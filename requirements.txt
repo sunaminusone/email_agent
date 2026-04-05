@@ -2,7 +2,16 @@ fastapi
 uvicorn[standard]
 pydantic
 python-dotenv
+python-multipart
+requests
+redis
+pandas
+openpyxl
+psycopg[binary]
 langchain
+langchain-text-splitters
 langchain-core
 langchain-openai
+langchain-chroma
+chromadb
 langserve[all]
