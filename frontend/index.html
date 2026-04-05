@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Email Agent Prototype</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <p class="eyebrow">LangServe Prototype</p>
+      <h1>Email Agent 控制台</h1>
+      <p class="subtitle">
+        输入一段客户邮件或内部问题，快速查看结构化解析结果、Agent 输入以及下一步处理建议。
+      </p>
+    </section>
+
+    <section class="panel layout">
+      <form id="agent-form" class="composer">
+        <label for="user_query">用户输入</label>
+        <textarea
+          id="user_query"
+          name="user_query"
+          rows="10"
+          placeholder="例如：Hi, could you send me a quote for your anti-CD3 antibody and let me know the lead time to California?"
+          required
+        ></textarea>
+
+        <label for="conversation_history">对话历史（可选，JSON 数组）</label>
+        <textarea
+          id="conversation_history"
+          name="conversation_history"
+          rows="6"
+          placeholder='[{"role":"assistant","content":"Could you share the catalog number?"}]'
+        ></textarea>
+
+        <label for="attachments">附件（可选，JSON 数组）</label>
+        <textarea
+          id="attachments"
+          name="attachments"
+          rows="4"
+          placeholder='[{"file_name":"quote_request.pdf","file_type":"application/pdf"}]'
+        ></textarea>
+
+        <button type="submit" id="submit-btn">运行原型</button>
+      </form>
+
+      <section class="results">
+        <div class="result-card">
+          <h2>回复预览</h2>
+          <pre id="reply_preview">等待输入...</pre>
+        </div>
+
+        <div class="result-card">
+          <h2>建议工作流</h2>
+          <ul id="workflow"></ul>
+        </div>
+
+        <div class="result-card">
+          <h2>路由决策</h2>
+          <pre id="route_result">{}</pre>
+        </div>
+
+        <div class="result-card">
+          <h2>结构化结果</h2>
+          <pre id="parsed_result">{}</pre>
+        </div>
+
+        <div class="result-card">
+          <h2>Agent Input</h2>
+          <pre id="agent_input">{}</pre>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,36 +1,21 @@
 # src/schemas/parser_schema.py
-from typing import List, Optional, Literal
-from pydantic import BaseModel, Field
+from typing import List, Optional
 
-# =========================
-# 1. Shared literal types
-# =========================
+from pydantic import BaseModel, ConfigDict, Field
 
-PrimaryIntent = Literal[
-    "product_inquiry",
-    "technical_question",
-    "pricing_question",
-    "timeline_question",
-    "customization_request",
-    "documentation_request",
-    "shipping_question",
-    "troubleshooting",
-    "order_support",
-    "complaint",
-    "follow_up",
-    "partnership_request",
-    "general_info",
-    "unknown",
-]
-
-LanguageType = Literal["zh", "en", "other"]
-ChannelType = Literal["internal_qa", "email", "chat", "unknown"]
-QueryType = Literal["question", "request", "unclear"]
-UrgencyType = Literal["low", "medium", "high"]
-RiskLevelType = Literal["low", "medium", "high"]
+from src.schemas.enums import (
+    ChannelType,
+    LanguageType,
+    PrimaryIntent,
+    QueryType,
+    RiskLevelType,
+    UrgencyType,
+)
 
 
 class ParsedContext(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
     language: LanguageType = "other"
     channel: ChannelType = "internal_qa"
     primary_intent: PrimaryIntent = "unknown"
@@ -111,6 +96,8 @@ class ToolHints(BaseModel):
 
 
 class ParsedResult(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
     normalized_query: str = ""
     context: ParsedContext = Field(default_factory=ParsedContext)
     entities: Entities = Field(default_factory=Entities)
