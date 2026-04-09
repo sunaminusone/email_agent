@@ -10,6 +10,19 @@ def resolve_response_content_plan(agent_input, route, signal_ctx: dict, answer_f
     has_price = signal_ctx["has_price"]
     has_docs = signal_ctx["has_docs"]
     has_technical = signal_ctx["has_technical"]
+    revealed_attributes = set(signal_ctx.get("revealed_attributes", []))
+
+    if answer_focus == "acknowledgement":
+        return {
+            "content_priority": [],
+            "should_suppress_generic_summary": True,
+        }
+
+    if answer_focus == "conversation_close":
+        return {
+            "content_priority": [],
+            "should_suppress_generic_summary": True,
+        }
 
     if answer_focus == "workflow_status":
         return {
@@ -87,6 +100,44 @@ def resolve_response_content_plan(agent_input, route, signal_ctx: dict, answer_f
             "include_target_antigen": False,
             "include_application": False,
             "include_species_reactivity": False,
+            "should_suppress_generic_summary": True,
+        }
+
+    if answer_focus == "product_elaboration":
+        include_target_antigen = "target_antigen" not in revealed_attributes
+        include_application = "application" not in revealed_attributes
+        include_species_reactivity = "species_reactivity" not in revealed_attributes
+        include_technical_context = has_technical and "technical_context" not in revealed_attributes
+        include_documents = has_docs and "documents" not in revealed_attributes and has_any(query, ["brochure", "datasheet", "document", "manual"])
+        include_price = has_price and "price" not in revealed_attributes and has_any(query, ["price", "quote", "cost"])
+        include_lead_time = has_price and "lead_time" not in revealed_attributes and has_any(query, LEAD_TIME_MARKERS)
+
+        priority = ["product_identity"]
+        if include_target_antigen:
+            priority.append("target_antigen")
+        if include_application:
+            priority.append("application")
+        if include_species_reactivity:
+            priority.append("species_reactivity")
+        if include_technical_context:
+            priority.append("technical_context")
+        if include_documents:
+            priority.append("documents")
+        if include_price:
+            priority.append("price")
+        if include_lead_time:
+            priority.append("lead_time")
+
+        return {
+            "content_priority": priority,
+            "include_product_identity": True,
+            "include_target_antigen": include_target_antigen,
+            "include_application": include_application,
+            "include_species_reactivity": include_species_reactivity,
+            "include_technical_context": include_technical_context,
+            "include_documents": include_documents,
+            "include_price": include_price,
+            "include_lead_time": include_lead_time,
             "should_suppress_generic_summary": True,
         }
 

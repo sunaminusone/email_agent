@@ -43,5 +43,44 @@ def format_document_scope(scope: str, *, language: str = "en") -> str:
     return "product-line" if scope == "business_line" else "service-specific"
 
 
+def format_scope_acknowledgement(
+    *,
+    scope_type: str,
+    scope_name: str,
+    scope_source: str = "",
+    catalog_no: str = "",
+    acknowledgement_mode: str = "none",
+    language: str = "en",
+) -> str:
+    scope_type = str(scope_type or "").strip()
+    scope_name = str(scope_name or "").strip()
+    catalog_no = str(catalog_no or "").strip()
+    acknowledgement_mode = str(acknowledgement_mode or "none").strip()
+
+    if not scope_type or not scope_name or acknowledgement_mode == "none":
+        return ""
+
+    if scope_type == "product":
+        label = format_product_label(scope_name, catalog_no, language=language) if catalog_no else scope_name
+        if language == "zh":
+            if acknowledgement_mode == "assumed":
+                return f"如果你指的是我们刚才讨论的产品 {label}，下面是相关信息。"
+            return f"关于你提到的产品 {label}，下面是相关信息。"
+        if acknowledgement_mode == "assumed":
+            return f"Assuming you mean the previously discussed product, {label}, here is the relevant information."
+        return f"Regarding the product you mentioned, {label}, here is the relevant information."
+
+    if scope_type == "service":
+        if language == "zh":
+            if acknowledgement_mode == "assumed":
+                return f"如果你指的是我们刚才讨论的服务 {scope_name}，下面是相关信息。"
+            return f"关于你提到的服务 {scope_name}，下面是相关信息。"
+        if acknowledgement_mode == "assumed":
+            return f"Assuming you mean the previously discussed service, {scope_name}, here is the relevant information."
+        return f"Regarding the service you mentioned, {scope_name}, here is the relevant information."
+
+    return ""
+
+
 def join_sentences(parts: Iterable[str]) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from src.schemas import FinalResponse
 from .blocks import build_content_blocks
 from .clarification import build_deterministic_response, clean_missing_information
 from .fallback import effective_route_name, resolve_legacy_fallback, route_for_response
@@ -58,6 +59,48 @@ def build_response_content(payload: dict) -> dict:
 
     content_blocks = build_content_blocks(payload)
     content_summary = " ".join(block.text for block in content_blocks[:8])
+
+    if deterministic_response is None and response_resolution.answer_focus == "acknowledgement":
+        message = (
+            "好的，已收到。如果你想继续，我可以继续补充这款产品的应用、反应性、价格或文档信息。"
+            if language == "zh"
+            else "Got it. If you'd like, I can still help with applications, reactivity, pricing, or documents for this product."
+        )
+        deterministic_response = FinalResponse(
+            message=message,
+            response_type="acknowledgement",
+            grounded_action_types=action_types,
+        )
+
+    if deterministic_response is None and response_resolution.answer_focus == "conversation_close":
+        message = (
+            "好的，我先停在这里。后面如果你想继续这个产品或换个新问题，我们都可以接着来。"
+            if language == "zh"
+            else "Understood. I'll stop here for now. If you want to return to this product or start a new question later, we can pick it up then."
+        )
+        deterministic_response = FinalResponse(
+            message=message,
+            response_type="conversation_close",
+            grounded_action_types=action_types,
+        )
+
+    if deterministic_response is None and response_resolution.answer_focus == "product_elaboration":
+        newly_revealed = {
+            block.kind
+            for block in content_blocks
+            if block.kind in {"target_antigen", "application", "species_reactivity", "technical_context", "documents", "price", "lead_time"}
+        }
+        if not newly_revealed:
+            message = (
+                "我已经把当前能直接确认的核心产品信息都说完了。如果你愿意，我可以继续帮你看价格、交期、文档，或者你也可以指定想看的属性。"
+                if language == "zh"
+                else "I've already shared the main grounded product details I can confirm right now. If you'd like, I can keep going with pricing, lead time, documents, or a specific attribute you care about."
+            )
+            deterministic_response = FinalResponse(
+                message=message,
+                response_type="answer",
+                grounded_action_types=action_types,
+            )
 
     return {
         **payload,

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from functools import lru_cache
+
+from src.rag.service_page_ingestion import load_service_page_documents
 from src.schemas import (
     ActiveEntityPayload,
     AttachmentSummary,
@@ -32,6 +35,19 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(key)
         ordered.append(cleaned)
     return ordered
+
+
+def _normalize_identifier(value: str) -> str:
+    cleaned = " ".join(str(value or "").strip().split())
+    return cleaned.upper()
+
+
+def _first_value(values: list[str]) -> str:
+    for value in values or []:
+        cleaned = str(value or "").strip()
+        if cleaned:
+            return cleaned
+    return ""
 
 
 def _looks_like_product_confirmation(query: str) -> bool:
@@ -123,30 +139,42 @@ def build_interpreted_payload(
     reference_resolution = ""
     reference_resolutions: list[str] = []
     session_payload = routing_memory.session_payload
+    explicit_service_turn = bool(parsed.entities.service_names and not parsed.entities.product_names)
 
-    if deterministic_payload.catalog_numbers:
+    if deterministic_payload.catalog_numbers and not explicit_service_turn:
         confirmed_identifier_type = "catalog_number"
-        reference_resolution = deterministic_payload.catalog_numbers[0]
-        reference_resolutions = list(deterministic_payload.catalog_numbers)
+        reference_resolution = _normalize_identifier(deterministic_payload.catalog_numbers[0])
+        reference_resolutions = [_normalize_identifier(value) for value in deterministic_payload.catalog_numbers]
     elif deterministic_payload.invoice_numbers:
         confirmed_identifier_type = "invoice_number"
-        reference_resolution = deterministic_payload.invoice_numbers[0]
-        reference_resolutions = list(deterministic_payload.invoice_numbers)
+        reference_resolution = _normalize_identifier(deterministic_payload.invoice_numbers[0])
+        reference_resolutions = [_normalize_identifier(value) for value in deterministic_payload.invoice_numbers]
     elif deterministic_payload.order_numbers:
         confirmed_identifier_type = "order_number"
-        reference_resolution = deterministic_payload.order_numbers[0]
-    elif reference_resolution_result.resolved_identifier:
+        reference_resolution = _normalize_identifier(deterministic_payload.order_numbers[0])
+    elif reference_resolution_result.resolved_identifier and not (
+        explicit_service_turn and reference_resolution_result.resolved_identifier_type == "catalog_number"
+    ):
         confirmed_identifier_type = reference_resolution_result.resolved_identifier_type
-        reference_resolution = reference_resolution_result.resolved_identifier
-        reference_resolutions = list(reference_resolution_result.resolved_identifiers or [reference_resolution_result.resolved_identifier])
-    elif turn_resolution.payload_usable and turn_resolution.resolved_identifier:
+        reference_resolution = _normalize_identifier(reference_resolution_result.resolved_identifier)
+        reference_resolutions = [
+            _normalize_identifier(value)
+            for value in (reference_resolution_result.resolved_identifiers or [reference_resolution_result.resolved_identifier])
+        ]
+    elif turn_resolution.payload_usable and turn_resolution.resolved_identifier and not (
+        explicit_service_turn and turn_resolution.resolved_identifier_type == "catalog_number"
+    ):
         confirmed_identifier_type = turn_resolution.resolved_identifier_type
-        reference_resolution = turn_resolution.resolved_identifier
-        reference_resolutions = [turn_resolution.resolved_identifier]
-    elif session_payload.active_entity.identifier and turn_resolution.should_reuse_active_entity:
-        reference_resolution = session_payload.active_entity.identifier
+        reference_resolution = _normalize_identifier(turn_resolution.resolved_identifier)
+        reference_resolutions = [_normalize_identifier(turn_resolution.resolved_identifier)]
+    elif (
+        session_payload.active_entity.identifier
+        and turn_resolution.should_reuse_active_entity
+        and not (explicit_service_turn and session_payload.active_entity.identifier_type == "catalog_number")
+    ):
+        reference_resolution = _normalize_identifier(session_payload.active_entity.identifier)
         confirmed_identifier_type = session_payload.active_entity.identifier_type
-        reference_resolutions = [session_payload.active_entity.identifier]
+        reference_resolutions = [_normalize_identifier(session_payload.active_entity.identifier)]
     else:
         reference_resolutions = []
 
@@ -162,6 +190,32 @@ def _entity_has_signal(entity: ActiveEntityPayload) -> bool:
     return bool(entity.identifier or entity.display_name or entity.business_line)
 
 
+def _normalize_lookup_text(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+@lru_cache(maxsize=1)
+def _service_business_line_map() -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for document in load_service_page_documents():
+        metadata = dict(document.metadata)
+        service_name = str(metadata.get("service_name") or "").strip()
+        business_line = str(metadata.get("business_line") or "").strip()
+        if not service_name or not business_line:
+            continue
+        mapping.setdefault(_normalize_lookup_text(service_name), business_line)
+    return mapping
+
+
+def _infer_business_line_from_service_name(parsed: ParsedResult) -> str:
+    mapping = _service_business_line_map()
+    for service_name in parsed.entities.service_names:
+        business_line = mapping.get(_normalize_lookup_text(service_name))
+        if business_line:
+            return business_line
+    return ""
+
+
 def _build_current_entity(
     parsed: ParsedResult,
     interpreted_payload: InterpretedPayload,
@@ -169,7 +223,46 @@ def _build_current_entity(
     turn_resolution: TurnResolution,
     prior_payload: PersistedSessionPayload,
 ) -> ActiveEntityPayload:
-    identifier = (
+    explicit_service_name = _first_value(list(parsed.entities.service_names))
+    explicit_product_name = _first_value(list(parsed.entities.product_names))
+    explicit_catalog_number = _normalize_identifier(_first_value(list(parsed.entities.catalog_numbers)))
+    explicit_target = _first_value(list(parsed.entities.targets))
+
+    business_line = (
+        reference_resolution.resolved_business_line
+        or turn_resolution.resolved_business_line
+        or _infer_business_line_from_service_name(parsed)
+        or prior_payload.active_business_line
+        or prior_payload.active_entity.business_line
+    )
+    if explicit_service_name:
+        return ActiveEntityPayload(
+            identifier="",
+            identifier_type="",
+            entity_kind="service",
+            display_name=explicit_service_name,
+            business_line=business_line or "",
+        )
+
+    if explicit_product_name or explicit_catalog_number:
+        return ActiveEntityPayload(
+            identifier=explicit_catalog_number,
+            identifier_type="catalog_number" if explicit_catalog_number else "",
+            entity_kind="product",
+            display_name=explicit_product_name or reference_resolution.resolved_display_name or prior_payload.active_entity.display_name or explicit_catalog_number,
+            business_line=business_line or "",
+        )
+
+    if explicit_target:
+        return ActiveEntityPayload(
+            identifier="",
+            identifier_type="",
+            entity_kind="scientific_target",
+            display_name=explicit_target,
+            business_line=business_line or "",
+        )
+
+    identifier = _normalize_identifier(
         interpreted_payload.reference_resolution
         or reference_resolution.resolved_identifier
         or prior_payload.active_entity.identifier
@@ -179,16 +272,8 @@ def _build_current_entity(
         or reference_resolution.resolved_identifier_type
         or prior_payload.active_entity.identifier_type
     )
-    business_line = (
-        reference_resolution.resolved_business_line
-        or turn_resolution.resolved_business_line
-        or prior_payload.active_business_line
-        or prior_payload.active_entity.business_line
-    )
     display_name = (
-        (parsed.entities.product_names or [None])[0]
-        or (parsed.entities.service_names or [None])[0]
-        or reference_resolution.resolved_display_name
+        reference_resolution.resolved_display_name
         or prior_payload.active_entity.display_name
         or business_line.replace("_", "-")
     )
@@ -198,8 +283,6 @@ def _build_current_entity(
         entity_kind = "product"
     elif identifier_type in {"invoice_number", "order_number"}:
         entity_kind = "record"
-    elif parsed.entities.service_names:
-        entity_kind = "service"
     elif business_line:
         entity_kind = "business_line"
 
@@ -255,6 +338,87 @@ def _build_identifier_follow_up(ambiguous_identifiers: list[str]) -> list[str]:
     return [f"Please confirm whether these identifiers refer to product/catalog numbers or invoice/order numbers: {identifier_text}."]
 
 
+def _resolve_active_context_fields(
+    *,
+    parsed: ParsedResult,
+    current_entity: ActiveEntityPayload,
+    prior_payload: PersistedSessionPayload,
+    turn_resolution: TurnResolution,
+) -> tuple[str, str, str]:
+    explicit_service_name = _first_value(list(parsed.entities.service_names))
+    explicit_product_name = _first_value(list(parsed.entities.product_names))
+    explicit_target = _first_value(list(parsed.entities.targets))
+
+    if turn_resolution.should_reset_route_context:
+        return (
+            explicit_service_name,
+            explicit_product_name,
+            explicit_target,
+        )
+
+    if explicit_service_name or current_entity.entity_kind == "service":
+        return (
+            explicit_service_name or current_entity.display_name,
+            "",
+            explicit_target or prior_payload.active_target or "",
+        )
+
+    if explicit_product_name or current_entity.entity_kind == "product":
+        return (
+            "",
+            explicit_product_name or current_entity.display_name,
+            explicit_target or prior_payload.active_target or "",
+        )
+
+    active_service_name = (
+        (parsed.entities.service_names or [None])[0]
+        or (current_entity.display_name if current_entity.entity_kind == "service" else None)
+        or prior_payload.active_service_name
+        or ""
+    )
+    active_product_name = (
+        (parsed.entities.product_names or [None])[0]
+        or (current_entity.display_name if current_entity.entity_kind == "product" else None)
+        or prior_payload.active_product_name
+        or ""
+    )
+    active_target = (
+        (parsed.entities.targets or [None])[0]
+        or prior_payload.active_target
+        or ""
+    )
+    return active_service_name, active_product_name, active_target
+
+
+def _resolve_revealed_attributes(
+    *,
+    current_entity: ActiveEntityPayload,
+    prior_payload: PersistedSessionPayload,
+    turn_resolution: TurnResolution,
+) -> list[str]:
+    if turn_resolution.should_reset_route_context:
+        return []
+
+    prior_entity = prior_payload.active_entity
+    if not prior_entity.identifier and not prior_entity.display_name:
+        return []
+
+    if current_entity.entity_kind != prior_entity.entity_kind:
+        return []
+
+    if current_entity.entity_kind == "product":
+        current_key = (current_entity.identifier or "").strip().lower() or (current_entity.display_name or "").strip().lower()
+        prior_key = (prior_entity.identifier or "").strip().lower() or (prior_entity.display_name or "").strip().lower()
+        if current_key and prior_key and current_key != prior_key:
+            return []
+
+    if current_entity.entity_kind == "service":
+        if (current_entity.display_name or "").strip().lower() != (prior_entity.display_name or "").strip().lower():
+            return []
+
+    return list(prior_payload.revealed_attributes or [])
+
+
 def build_session_payload(
     parsed: ParsedResult,
     deterministic_payload: DeterministicPayload,
@@ -273,6 +437,17 @@ def build_session_payload(
         prior_payload,
     )
     recent_entities = _merge_recent_entities(prior_payload, current_entity, turn_resolution)
+    active_service_name, active_product_name, active_target = _resolve_active_context_fields(
+        parsed=parsed,
+        current_entity=current_entity,
+        prior_payload=prior_payload,
+        turn_resolution=turn_resolution,
+    )
+    revealed_attributes = _resolve_revealed_attributes(
+        current_entity=current_entity,
+        prior_payload=prior_payload,
+        turn_resolution=turn_resolution,
+    )
 
     pending_identifier = ambiguous_identifiers[0] if ambiguous_identifiers else ""
     pending_question = _build_identifier_follow_up(ambiguous_identifiers)[0] if ambiguous_identifiers else ""
@@ -280,6 +455,9 @@ def build_session_payload(
     return PersistedSessionPayload(
         active_entity=current_entity,
         recent_entities=recent_entities,
+        active_service_name=active_service_name,
+        active_product_name=active_product_name,
+        active_target=active_target,
         pending_clarification=PendingClarificationPayload(
             field="identifier_type" if pending_identifier else "",
             candidate_identifier=pending_identifier,
@@ -287,6 +465,7 @@ def build_session_payload(
         ),
         active_business_line=current_entity.business_line or turn_resolution.resolved_business_line or prior_payload.active_business_line,
         last_user_goal=interpreted_payload.user_goal or prior_payload.last_user_goal,
+        revealed_attributes=revealed_attributes,
     )
 
 

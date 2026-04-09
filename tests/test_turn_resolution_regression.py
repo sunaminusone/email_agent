@@ -33,6 +33,7 @@ def _parsed(
     order_numbers=None,
     product_names=None,
     service_names=None,
+    targets=None,
     needs_documentation: bool = False,
     needs_timeline: bool = False,
     needs_invoice: bool = False,
@@ -47,6 +48,7 @@ def _parsed(
             order_numbers=order_numbers or [],
             product_names=product_names or [],
             service_names=service_names or [],
+            targets=targets or [],
         ),
         request_flags=RequestFlags(
             needs_documentation=needs_documentation,
@@ -102,6 +104,30 @@ def test_clarification_answer_reuses_pending_invoice_identifier():
     assert agent.turn_resolution.turn_type == "clarification_answer"
     assert agent.entities.order_numbers == ["54321"]
     assert agent.effective_query == "invoice 54321"
+
+
+def test_product_selection_clarification_reuses_selected_catalog_number():
+    history = _history_with_route_state(
+        {
+            "active_route": "clarification_request",
+            "route_phase": "waiting_for_user",
+            "pending_identifiers": ["20025", "31785", "P06329"],
+            "session_payload": {
+                "pending_clarification": {
+                    "field": "product_selection",
+                    "candidate_identifier": "",
+                    "candidate_options": ["20025", "31785", "P06329"],
+                    "question": 'I found multiple products matching "MSH2". Please choose one:\n- 20025 | Mouse Monoclonal Antibody to MSH2\n- 31785 | Mouse Monoclonal Antibody to MSH2\n- P06329 | Rabbit Polyclonal antibody to MSH2\nYou can reply with the catalog number only.',
+                }
+            },
+        },
+        'I found multiple products matching "MSH2". Please choose one:\n- 20025 | Mouse Monoclonal Antibody to MSH2\n- 31785 | Mouse Monoclonal Antibody to MSH2\n- P06329 | Rabbit Polyclonal antibody to MSH2\nYou can reply with the catalog number only.',
+    )
+    agent = build_agent_input("t3", "20025", _parsed(primary_intent="follow_up"), history, [])
+    assert agent.turn_resolution.turn_type == "clarification_answer"
+    assert agent.entities.catalog_numbers == ["20025"]
+    assert agent.interpreted_payload.confirmed_identifier_type == "catalog_number"
+    assert "catalog number 20025" in agent.retrieval_query.lower()
 
 
 def test_follow_up_lead_time_reuses_active_entity():
@@ -459,3 +485,97 @@ def test_reference_resolution_can_match_by_display_name():
     )
     agent = build_agent_input("t13", "tell me more about baculovirus expression", _parsed(primary_intent="follow_up"), history, [])
     assert agent.reference_resolution.resolved_display_name == "Baculovirus Expression"
+
+
+def test_active_service_context_is_preserved_across_follow_up_turns():
+    history = _history_with_route_state(
+        {
+            "active_route": "workflow_agent",
+            "active_business_line": "mrna_lnp",
+            "route_phase": "active",
+            "session_payload": {
+                "active_entity": {
+                    "identifier": "",
+                    "identifier_type": "",
+                    "entity_kind": "service",
+                    "display_name": "mRNA-LNP Gene Delivery",
+                    "business_line": "mrna_lnp",
+                },
+                "active_service_name": "mRNA-LNP Gene Delivery",
+                "active_target": "EGFP mRNA",
+                "active_business_line": "mrna_lnp",
+                "last_user_goal": "request_technical_information",
+            },
+        }
+    )
+    agent = build_agent_input("t14", "what models do you support?", _parsed(primary_intent="follow_up"), history, [])
+    assert agent.active_service_name == "mRNA-LNP Gene Delivery"
+    assert agent.active_business_line == "mrna_lnp"
+    assert agent.active_target == "EGFP mRNA"
+    assert agent.session_payload.active_service_name == "mRNA-LNP Gene Delivery"
+    assert agent.session_payload.active_target == "EGFP mRNA"
+
+
+def test_explicit_service_turn_does_not_pollute_product_context():
+    agent = build_agent_input(
+        "t14b",
+        "Tell me about mRNA-LNP Gene Delivery",
+        _parsed(primary_intent="general_info", service_names=["mRNA-LNP Gene Delivery"]),
+        [],
+        [],
+    )
+    assert agent.active_service_name == "mRNA-LNP Gene Delivery"
+    assert agent.active_product_name == ""
+    assert agent.session_payload.active_entity.entity_kind == "service"
+    assert agent.session_payload.active_entity.identifier == ""
+    assert agent.session_payload.active_entity.identifier_type == ""
+    assert agent.effective_query == "Tell me about mRNA-LNP Gene Delivery"
+    assert agent.retrieval_query == "Tell me about mRNA-LNP Gene Delivery"
+
+
+def test_current_turn_product_and_target_are_promoted_into_active_context():
+    agent = build_agent_input(
+        "t15",
+        "tell me about mouse monoclonal antibody to nucleophosmin",
+        _parsed(
+            primary_intent="product_inquiry",
+            product_names=["Mouse Monoclonal antibody to Nucleophosmin"],
+            targets=["Nucleophosmin"],
+        ),
+        [],
+        [],
+    )
+    assert agent.active_product_name == "Mouse Monoclonal antibody to Nucleophosmin"
+    assert agent.active_target == "Nucleophosmin"
+    assert agent.session_payload.active_product_name == "Mouse Monoclonal antibody to Nucleophosmin"
+    assert agent.session_payload.active_target == "Nucleophosmin"
+
+
+def test_explicit_new_service_replaces_previous_active_service_context():
+    history = _history_with_route_state(
+        {
+            "active_route": "commercial_agent",
+            "active_business_line": "mrna_lnp",
+            "route_phase": "active",
+            "session_payload": {
+                "active_entity": {
+                    "identifier": "",
+                    "identifier_type": "",
+                    "entity_kind": "service",
+                    "display_name": "mRNA-LNP Gene Delivery",
+                    "business_line": "mrna_lnp",
+                },
+                "active_service_name": "mRNA-LNP Gene Delivery",
+                "active_business_line": "mrna_lnp",
+            },
+        }
+    )
+    agent = build_agent_input(
+        "t16",
+        "tell me about Custom CAR-NK Manufacturing",
+        _parsed(primary_intent="general_info", service_names=["Custom CAR-NK Manufacturing"]),
+        history,
+        [],
+    )
+    assert agent.active_service_name == "Custom CAR-NK Manufacturing"
+    assert agent.session_payload.active_service_name == "Custom CAR-NK Manufacturing"

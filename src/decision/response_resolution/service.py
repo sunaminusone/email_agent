@@ -4,6 +4,7 @@ from src.schemas import AgentContext, ExecutionRun, ResponseResolution, RouteDec
 
 from .common import build_response_signal_context
 from .content_policy import resolve_response_content_plan
+from .dialogue_act import resolve_dialogue_act
 from .focus_policy import resolve_response_focus
 from .style_policy import resolve_reply_style
 from .topic_policy import resolve_response_topic
@@ -15,6 +16,10 @@ def resolve_response(
     execution_run: ExecutionRun,
 ) -> ResponseResolution:
     signal_ctx = build_response_signal_context(agent_input, execution_run)
+    dialogue_act_info = resolve_dialogue_act(agent_input, route, signal_ctx)
+    signal_ctx["dialogue_act"] = dialogue_act_info["dialogue_act"]
+    signal_ctx["dialogue_act_reason"] = dialogue_act_info["reason"]
+    signal_ctx["dialogue_act_confidence"] = dialogue_act_info["confidence"]
     focus_info = resolve_response_focus(agent_input, route, signal_ctx)
     answer_focus = focus_info["answer_focus"]
     topic_type = resolve_response_topic(answer_focus=answer_focus, route_name=route.route_name)
@@ -23,6 +28,7 @@ def resolve_response(
 
     return ResponseResolution(
         topic_type=topic_type,
+        dialogue_act=dialogue_act_info["dialogue_act"],
         answer_focus=answer_focus,
         primary_action_type=focus_info["primary_action_type"],
         supporting_action_types=focus_info["supporting_action_types"],

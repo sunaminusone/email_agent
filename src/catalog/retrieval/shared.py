@@ -97,10 +97,9 @@ def candidate_aliases(
     candidates: list[str] = []
     seen: set[str] = set()
     raw_values = [*product_names, *service_names, *targets]
-    if not raw_values:
-        raw_values = [query]
+    seed_values = raw_values or [query]
 
-    for value in raw_values:
+    for value in seed_values:
         cleaned = normalize_query_text(value)
         if cleaned and cleaned not in seen:
             seen.add(cleaned)
@@ -108,11 +107,12 @@ def candidate_aliases(
 
     from src.catalog.normalization import LOW_SIGNAL_TOKENS
 
-    for token in split_query_terms(*raw_values, query):
-        if token in LOW_SIGNAL_TOKENS or token in seen:
-            continue
-        seen.add(token)
-        candidates.append(token)
+    if not raw_values:
+        for token in split_query_terms(query):
+            if token in LOW_SIGNAL_TOKENS or token in seen:
+                continue
+            seen.add(token)
+            candidates.append(token)
     return candidates
 
 

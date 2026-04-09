@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
+from src.conversation.context_scope import has_current_scope, resolve_effective_scope
 from src.memory import SessionStore
 from src.schemas import (
     AgentContext,
@@ -67,6 +68,63 @@ class UserPreferenceProvider:
 
 
 class KnowledgeProvider:
+    def _scope_input(self, agent_context: AgentContext) -> dict:
+        return {
+            "query": agent_context.query,
+            "original_query": agent_context.original_query,
+            "effective_query": agent_context.effective_query,
+            "context": {
+                "primary_intent": agent_context.context.primary_intent,
+            },
+            "entities": {
+                "service_names": list(agent_context.entities.service_names),
+                "product_names": list(agent_context.entities.product_names),
+                "catalog_numbers": list(agent_context.entities.catalog_numbers),
+                "targets": list(agent_context.entities.targets),
+            },
+            "product_lookup_keys": {
+                "service_names": list(agent_context.product_lookup_keys.service_names),
+                "product_names": list(agent_context.product_lookup_keys.product_names),
+                "catalog_numbers": list(agent_context.product_lookup_keys.catalog_numbers),
+                "targets": list(agent_context.product_lookup_keys.targets),
+            },
+            "active_service_name": agent_context.active_service_name,
+            "active_product_name": agent_context.active_product_name,
+            "active_target": agent_context.active_target,
+            "session_payload": {
+                "active_service_name": agent_context.session_payload.active_service_name,
+                "active_product_name": agent_context.session_payload.active_product_name,
+                "active_target": agent_context.session_payload.active_target,
+                "active_entity": {
+                    "entity_kind": agent_context.session_payload.active_entity.entity_kind,
+                },
+            },
+            "routing_memory": {
+                "should_stick_to_active_route": agent_context.routing_memory.should_stick_to_active_route,
+                "session_payload": {
+                    "active_entity": {
+                        "entity_kind": agent_context.routing_memory.session_payload.active_entity.entity_kind,
+                    },
+                },
+            },
+            "turn_resolution": {
+                "turn_type": agent_context.turn_resolution.turn_type,
+            },
+        }
+
+    def _effective_scope(self, agent_context: AgentContext) -> dict[str, str]:
+        return resolve_effective_scope(self._scope_input(agent_context))
+
+    def _has_current_scope(self, agent_context: AgentContext) -> bool:
+        return has_current_scope(self._scope_input(agent_context))
+
+    def _should_fallback_to_active_service_scope(self, agent_context: AgentContext) -> bool:
+        effective_scope = self._effective_scope(agent_context)
+        return (
+            effective_scope["scope_type"] == "service"
+            and effective_scope["source"] == "active"
+        )
+
     def _should_lookup_documents(self, agent_context: AgentContext) -> bool:
         return bool(
             agent_context.request_flags.needs_documentation
@@ -74,11 +132,17 @@ class KnowledgeProvider:
         )
 
     def _should_lookup_technical(self, agent_context: AgentContext) -> bool:
+        current_scope_present = self._has_current_scope(agent_context)
         return bool(
             agent_context.request_flags.needs_troubleshooting
             or agent_context.request_flags.needs_protocol
             or agent_context.request_flags.needs_regulatory_info
             or agent_context.context.primary_intent in {"technical_question", "troubleshooting"}
+            or self._should_fallback_to_active_service_scope(agent_context)
+            or (
+                current_scope_present
+                and agent_context.context.primary_intent in {"technical_question", "troubleshooting"}
+            )
         )
 
     def load(self, agent_context: AgentContext) -> KnowledgeContext:
@@ -119,15 +183,29 @@ class KnowledgeProvider:
         if self._should_lookup_technical(agent_context):
             from src.rag.service import retrieve_technical_knowledge
 
+            effective_scope = self._effective_scope(agent_context)
+            use_active_service_scope = (
+                effective_scope["scope_type"] == "service"
+                and effective_scope["source"] == "active"
+            )
+            business_line_hint = (
+                agent_context.active_business_line or agent_context.routing_debug.business_line
+                if use_active_service_scope
+                else agent_context.routing_debug.business_line
+            )
             lookup_status = "completed"
             technical = retrieve_technical_knowledge(
                 query=agent_context.retrieval_query or agent_context.effective_query or agent_context.query,
-                business_line_hint=agent_context.routing_debug.business_line,
+                business_line_hint=business_line_hint,
                 retrieval_hints=agent_context.retrieval_hints.model_dump(mode="json"),
+                active_service_name=agent_context.active_service_name if use_active_service_scope else "",
+                active_product_name=agent_context.active_product_name if use_active_service_scope else "",
+                active_target=agent_context.active_target if use_active_service_scope else "",
                 product_names=list(agent_context.entities.product_names),
                 service_names=list(agent_context.entities.service_names),
                 targets=list(agent_context.entities.targets),
                 top_k=3,
+                scope_context=self._scope_input(agent_context),
             )
             for match in technical.get("matches", []):
                 snippets.append(

@@ -138,7 +138,11 @@ def build_routing_memory(
         active_business_line=active_business_line,
         active_engagement_type=active_engagement_type,
         carried_missing_information=carried_missing_information or parsed.missing_information,
-        pending_identifiers=pending_identifiers or ([session_payload.pending_clarification.candidate_identifier] if session_payload.pending_clarification.candidate_identifier else []),
+        pending_identifiers=(
+            pending_identifiers
+            or list(session_payload.pending_clarification.candidate_options)
+            or ([session_payload.pending_clarification.candidate_identifier] if session_payload.pending_clarification.candidate_identifier else [])
+        ),
         session_payload=session_payload,
         state_reason=state_reason,
     )

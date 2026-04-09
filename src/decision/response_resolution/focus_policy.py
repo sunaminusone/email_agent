@@ -12,6 +12,7 @@ def resolve_response_focus(agent_input, route, signal_ctx: dict) -> dict:
     flags = signal_ctx["flags"]
     query = signal_ctx["query"]
     grounded_actions = signal_ctx["grounded_actions"]
+    dialogue_act = signal_ctx.get("dialogue_act", "UNKNOWN")
 
     has_product = signal_ctx["has_product"]
     has_price = signal_ctx["has_price"]
@@ -30,6 +31,26 @@ def resolve_response_focus(agent_input, route, signal_ctx: dict) -> dict:
             "preferred_route_name": "workflow_agent",
             "reason": "Workflow requests should respond through the workflow responder.",
             "confidence": 0.98,
+        }
+
+    if dialogue_act == "ACKNOWLEDGE":
+        return {
+            "answer_focus": "acknowledgement",
+            "primary_action_type": "",
+            "supporting_action_types": [],
+            "preferred_route_name": route.route_name,
+            "reason": signal_ctx.get("dialogue_act_reason", "The user is acknowledging the prior answer."),
+            "confidence": signal_ctx.get("dialogue_act_confidence", 0.95),
+        }
+
+    if dialogue_act == "TERMINATE":
+        return {
+            "answer_focus": "conversation_close",
+            "primary_action_type": "",
+            "supporting_action_types": [],
+            "preferred_route_name": route.route_name,
+            "reason": signal_ctx.get("dialogue_act_reason", "The user asked to stop the current topic."),
+            "confidence": signal_ctx.get("dialogue_act_confidence", 0.95),
         }
 
     if route.route_name == "operational_agent":
@@ -74,6 +95,7 @@ def resolve_response_focus(agent_input, route, signal_ctx: dict) -> dict:
         flags.needs_troubleshooting
         or flags.needs_regulatory_info
         or agent_input.context.primary_intent in {"technical_question", "troubleshooting"}
+        or route.route_name == "technical_rag"
     ):
         return {
             "answer_focus": "technical_context",
@@ -89,12 +111,16 @@ def resolve_response_focus(agent_input, route, signal_ctx: dict) -> dict:
         and has_any(query, INFO_MARKERS)
     ):
         return {
-            "answer_focus": "product_identity",
+            "answer_focus": "product_elaboration" if dialogue_act == "ELABORATE" else "product_identity",
             "primary_action_type": "lookup_catalog_product",
             "supporting_action_types": [action for action in grounded_actions if action != "lookup_catalog_product"],
             "preferred_route_name": "product_lookup",
-            "reason": "The current turn is a follow-up asking for more product information.",
-            "confidence": 0.9,
+            "reason": (
+                signal_ctx.get("dialogue_act_reason", "The current turn is a follow-up asking for more product information.")
+                if dialogue_act == "ELABORATE"
+                else "The current turn is a follow-up asking for more product information."
+            ),
+            "confidence": signal_ctx.get("dialogue_act_confidence", 0.9) if dialogue_act == "ELABORATE" else 0.9,
         }
 
     if flags.needs_documentation and has_docs:

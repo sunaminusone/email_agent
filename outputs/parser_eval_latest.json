@@ -1,0 +1,690 @@
+{
+  "golden_set_path": "/Users/promab/anaconda_projects/email_agent/data/labeled/parser_eval_golden_set.json",
+  "metrics": {
+    "total_cases": 18,
+    "passed_cases": 18,
+    "failed_cases": 0,
+    "case_pass_rate": 1.0,
+    "intent_accuracy": 1.0
+  },
+  "results": [
+    {
+      "id": "product_alias_npm1",
+      "query": "Tell me about NPM1",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Mouse Monoclonal antibody to Nucleophosmin"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Mouse Monoclonal antibody to Nucleophosmin"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "product_alias_6his",
+      "query": "Tell me about 6 His epitope tag",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Rabbit Polyclonal antibody to 6×His Tag"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Rabbit Polyclonal antibody to 6×His Tag"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "product_alias_tp53",
+      "query": "Tell me about TP53",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "TP53"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "TP53"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "product_alias_6xhis_variant",
+      "query": "Tell me about 6xHis epitope tag",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Rabbit Polyclonal antibody to 6×His Tag"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Rabbit Polyclonal antibody to 6×His Tag"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "product_alias_6timeshis_variant",
+      "query": "Tell me about 6×His epitope tag",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Rabbit Polyclonal antibody to 6×His Tag"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Rabbit Polyclonal antibody to 6×His Tag"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "product_family_mrna_lipid_nanoparticle",
+      "query": "Tell me about mRNA-Lipid Nanoparticle",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "mRNA-Lipid Nanoparticle"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "mRNA-Lipid Nanoparticle"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "product_full_title_npm1",
+      "query": "Tell me about Mouse Monoclonal antibody to Nucleophosmin",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Mouse Monoclonal antibody to Nucleophosmin"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [
+          "Mouse Monoclonal antibody to Nucleophosmin"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "service_alias_mrna_lnp_delivery",
+      "query": "Do you offer mRNA-LNP delivery?",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [
+          "mRNA-LNP Gene Delivery"
+        ],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [
+          "mRNA-LNP Gene Delivery"
+        ],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "service_name_affinity_tune_up",
+      "query": "Tell me about Affinity Tune-Up and Humanization",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "general_info",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [
+          "Affinity Tune-Up & Humanization"
+        ],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "general_info",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [
+          "Affinity Tune-Up & Humanization"
+        ],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "service_timeline_mouse_mab",
+      "query": "What is the timeline for Mouse Monoclonal Antibodies?",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true,
+        "needs_timeline": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "timeline_question",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [
+          "Mouse Monoclonal Antibodies"
+        ],
+        "referenced_prior_context": "",
+        "needs_timeline": true
+      },
+      "actual": {
+        "primary_intent": "timeline_question",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [
+          "Mouse Monoclonal Antibodies"
+        ],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": true,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "service_offer_rabbit_mab",
+      "query": "Do you offer Rabbit Monoclonal Antibodies?",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "product_inquiry",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [
+          "Rabbit Monoclonal Antibodies"
+        ],
+        "referenced_prior_context": ""
+      },
+      "actual": {
+        "primary_intent": "product_inquiry",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [
+          "Rabbit Monoclonal Antibodies"
+        ],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "catalog_datasheet",
+      "query": "datasheet for 20001",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true,
+        "needs_documentation": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "documentation_request",
+        "product_names": [],
+        "catalog_numbers": [
+          "20001"
+        ],
+        "service_names": [],
+        "referenced_prior_context": "",
+        "needs_documentation": true
+      },
+      "actual": {
+        "primary_intent": "documentation_request",
+        "product_names": [],
+        "catalog_numbers": [
+          "20001"
+        ],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": true,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "product_alias_datasheet_npm1",
+      "query": "datasheet for NPM1",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true,
+        "needs_documentation": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "documentation_request",
+        "product_names": [
+          "Mouse Monoclonal antibody to Nucleophosmin"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": "",
+        "needs_documentation": true
+      },
+      "actual": {
+        "primary_intent": "documentation_request",
+        "product_names": [
+          "Mouse Monoclonal antibody to Nucleophosmin"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": true,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "catalog_quote",
+      "query": "quote for 20001",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true,
+        "needs_price": true,
+        "needs_quote": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "pricing_question",
+        "product_names": [],
+        "catalog_numbers": [
+          "20001"
+        ],
+        "service_names": [],
+        "referenced_prior_context": "",
+        "needs_price": true,
+        "needs_quote": true
+      },
+      "actual": {
+        "primary_intent": "pricing_question",
+        "product_names": [],
+        "catalog_numbers": [
+          "20001"
+        ],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": true,
+        "needs_quote": true,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "product_alias_quote_npm1",
+      "query": "quote for NPM1",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true,
+        "needs_price": true,
+        "needs_quote": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "pricing_question",
+        "product_names": [
+          "Mouse Monoclonal antibody to Nucleophosmin"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": "",
+        "needs_price": true,
+        "needs_quote": true
+      },
+      "actual": {
+        "primary_intent": "pricing_question",
+        "product_names": [
+          "Mouse Monoclonal antibody to Nucleophosmin"
+        ],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": true,
+        "needs_quote": true,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "order_tracking",
+      "query": "I need tracking for order 20001",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "order_numbers": true,
+        "catalog_numbers": true,
+        "product_names": true,
+        "service_names": true,
+        "referenced_prior_context": true,
+        "needs_shipping_info": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "order_support",
+        "order_numbers": [
+          "20001"
+        ],
+        "catalog_numbers": [],
+        "product_names": [],
+        "service_names": [],
+        "referenced_prior_context": "",
+        "needs_shipping_info": true
+      },
+      "actual": {
+        "primary_intent": "order_support",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [
+          "20001"
+        ],
+        "referenced_prior_context": "",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": true
+      }
+    },
+    {
+      "id": "referential_antibody_follow_up",
+      "query": "What applications is this antibody validated for?",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "technical_question",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": "this antibody"
+      },
+      "actual": {
+        "primary_intent": "technical_question",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "this antibody",
+        "needs_documentation": false,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    },
+    {
+      "id": "referential_service_document",
+      "query": "Can you send the brochure for that service?",
+      "passed": true,
+      "field_results": {
+        "primary_intent": true,
+        "product_names": true,
+        "catalog_numbers": true,
+        "service_names": true,
+        "referenced_prior_context": true,
+        "needs_documentation": true
+      },
+      "mismatches": {},
+      "expected": {
+        "primary_intent": "documentation_request",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [],
+        "referenced_prior_context": "that service",
+        "needs_documentation": true
+      },
+      "actual": {
+        "primary_intent": "documentation_request",
+        "product_names": [],
+        "catalog_numbers": [],
+        "service_names": [],
+        "order_numbers": [],
+        "referenced_prior_context": "that service",
+        "needs_documentation": true,
+        "needs_timeline": false,
+        "needs_price": false,
+        "needs_quote": false,
+        "needs_shipping_info": false
+      }
+    }
+  ]
+}

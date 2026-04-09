@@ -93,7 +93,8 @@ def select_search_term(
     service_names: list[str],
     targets: list[str],
 ) -> str:
-    prioritized_sources = [*product_names, *service_names, *targets, query]
+    scoped_sources = [*product_names, *service_names, *targets]
+    prioritized_sources = scoped_sources or [query]
     tokens = split_query_terms(*prioritized_sources)
     meaningful_tokens = [token for token in tokens if token not in LOW_SIGNAL_TOKENS]
     if meaningful_tokens:

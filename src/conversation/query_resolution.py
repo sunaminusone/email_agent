@@ -59,8 +59,11 @@ def build_effective_query(
     session_payload: PersistedSessionPayload,
 ) -> str:
     base_query = str(original_query or "").strip()
-    reference = interpreted_payload.reference_resolution or session_payload.active_entity.identifier
-    identifier_type = interpreted_payload.confirmed_identifier_type or session_payload.active_entity.identifier_type
+    active_entity = session_payload.active_entity
+    active_identifier = active_entity.identifier if active_entity.entity_kind in {"product", "record"} else ""
+    active_identifier_type = active_entity.identifier_type if active_entity.entity_kind in {"product", "record"} else ""
+    reference = interpreted_payload.reference_resolution or active_identifier
+    identifier_type = interpreted_payload.confirmed_identifier_type or active_identifier_type
     user_goal = interpreted_payload.user_goal or session_payload.last_user_goal
 
     if not reference:

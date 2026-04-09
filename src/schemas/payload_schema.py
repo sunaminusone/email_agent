@@ -70,6 +70,7 @@ class PendingClarificationPayload(BaseModel):
 
     field: str = Field(default="")
     candidate_identifier: str = Field(default="")
+    candidate_options: List[str] = Field(default_factory=list)
     question: str = Field(default="")
 
 
@@ -78,6 +79,10 @@ class PersistedSessionPayload(BaseModel):
 
     active_entity: ActiveEntityPayload = Field(default_factory=ActiveEntityPayload)
     recent_entities: List[ActiveEntityPayload] = Field(default_factory=list)
+    active_service_name: str = Field(default="")
+    active_product_name: str = Field(default="")
+    active_target: str = Field(default="")
     pending_clarification: PendingClarificationPayload = Field(default_factory=PendingClarificationPayload)
     active_business_line: str = Field(default="")
     last_user_goal: str = Field(default="")
+    revealed_attributes: List[str] = Field(default_factory=list)

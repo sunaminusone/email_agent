@@ -73,6 +73,10 @@ These boundaries are intentional and should stay stable as the project grows.
 - `rag/`: semantic retrieval for technical questions
 - `integrations/quickbooks/`: OAuth, token management, query repository, and result matching
 
+### Service-Page RAG
+
+- Service-page `rag_ready` authoring and ingestion conventions are documented in [docs/SERVICE_PAGE_RAG_STANDARD.md](/Users/promab/anaconda_projects/email_agent/docs/SERVICE_PAGE_RAG_STANDARD.md)
+
 ### Response stack
 
 - `decision/response_resolution/`: topic, focus, style, and content-policy selection

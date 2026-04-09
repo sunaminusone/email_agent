@@ -14,6 +14,40 @@ from src.parser.service import parse_user_input
 from src.orchestration.planner_service import build_execution_plan
 
 
+def _extract_catalog_candidates_from_question(question: str) -> list[str]:
+    candidates: list[str] = []
+    for line in str(question or "").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("- "):
+            continue
+        payload = stripped[2:].strip()
+        catalog_no = payload.split("|", 1)[0].strip()
+        if catalog_no:
+            candidates.append(catalog_no)
+    return candidates
+
+
+def _revealed_attributes_from_response(response_resolution) -> list[str]:
+    revealed: list[str] = []
+    if response_resolution.include_product_identity:
+        revealed.append("identity")
+    if response_resolution.include_target_antigen:
+        revealed.append("target_antigen")
+    if response_resolution.include_application:
+        revealed.append("application")
+    if response_resolution.include_species_reactivity:
+        revealed.append("species_reactivity")
+    if response_resolution.include_technical_context:
+        revealed.append("technical_context")
+    if response_resolution.include_documents:
+        revealed.append("documents")
+    if response_resolution.include_price:
+        revealed.append("price")
+    if response_resolution.include_lead_time:
+        revealed.append("lead_time")
+    return revealed
+
+
 def _message_signature(message: dict) -> tuple[str, str, str]:
     metadata = message.get("metadata", {}) or {}
     return (
@@ -40,11 +74,54 @@ def _merge_histories(
     return merged
 
 
-def _build_route_state(agent_input: AgentContext, route, final_response) -> dict:
-    route_phase = "waiting_for_user" if final_response.response_type == "clarification" else "active"
+def _build_route_state(agent_input: AgentContext, route, final_response, response_resolution) -> dict:
+    is_clarification_response = final_response.response_type in {"clarification", "clarification_request"}
+    route_phase = "waiting_for_user" if is_clarification_response else "active"
     pending_route = None
-    if final_response.response_type == "clarification" and route.route_name != "clarification_request":
+    if is_clarification_response and route.route_name != "clarification_request":
         pending_route = route.route_name
+
+    session_payload = agent_input.session_payload.model_dump(mode="json")
+    pending_identifiers = list(agent_input.product_lookup_keys.ambiguous_identifiers)
+    clarification_prompt = route.missing_information_to_request[0] if route.missing_information_to_request else ""
+
+    if (
+        is_clarification_response
+        and route.route_name == "clarification_request"
+        and clarification_prompt.startswith('I found multiple products matching "')
+    ):
+        candidate_options = _extract_catalog_candidates_from_question(clarification_prompt)
+        session_payload["pending_clarification"] = {
+            "field": "product_selection",
+            "candidate_identifier": "",
+            "candidate_options": candidate_options,
+            "question": clarification_prompt,
+        }
+        pending_identifiers = candidate_options
+
+    newly_revealed = _revealed_attributes_from_response(response_resolution)
+    existing_revealed = list(session_payload.get("revealed_attributes", []) or [])
+    session_payload["revealed_attributes"] = list(dict.fromkeys(existing_revealed + newly_revealed))
+
+    if final_response.response_type == "conversation_close":
+        active_entity = dict(session_payload.get("active_entity", {}) or {})
+        if active_entity.get("entity_kind") == "product":
+            session_payload["active_product_name"] = ""
+            session_payload["revealed_attributes"] = []
+            session_payload["pending_clarification"] = {
+                "field": "",
+                "candidate_identifier": "",
+                "candidate_options": [],
+                "question": "",
+            }
+            session_payload["active_entity"] = {
+                "identifier": "",
+                "identifier_type": "",
+                "entity_kind": "",
+                "display_name": "",
+                "business_line": session_payload.get("active_business_line", ""),
+            }
+            pending_identifiers = []
 
     return {
         "active_route": route.route_name,
@@ -55,8 +132,8 @@ def _build_route_state(agent_input: AgentContext, route, final_response) -> dict
         "route_phase": route_phase,
         "last_assistant_prompt_type": final_response.response_type,
         "carried_missing_information": final_response.missing_information_requested or agent_input.missing_information,
-        "pending_identifiers": list(agent_input.product_lookup_keys.ambiguous_identifiers),
-        "session_payload": agent_input.session_payload.model_dump(mode="json"),
+        "pending_identifiers": pending_identifiers,
+        "session_payload": session_payload,
     }
 
 
@@ -154,7 +231,12 @@ def run_email_agent(request: Union[AgentRequest, dict]) -> AgentPrototypeRespons
                 block.model_dump(mode="json") for block in response_artifacts["response_content_blocks"]
             ],
             "needs_human_handoff": final_response.needs_human_handoff,
-            "route_state": _build_route_state(enriched_context, route, final_response),
+            "route_state": _build_route_state(
+                enriched_context,
+                route,
+                final_response,
+                response_artifacts["response_resolution"],
+            ),
         },
     }
     session_store.append_turns(

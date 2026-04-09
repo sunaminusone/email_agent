@@ -1,5 +1,7 @@
 from typing import Any, Dict, List
 
+from src.conversation.context_scope import has_current_scope, resolve_effective_scope
+
 from .constants import (
     COMMERCIAL_TOOL_ORDER,
     CUSTOMER_TERMS,
@@ -13,12 +15,16 @@ from .constants import (
 from .utils import append_unique, has_any, normalized_query
 
 
+def _should_use_active_service_for_technical_rag(agent_input: Dict[str, Any], query: str) -> bool:
+    effective_scope = resolve_effective_scope({**agent_input, "query": query})
+    return effective_scope["scope_type"] == "service" and effective_scope["source"] == "active"
+
+
 def select_commercial_tools(agent_input: Dict[str, Any], hints: List[str] | None = None) -> List[str]:
     query = normalized_query(agent_input)
     context = agent_input.get("context", {})
     entities = agent_input.get("entities", {})
     request_flags = agent_input.get("request_flags", {})
-    product_lookup_keys = agent_input.get("product_lookup_keys", {})
     selected: List[str] = []
 
     hint_values = hints or []
@@ -26,18 +32,7 @@ def select_commercial_tools(agent_input: Dict[str, Any], hints: List[str] | None
         if hint in COMMERCIAL_TOOL_ORDER:
             append_unique(selected, hint)
 
-    has_product_reference = any(
-        [
-            entities.get("product_names"),
-            entities.get("catalog_numbers"),
-            entities.get("service_names"),
-            entities.get("targets"),
-            product_lookup_keys.get("product_names"),
-            product_lookup_keys.get("catalog_numbers"),
-            product_lookup_keys.get("service_names"),
-            product_lookup_keys.get("targets"),
-        ]
-    )
+    current_scope_present = has_current_scope(agent_input)
 
     primary_intent = context.get("primary_intent", "")
     secondary_intents = set(context.get("secondary_intents", []))
@@ -46,7 +41,7 @@ def select_commercial_tools(agent_input: Dict[str, Any], hints: List[str] | None
         request_flags.get("needs_availability")
         or primary_intent == "product_inquiry"
         or "product_inquiry" in secondary_intents
-        or has_product_reference
+        or current_scope_present
     ):
         append_unique(selected, "product_lookup")
 
@@ -76,6 +71,7 @@ def select_commercial_tools(agent_input: Dict[str, Any], hints: List[str] | None
         or primary_intent in {"technical_question", "troubleshooting"}
         or bool({"technical_question", "troubleshooting"} & secondary_intents)
         or has_any(query, TECHNICAL_TERMS)
+        or _should_use_active_service_for_technical_rag(agent_input, query)
     ):
         append_unique(selected, "technical_rag")
 

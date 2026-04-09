@@ -109,6 +109,24 @@ def _looks_like_short_confirmation(query: str) -> bool:
     return normalized in SHORT_CONFIRMATION_TERMS
 
 
+def _resolve_pending_product_selection(query: str, routing_memory: RoutingMemory) -> str:
+    pending = routing_memory.session_payload.pending_clarification
+    if pending.field != "product_selection":
+        return ""
+
+    candidate_options = [str(value or "").strip() for value in pending.candidate_options if str(value or "").strip()]
+    if not candidate_options:
+        candidate_options = [str(value or "").strip() for value in routing_memory.pending_identifiers if str(value or "").strip()]
+    if not candidate_options:
+        return ""
+
+    normalized_query = str(query or "").strip().upper()
+    for candidate in candidate_options:
+        if normalized_query == candidate.upper():
+            return candidate
+    return ""
+
+
 def _resolve_identifier_type(query: str, routing_memory: RoutingMemory) -> str:
     normalized = _normalize_text(query)
     if any(term in normalized for term in PRODUCT_CONFIRMATION_TERMS):
@@ -184,6 +202,26 @@ def resolve_turn(
         )
 
     clarification_context = bool(pending.field or routing_memory.pending_route_after_clarification)
+    selected_product_identifier = _resolve_pending_product_selection(original_query, routing_memory)
+
+    if clarification_context and selected_product_identifier:
+        return TurnResolution(
+            turn_type="clarification_answer",
+            confidence=0.98,
+            should_reuse_active_route=False,
+            should_resume_pending_route=bool(routing_memory.pending_route_after_clarification),
+            should_reuse_active_entity=bool(active_entity.identifier),
+            should_reuse_pending_identifier=True,
+            should_reset_route_context=False,
+            payload_usable=True,
+            payload_usable_fields=["pending_identifier"],
+            resolved_identifier=selected_product_identifier,
+            resolved_identifier_type="catalog_number",
+            resolved_business_line=current_business_line or active_business_line,
+            resolved_user_goal=resolved_user_goal or routing_memory.session_payload.last_user_goal,
+            reason="The user selected a catalog number from a pending product-choice clarification list.",
+        )
+
     if clarification_context and (
         _looks_like_short_confirmation(original_query)
         or any(term in normalized_query for term in PRODUCT_CONFIRMATION_TERMS + INVOICE_CONFIRMATION_TERMS + ORDER_CONFIRMATION_TERMS)

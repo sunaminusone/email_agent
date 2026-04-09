@@ -57,22 +57,23 @@ Possible entity types include:
 - document_names
 - company_names
 
+Entity resolution guidance:
+- Use product_names for product identifiers, product aliases, reagent names, antigen/tag aliases, or product family names when the user is asking about a product.
+- Use service_names for named offerings such as development, delivery, humanization, production, or design services.
+- Do not split one named service phrase into multiple product_names.
+- Plural offering names such as "Mouse Monoclonal Antibodies", "Rabbit Monoclonal Antibodies", or "Rabbit Polyclonal Antibody Production" often refer to service lines, not individual products.
+- If the user only gives an alias, extract the alias as mentioned; do not invent a catalog number or canonical title.
+- For short product alias questions like "Tell me about NPM1" or "Tell me about 6 His epitope tag", prefer context.primary_intent = "product_inquiry" unless the user explicitly asks for a document, quote, or order action.
+
 Short-query handling guidance:
 - Very short product-like queries often still contain a usable catalog identifier.
 - If the user provides a short alphanumeric or numeric identifier in a product lookup context, prefer extracting it into entities.catalog_numbers instead of leaving it empty.
 - For short requests such as "product 20001" or "give me 12345", treat the identifier as a likely catalog number unless the surrounding words clearly indicate an order, invoice, or shipping lookup.
 
-Few-shot examples for short queries:
+Few-shot examples:
 User: i want product 20001
 Key extraction:
 - entities.catalog_numbers = ["20001"]
-- context.primary_intent = "product_inquiry"
-- request_flags.needs_availability = true
-- missing_information = []
-
-User: give me 12345
-Key extraction:
-- entities.catalog_numbers = ["12345"]
 - context.primary_intent = "product_inquiry"
 - request_flags.needs_availability = true
 - missing_information = []
@@ -82,7 +83,6 @@ Key extraction:
 - entities.catalog_numbers = ["PM-12345"]
 - context.primary_intent = "product_inquiry"
 - request_flags.needs_availability = true
-- missing_information = []
 
 User: quote for 20001
 Key extraction:
@@ -91,17 +91,75 @@ Key extraction:
 - request_flags.needs_price = true
 - request_flags.needs_quote = true
 
-User: antibody 20001
-Key extraction:
-- entities.catalog_numbers = ["20001"]
-- context.primary_intent = "product_inquiry"
-- request_flags.needs_availability = true
-
 User: datasheet for 20001
 Key extraction:
 - entities.catalog_numbers = ["20001"]
 - context.primary_intent = "documentation_request"
 - request_flags.needs_documentation = true
+
+User: tell me about NPM1
+Key extraction:
+- entities.product_names = ["NPM1"]
+- context.primary_intent = "product_inquiry"
+- request_flags.needs_availability = true
+
+User: tell me about mRNA-Lipid Nanoparticle
+Key extraction:
+- entities.product_names = ["mRNA-Lipid Nanoparticle"]
+- context.primary_intent = "product_inquiry"
+- request_flags.needs_availability = true
+
+User: do you offer mRNA-LNP delivery?
+Key extraction:
+- entities.service_names = ["mRNA-LNP delivery"]
+- entities.product_names = []
+- context.primary_intent = "product_inquiry"
+- request_flags.needs_availability = true
+
+User: tell me about Affinity Tune-Up and Humanization
+Key extraction:
+- entities.service_names = ["Affinity Tune-Up and Humanization"]
+- entities.product_names = []
+- context.primary_intent = "general_info"
+
+User: what is the timeline for Mouse Monoclonal Antibodies?
+Key extraction:
+- entities.service_names = ["Mouse Monoclonal Antibodies"]
+- entities.product_names = []
+- context.primary_intent = "timeline_question"
+- request_flags.needs_timeline = true
+
+User: do you offer Rabbit Monoclonal Antibodies?
+Key extraction:
+- entities.service_names = ["Rabbit Monoclonal Antibodies"]
+- entities.product_names = []
+- context.primary_intent = "product_inquiry"
+- request_flags.needs_availability = true
+
+User: what applications is this antibody validated for?
+Key extraction:
+- entities.product_names = []
+- entities.service_names = []
+- entities.catalog_numbers = []
+- open_slots.referenced_prior_context = "this antibody"
+- context.primary_intent = "technical_question"
+
+User: can you send the brochure for that service?
+Key extraction:
+- entities.product_names = []
+- entities.service_names = []
+- entities.catalog_numbers = []
+- open_slots.referenced_prior_context = "that service"
+- context.primary_intent = "documentation_request"
+- request_flags.needs_documentation = true
+
+User: what happens next for it?
+Key extraction:
+- entities.product_names = []
+- entities.service_names = []
+- entities.catalog_numbers = []
+- open_slots.referenced_prior_context = "it"
+- context.primary_intent = "follow_up"
 
 User: status of invoice 20001
 Key extraction:
@@ -116,24 +174,12 @@ Key extraction:
 - request_flags.needs_invoice = true
 
 Request flag guidance:
-Turn user needs into boolean signals when supported by the message.
-Examples:
-- needs_price: asking about price or cost
-- needs_timeline: asking how long something takes or when it can arrive
-- needs_protocol: asking for protocol, workflow, process, method, or experiment steps
-- needs_customization: asking whether something can be customized or specially designed
-- needs_order_status: asking for progress/status of an existing order
-- needs_shipping_info: asking about shipping/tracking/customs/delivery
-- needs_documentation: asking for datasheet, brochure, COA, SDS, manual, technical file
-- needs_troubleshooting: asking how to solve a technical or product-use problem
-- needs_quote: explicitly asking for a quotation
-- needs_availability: asking whether the product/service exists, is available, or is offered
-- needs_recommendation: asking which option is better, best, or most suitable
-- needs_comparison: asking to compare products, services, formats, or solutions
-- needs_invoice: asking for invoice, PO, payment paperwork, billing details
-- needs_refund_or_cancellation: asking to cancel, return, refund, or revise an order
-- needs_sample: asking for sample, trial material, evaluation unit
-- needs_regulatory_info: asking for compliance, import/export documents, certificates, or regulatory details
+Turn user needs into boolean signals when clearly supported by the message.
+Most flags can be inferred from the field name. Pay special attention to:
+- needs_documentation: datasheet, brochure, COA, SDS, manual, technical file
+- needs_quote / needs_price: quotation, price, cost, budget
+- needs_shipping_info / needs_order_status / needs_invoice: tracking, delivery, order progress, invoice, PO, billing
+- needs_protocol / needs_troubleshooting / needs_timeline: workflow/process, fixing a technical issue, lead time / ETA
 
 Constraint guidance:
 Extract only if explicit or strongly implied:
@@ -157,6 +203,13 @@ Use open_slots for important context that does not fit fixed schema cleanly:
 - delivery_or_logistics_note
 - regulatory_or_compliance_note
 - other_notes
+
+Context-dependent follow-up guidance:
+- If the user refers to an object indirectly using phrases like "this antibody", "this service", "that one", "it", "its", "the product", or similar follow-up language, do not guess the missing entity.
+- In those cases, leave product_names / service_names / catalog_numbers empty unless the entity is explicitly restated in the current message.
+- Use open_slots.referenced_prior_context to capture the referring phrase, such as "this antibody" or "that service".
+- If the query clearly depends on prior context, prefer context.primary_intent = "follow_up" unless another intent such as technical_question, documentation_request, or timeline_question is more clearly primary.
+- Never invent a specific product or service name just to make the schema look complete.
 
 Language guidance:
 - zh for Chinese

@@ -59,6 +59,10 @@ class ResponseResolution(BaseModel):
         default=ResponseTopic.GENERAL_CHAT,
         description="High-level response topic used to select the downstream response chain.",
     )
+    dialogue_act: str = Field(
+        default="UNKNOWN",
+        description="Dialogue act inferred for the current turn, such as ACKNOWLEDGE, TERMINATE, ELABORATE, SELECTION, or INQUIRY.",
+    )
 
     answer_focus: str = Field(
         default="summary",

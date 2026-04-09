@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.conversation.context_scope import resolve_effective_scope
 from src.responders.common import (
     requested_customer_fields,
     requested_invoice_fields,
@@ -50,6 +51,119 @@ def _first_action(execution_run, action_type: str):
     return next((action for action in execution_run.executed_actions if action.action_type == action_type), None)
 
 
+def _resolved_scope_block(payload: dict, product_matches: list[dict[str, Any]]) -> AtomicContentBlock | None:
+    agent_input = payload["agent_input"]
+    execution_run = payload["execution_run"]
+    turn_type = agent_input.turn_resolution.turn_type
+    prior_entity_kind = agent_input.routing_memory.session_payload.active_entity.entity_kind
+
+    technical_action = _first_action(execution_run, "retrieve_technical_knowledge")
+    technical_debug = technical_action.output.get("retrieval_debug", {}) if technical_action else {}
+    technical_scope_type = str(technical_debug.get("effective_scope_type") or "").strip()
+    technical_scope_name = str(technical_debug.get("effective_scope_name") or "").strip()
+    technical_scope_source = str(technical_debug.get("effective_scope_source") or "").strip()
+
+    if technical_scope_type and technical_scope_name:
+        should_acknowledge = technical_scope_source == "active"
+        acknowledgement_mode = "assumed" if technical_scope_source == "active" else "explicit"
+        return AtomicContentBlock(
+            kind="resolved_scope",
+            payload={
+                "scope_type": technical_scope_type,
+                "scope_name": technical_scope_name,
+                "scope_source": technical_scope_source,
+                "catalog_no": "",
+                "business_line": technical_action.output.get("business_line_hint", ""),
+                "should_acknowledge": should_acknowledge,
+                "acknowledgement_mode": acknowledgement_mode if should_acknowledge else "none",
+            },
+            text=f"Resolved scope: {technical_scope_type} {technical_scope_name} ({technical_scope_source or 'unknown source'}).",
+        )
+
+    effective_scope = resolve_effective_scope(
+        {
+            "query": agent_input.query,
+            "original_query": agent_input.original_query,
+            "effective_query": agent_input.effective_query,
+            "context": {"primary_intent": agent_input.context.primary_intent},
+            "entities": {
+                "service_names": list(agent_input.entities.service_names),
+                "product_names": list(agent_input.entities.product_names),
+                "catalog_numbers": list(agent_input.entities.catalog_numbers),
+                "targets": list(agent_input.entities.targets),
+            },
+            "product_lookup_keys": {
+                "service_names": list(agent_input.product_lookup_keys.service_names),
+                "product_names": list(agent_input.product_lookup_keys.product_names),
+                "catalog_numbers": list(agent_input.product_lookup_keys.catalog_numbers),
+                "targets": list(agent_input.product_lookup_keys.targets),
+            },
+            "active_service_name": agent_input.active_service_name,
+            "active_product_name": agent_input.active_product_name,
+            "active_target": agent_input.active_target,
+            "session_payload": {
+                "active_service_name": agent_input.session_payload.active_service_name,
+                "active_product_name": agent_input.session_payload.active_product_name,
+                "active_target": agent_input.session_payload.active_target,
+                "active_entity": {"entity_kind": agent_input.session_payload.active_entity.entity_kind},
+            },
+            "routing_memory": {
+                "should_stick_to_active_route": agent_input.routing_memory.should_stick_to_active_route,
+                "session_payload": {
+                    "active_entity": {
+                        "entity_kind": agent_input.routing_memory.session_payload.active_entity.entity_kind,
+                    }
+                },
+            },
+            "turn_resolution": {"turn_type": turn_type},
+        }
+    )
+
+    if product_matches:
+        product_match = product_matches[0]
+        current_turn_has_product_scope = bool(agent_input.entities.product_names or agent_input.entities.catalog_numbers)
+        scope_source = "current" if current_turn_has_product_scope else ("active" if agent_input.active_product_name else "")
+        should_acknowledge = bool(
+            product_match.get("name")
+            and prior_entity_kind
+            and prior_entity_kind != "product"
+            and turn_type in {"follow_up", "clarification_answer", "fresh_request", "new_request"}
+        )
+        acknowledgement_mode = "explicit" if current_turn_has_product_scope else "assumed"
+        return AtomicContentBlock(
+            kind="resolved_scope",
+            payload={
+                "scope_type": "product",
+                "scope_name": product_match.get("name") or product_match.get("display_name") or "",
+                "scope_source": scope_source,
+                "catalog_no": product_match.get("catalog_no") or "",
+                "business_line": product_match.get("business_line") or "",
+                "should_acknowledge": should_acknowledge,
+                "acknowledgement_mode": acknowledgement_mode if should_acknowledge else "none",
+            },
+            text=f"Resolved scope: product {product_match.get('catalog_no') or product_match.get('name') or 'unknown'}.",
+        )
+
+    if effective_scope.get("scope_type") and effective_scope.get("name"):
+        should_acknowledge = effective_scope.get("source") == "active"
+        acknowledgement_mode = "assumed" if effective_scope.get("source") == "active" else "explicit"
+        return AtomicContentBlock(
+            kind="resolved_scope",
+            payload={
+                "scope_type": effective_scope.get("scope_type", ""),
+                "scope_name": effective_scope.get("name", ""),
+                "scope_source": effective_scope.get("source", ""),
+                "catalog_no": "",
+                "business_line": agent_input.active_business_line or agent_input.routing_debug.business_line,
+                "should_acknowledge": should_acknowledge,
+                "acknowledgement_mode": acknowledgement_mode if should_acknowledge else "none",
+            },
+            text=f"Resolved scope: {effective_scope.get('scope_type', '')} {effective_scope.get('name', '')}.",
+        )
+
+    return None
+
+
 def _product_identity_matches(execution_run) -> list[dict[str, Any]]:
     ordered_matches = [
         *_all_matches(execution_run, "lookup_catalog_product"),
@@ -91,6 +205,9 @@ def build_content_blocks(payload: dict) -> list[AtomicContentBlock]:
 
     general_info_follow_up = _is_general_info_follow_up(payload)
     blocks: list[AtomicContentBlock] = []
+    scope_block = _resolved_scope_block(payload, product_matches)
+    if scope_block is not None:
+        blocks.append(scope_block)
 
     for key in content_priority:
         if key == "product_identity" and product_matches:

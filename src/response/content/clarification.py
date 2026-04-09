@@ -102,6 +102,8 @@ def _direct_clarification_question(missing_information: list[str]) -> str:
     candidate = (missing_information[0] or "").strip()
     if candidate.startswith("Please confirm whether ") and candidate.endswith("."):
         return candidate
+    if candidate.startswith("I found multiple products matching "):
+        return candidate
     return ""
 
 

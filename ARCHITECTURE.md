@@ -237,14 +237,65 @@ normalize -> retrieval -> ranking -> selection -> service
 Semantic technical retrieval.
 
 Responsibilities:
-- vector store loading
-- chunk retrieval
-- technical knowledge grounding
+- service-page ingestion from curated `rag_ready` files
+- vector store loading and rebuild
+- chunk retrieval and reranking
+- technical/service knowledge grounding
+- thin deterministic retrieval post-processing for explicit workflow/phase cases
 
 Current structure:
+- [ingestion_config.py](/Users/promab/anaconda_projects/email_agent/src/rag/ingestion_config.py)
+- [service_page_ingestion.py](/Users/promab/anaconda_projects/email_agent/src/rag/service_page_ingestion.py)
 - [service.py](/Users/promab/anaconda_projects/email_agent/src/rag/service.py)
 - [retriever.py](/Users/promab/anaconda_projects/email_agent/src/rag/retriever.py)
+- [reranker.py](/Users/promab/anaconda_projects/email_agent/src/rag/reranker.py)
 - [vectorstore.py](/Users/promab/anaconda_projects/email_agent/src/rag/vectorstore.py)
+
+Current service-page source-of-truth:
+- [/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk](/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk)
+
+Current service-page authoring standard:
+- [SERVICE_PAGE_RAG_STANDARD.md](/Users/promab/anaconda_projects/email_agent/docs/SERVICE_PAGE_RAG_STANDARD.md)
+
+Current vector store:
+- Chroma collection built from service-page `rag_ready` files only
+- stored under [/Users/promab/anaconda_projects/email_agent/data/processed/chroma_rag_service_pages](/Users/promab/anaconda_projects/email_agent/data/processed/chroma_rag_service_pages)
+
+Current retrieval flow:
+
+```text
+service-page rag_ready files
+  -> service_page_ingestion
+  -> explicit prechunked Documents
+  -> Chroma recall
+  -> BGE reranker
+  -> thin deterministic post-processing
+  -> rag/service.py result payload
+```
+
+Current source-file conventions:
+- keep one `[DOCUMENT]` block and multiple `[SECTION]` blocks
+- author explicit subchunks in the source files instead of relying on parser-side guessing
+- use:
+  - `plan_summary`
+  - `service_plan`
+  - `service_phase`
+  - `workflow_step`
+- preserve workflow order with:
+  - `step`
+  - `previous_step`
+  - `next_step`
+- distinguish phase semantics with:
+  - `main_phase`
+  - `optional_main_phase`
+  - `optional_branch`
+
+Current retrieval rule:
+- let embedding + reranker do the main ranking work
+- keep only a small deterministic layer for:
+  - `business_line_hint`
+  - `after X -> next_step`
+  - exact `service_phase` resolution for explicit phase queries
 
 #### `src/integrations/`
 

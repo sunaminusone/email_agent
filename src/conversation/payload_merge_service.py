@@ -24,6 +24,25 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return ordered
 
 
+def _looks_like_explicit_product_identifier_query(query: str) -> bool:
+    normalized = str(query or "").strip().lower()
+    return any(
+        phrase in normalized
+        for phrase in [
+            "catalog",
+            "catalog #",
+            "catalog no",
+            "catalog number",
+            "cat no",
+            "cat#",
+            "sku",
+            "item",
+            "product number",
+            "pm-",
+        ]
+    )
+
+
 def _looks_like_product_confirmation(query: str) -> bool:
     normalized = str(query or "").strip().lower()
     return any(
@@ -251,6 +270,17 @@ def enrich_parsed_result_with_identifier_fallback(parsed: ParsedResult, original
     catalog_numbers = identifier_signals["catalog_numbers"]
     order_numbers = identifier_signals["order_numbers"]
     ambiguous_identifiers = identifier_signals["ambiguous_identifiers"]
+
+    # When the current turn already resolved to an explicit service, do not let
+    # generic hyphenated-token fallback promote that service name into a catalog id.
+    if (
+        parsed.entities.service_names
+        and not parsed.entities.product_names
+        and not parsed.entities.catalog_numbers
+        and not _looks_like_explicit_product_identifier_query(original_query)
+    ):
+        catalog_numbers = []
+        ambiguous_identifiers = []
 
     updated_catalog_numbers = _dedupe_preserve_order([*parsed.entities.catalog_numbers, *catalog_numbers])
     updated_order_numbers = _dedupe_preserve_order([*parsed.entities.order_numbers, *order_numbers])

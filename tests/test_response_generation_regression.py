@@ -4,8 +4,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.schemas import (
+    Entities,
     ExecutedAction,
     ExecutionRun,
+    OpenSlots,
     ParsedContext,
     ParsedResult,
     RequestFlags,
@@ -13,6 +15,7 @@ from src.schemas import (
     RuntimeContext,
 )
 from src.conversation.agent_input_service import build_agent_input
+from src.decision import route_agent_input
 from src.decision.response_resolution import resolve_response
 from src.decision.response_service import build_response_artifacts, generate_final_response
 from src.response import chain as response_chain
@@ -33,19 +36,31 @@ def _history_with_route_state(route_state: dict, content: str = "Previous assist
 def _parsed(
     *,
     primary_intent: str = "unknown",
+    product_names: list[str] | None = None,
+    catalog_numbers: list[str] | None = None,
+    service_names: list[str] | None = None,
+    targets: list[str] | None = None,
     needs_documentation: bool = False,
     needs_timeline: bool = False,
     needs_price: bool = False,
     needs_quote: bool = False,
+    referenced_prior_context: str | None = None,
 ):
     return ParsedResult(
         context=ParsedContext(primary_intent=primary_intent),
+        entities=Entities(
+            product_names=list(product_names or []),
+            catalog_numbers=list(catalog_numbers or []),
+            service_names=list(service_names or []),
+            targets=list(targets or []),
+        ),
         request_flags=RequestFlags(
             needs_documentation=needs_documentation,
             needs_timeline=needs_timeline,
             needs_price=needs_price,
             needs_quote=needs_quote,
         ),
+        open_slots=OpenSlots(referenced_prior_context=referenced_prior_context),
     )
 
 
@@ -472,7 +487,7 @@ def test_product_detail_question_selects_detail_fields_without_price_by_default(
         ],
     )
     resolution = resolve_response(agent, _route("commercial_agent"), execution_run)
-    assert resolution.answer_focus == "product_identity"
+    assert resolution.answer_focus == "product_elaboration"
     assert resolution.include_target_antigen is True
     assert resolution.include_application is True
     assert resolution.include_species_reactivity is True
@@ -551,7 +566,121 @@ def test_technical_query_uses_technical_style():
     resolution = resolve_response(agent, _route("technical_rag"), execution_run)
     assert resolution.reply_style == "technical"
     response = generate_final_response(RuntimeContext(agent_context=agent), _route("technical_rag"), execution_run)
-    assert "relevant technical material" in response.message.lower()
+    assert "mouse monoclonal antibodies" in response.message.lower()
+    assert "timeline" in response.message.lower()
+
+
+def test_technical_renderer_acknowledges_active_service_scope():
+    history = _history_with_route_state(
+        {
+            "active_route": "commercial_agent",
+            "active_business_line": "mrna_lnp",
+            "active_engagement_type": "service_inquiry",
+            "route_phase": "active",
+            "session_payload": {
+                "active_entity": {
+                    "identifier": "",
+                    "identifier_type": "",
+                    "entity_kind": "service",
+                    "display_name": "mRNA-LNP Gene Delivery",
+                    "business_line": "mrna_lnp",
+                },
+                "active_service_name": "mRNA-LNP Gene Delivery",
+                "active_business_line": "mrna_lnp",
+                "last_user_goal": "request_technical_information",
+            },
+        }
+    )
+    agent = build_agent_input(
+        "tech-scope-thread",
+        "What is the service plan?",
+        _parsed(primary_intent="follow_up"),
+        history,
+        [],
+    )
+    execution_run = ExecutionRun(
+        plan_goal="Retrieve technical evidence",
+        overall_status="completed",
+        executed_actions=[
+            ExecutedAction(
+                action_id="tech",
+                action_type="retrieve_technical_knowledge",
+                status="completed",
+                output={
+                    "business_line_hint": "mrna_lnp",
+                    "matches": [
+                        {
+                            "file_name": "promab_mrna_lnp_gene_delivery_rag_ready.txt",
+                            "chunk_label": "Discovery Services Plan - Phase I",
+                            "content_preview": "Discovery Services Plan is a phased plan with three main phases followed by two optional phases.",
+                        }
+                    ],
+                    "retrieval_debug": {
+                        "effective_scope_type": "service",
+                        "effective_scope_name": "mRNA-LNP Gene Delivery",
+                        "effective_scope_source": "active",
+                        "acknowledgement_mode": "assumed",
+                    },
+                },
+            )
+        ],
+    )
+    response = generate_final_response(RuntimeContext(agent_context=agent), _route("technical_rag", business_line="mrna_lnp"), execution_run)
+    assert "previously discussed mrna-lnp gene delivery service" in response.message.lower()
+    assert "mrna-lnp gene delivery" in response.message.lower()
+
+
+def test_product_renderer_acknowledges_service_to_product_switch():
+    history = _history_with_route_state(
+        {
+            "active_route": "commercial_agent",
+            "active_business_line": "mrna_lnp",
+            "active_engagement_type": "service_inquiry",
+            "route_phase": "active",
+            "session_payload": {
+                "active_entity": {
+                    "identifier": "",
+                    "identifier_type": "",
+                    "entity_kind": "service",
+                    "display_name": "mRNA-LNP Gene Delivery",
+                    "business_line": "mrna_lnp",
+                },
+                "active_service_name": "mRNA-LNP Gene Delivery",
+                "active_business_line": "mrna_lnp",
+            },
+        }
+    )
+    agent = build_agent_input(
+        "product-switch-thread",
+        "Tell me about PM-LNP-1001",
+        _parsed(primary_intent="product_inquiry", product_names=["mRNA-LNP Starter Kit"], catalog_numbers=["PM-LNP-1001"]),
+        history,
+        [],
+    )
+    execution_run = ExecutionRun(
+        plan_goal="Provide product details",
+        overall_status="completed",
+        executed_actions=[
+            ExecutedAction(
+                action_id="product",
+                action_type="lookup_catalog_product",
+                status="completed",
+                output={
+                    "matches": [
+                        {
+                            "catalog_no": "PM-LNP-1001",
+                            "name": "mRNA-LNP Starter Kit",
+                            "business_line": "mRNA-LNP",
+                            "target_antigen": "EGFP mRNA",
+                        }
+                    ]
+                },
+            )
+        ],
+    )
+    response = generate_final_response(RuntimeContext(agent_context=agent), _route("product_lookup", business_line="mrna_lnp"), execution_run)
+    assert "mRNA-lnp starter kit".lower() in response.message.lower()
+    assert "egfp mrna" in response.message.lower()
 
 
 def test_workflow_route_uses_workflow_renderer_for_missing_information():
@@ -671,3 +800,220 @@ def test_product_renderer_handles_multiple_product_identity_blocks():
     assert "multiple products" in response.message.lower()
     assert "20001" in response.message
     assert "20002" in response.message
+
+
+def test_broad_service_capability_question_without_active_service_requests_clarification():
+    agent = build_agent_input(
+        "service-scope-thread-1",
+        "What models do you support?",
+        _parsed(primary_intent="technical_question"),
+        [],
+        [],
+    )
+
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+
+    assert routed.route.route_name == "clarification_request"
+    assert routed.route.missing_information_to_request
+    assert "which service" in routed.route.missing_information_to_request[0].lower()
+
+
+def test_broad_service_capability_question_with_active_service_keeps_follow_up_route():
+    history = _history_with_route_state(
+        {
+            "active_route": "commercial_agent",
+            "active_business_line": "mrna_lnp",
+            "active_engagement_type": "custom_service",
+            "route_phase": "active",
+            "session_payload": {
+                "active_entity": {
+                    "identifier": "",
+                    "identifier_type": "",
+                    "entity_kind": "service",
+                    "display_name": "mRNA-LNP Gene Delivery",
+                    "business_line": "mrna_lnp",
+                },
+                "active_service_name": "mRNA-LNP Gene Delivery",
+                "active_business_line": "mrna_lnp",
+                "last_user_goal": "request_technical_information",
+            },
+        }
+    )
+    agent = build_agent_input(
+        "service-scope-thread-2",
+        "What models do you support?",
+        _parsed(primary_intent="follow_up"),
+        history,
+        [],
+    )
+
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+
+    assert routed.route.route_name != "clarification_request"
+
+
+def test_broad_service_plan_question_without_active_service_requests_clarification():
+    agent = build_agent_input(
+        "service-scope-thread-3",
+        "What is your service plan?",
+        _parsed(primary_intent="technical_question"),
+        [],
+        [],
+    )
+
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+
+    assert routed.route.route_name == "clarification_request"
+    assert routed.route.missing_information_to_request
+    assert "which service" in routed.route.missing_information_to_request[0].lower()
+
+
+def test_broad_service_plan_question_with_active_service_keeps_follow_up_route():
+    history = _history_with_route_state(
+        {
+            "active_route": "commercial_agent",
+            "active_business_line": "antibody",
+            "active_engagement_type": "custom_service",
+            "route_phase": "active",
+            "session_payload": {
+                "active_entity": {
+                    "identifier": "",
+                    "identifier_type": "",
+                    "entity_kind": "service",
+                    "display_name": "Mouse Monoclonal Antibodies",
+                    "business_line": "antibody",
+                },
+                "active_service_name": "Mouse Monoclonal Antibodies",
+                "active_business_line": "antibody",
+                "last_user_goal": "request_service_plan",
+            },
+        }
+    )
+    agent = build_agent_input(
+        "service-scope-thread-4",
+        "What is your service plan?",
+        _parsed(primary_intent="follow_up"),
+        history,
+        [],
+    )
+
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+
+    assert routed.route.route_name != "clarification_request"
+
+
+def test_referential_antibody_question_without_active_scope_requests_clarification():
+    agent = build_agent_input(
+        "referential-scope-thread-1",
+        "What applications is this antibody validated for?",
+        _parsed(
+            primary_intent="technical_question",
+            referenced_prior_context="this antibody",
+        ),
+        [],
+        [],
+    )
+
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+
+    assert routed.route.route_name == "clarification_request"
+    assert routed.route.missing_information_to_request
+    assert "which antibody or product" in routed.route.missing_information_to_request[0].lower()
+
+
+def test_referential_antibody_question_with_active_product_skips_clarification():
+    history = _history_with_route_state(
+        {
+            "active_route": "commercial_agent",
+            "active_business_line": "antibody",
+            "active_engagement_type": "catalog_product",
+            "route_phase": "active",
+            "session_payload": {
+                "active_entity": {
+                    "identifier": "20001",
+                    "identifier_type": "catalog_number",
+                    "entity_kind": "product",
+                    "display_name": "Mouse Monoclonal antibody to Nucleophosmin",
+                    "business_line": "antibody",
+                },
+                "active_product_name": "Mouse Monoclonal antibody to Nucleophosmin",
+                "active_business_line": "antibody",
+                "last_user_goal": "request_product_information",
+            },
+        }
+    )
+    agent = build_agent_input(
+        "referential-scope-thread-2",
+        "What applications is this antibody validated for?",
+        _parsed(
+            primary_intent="technical_question",
+            referenced_prior_context="this antibody",
+        ),
+        history,
+        [],
+    )
+
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+
+    assert routed.route.route_name != "clarification_request"
+
+
+def test_ambiguous_product_alias_requests_clarification_with_all_candidates():
+    agent = build_agent_input(
+        "ambiguous-alias-thread-1",
+        "Tell me about MSH2",
+        _parsed(primary_intent="product_inquiry", product_names=["MSH2"]),
+        [],
+        [],
+    )
+
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+
+    assert routed.route.route_name == "clarification_request"
+    assert routed.route.missing_information_to_request
+    message = routed.route.missing_information_to_request[0]
+    assert 'multiple products matching "MSH2"' in message
+    assert "20025" in message
+    assert "P06329" in message
+    assert "reply with the catalog number" in message.lower()
+
+
+def test_unique_product_alias_does_not_trigger_ambiguous_alias_clarification():
+    agent = build_agent_input(
+        "ambiguous-alias-thread-2",
+        "Tell me about NPM1",
+        _parsed(primary_intent="product_inquiry", product_names=["Mouse Monoclonal antibody to Nucleophosmin"]),
+        [],
+        [],
+    )
+
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+
+    assert routed.route.route_name != "clarification_request"
+
+
+def test_ambiguous_product_alias_clarification_response_preserves_candidate_list():
+    agent = build_agent_input(
+        "ambiguous-alias-thread-3",
+        "Tell me about MSH2",
+        _parsed(primary_intent="product_inquiry", product_names=["MSH2"]),
+        [],
+        [],
+    )
+    routed = route_agent_input(RuntimeContext(agent_context=agent))
+    execution_run = ExecutionRun(
+        plan_goal="Clarify ambiguous product alias",
+        overall_status="completed",
+        executed_actions=[],
+    )
+
+    response = generate_final_response(
+        RuntimeContext(agent_context=agent),
+        routed.route,
+        execution_run,
+    )
+
+    assert response.response_type == "clarification"
+    assert 'multiple products matching "MSH2"' in response.message
+    assert "20025" in response.message
+    assert "P06329" in response.message

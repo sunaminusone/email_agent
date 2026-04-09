@@ -14,7 +14,7 @@ def _topic_for_focus(answer_focus: str, route_name: str) -> ResponseTopic:
         return ResponseTopic.DOCUMENT_DELIVERY
     if answer_focus in {"pricing", "lead_time"}:
         return ResponseTopic.COMMERCIAL_QUOTE
-    if answer_focus == "product_identity":
+    if answer_focus in {"product_identity", "product_elaboration"}:
         return ResponseTopic.PRODUCT_INFO
     return ResponseTopic.GENERAL_CHAT
 

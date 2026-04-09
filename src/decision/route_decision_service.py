@@ -27,9 +27,12 @@ from .route_policy_shared import (
     safe_routing_memory,
 )
 from .route_preconditions import (
+    ambiguous_product_alias_override,
     continuity_override,
     identifier_ambiguity_override,
+    missing_referential_scope_override,
     risk_or_handoff_override,
+    service_scope_ambiguity_override,
 )
 from .workflow_route_policy import resolve_workflow_route
 
@@ -91,6 +94,32 @@ def _build_rule_override(agent_input: dict[str, Any]) -> RouteDecision | None:
     )
     if ambiguity_decision is not None:
         return ambiguity_decision
+
+    ambiguous_product_decision = ambiguous_product_alias_override(
+        agent_input,
+        business_line=business_line,
+        engagement_type=engagement_type,
+    )
+    if ambiguous_product_decision is not None:
+        return ambiguous_product_decision
+
+    referential_scope_decision = missing_referential_scope_override(
+        agent_input,
+        intent=intent,
+        business_line=business_line,
+        engagement_type=engagement_type,
+    )
+    if referential_scope_decision is not None:
+        return referential_scope_decision
+
+    service_scope_decision = service_scope_ambiguity_override(
+        agent_input,
+        intent=intent,
+        business_line=business_line,
+        engagement_type=engagement_type,
+    )
+    if service_scope_decision is not None:
+        return service_scope_decision
 
     technical_decision = resolve_technical_route(
         agent_input,
