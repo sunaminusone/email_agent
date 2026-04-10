@@ -4,7 +4,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.common.models import AttributeConstraint, EntitySpan, ObjectRef, ObjectType, RecencyType, SourceType
+from src.ingestion.models import IngestionBundle
+from src.ingestion.models import AttributeConstraint, EntitySpan, RecencyType, SourceType
+from src.common.models import ObjectType
 
 
 class _ObjectsModel(BaseModel):
@@ -33,16 +35,26 @@ class AmbiguousObjectSet(_ObjectsModel):
     object_type: ObjectType = "unknown"
     query_value: str = ""
     candidates: list[ObjectCandidate] = Field(default_factory=list)
+    ambiguity_kind: str = "generic"
+    clarification_focus: str = ""
+    suggested_disambiguation_fields: list[str] = Field(default_factory=list)
     resolution_strategy: str = "clarify"
     reason: str = ""
     attribute_constraints: list[AttributeConstraint] = Field(default_factory=list)
     needs_user_clarification: bool = True
 
 
-class ObjectBundle(_ObjectsModel):
+class ExtractorOutput(_ObjectsModel):
     candidates: list[ObjectCandidate] = Field(default_factory=list)
     ambiguous_sets: list[AmbiguousObjectSet] = Field(default_factory=list)
-    context_refs: list[ObjectRef] = Field(default_factory=list)
+
+
+class ObjectBundle(_ObjectsModel):
+    ingestion_bundle: IngestionBundle | None = None
+    current_candidates: list[ObjectCandidate] = Field(default_factory=list)
+    context_candidates: list[ObjectCandidate] = Field(default_factory=list)
+    all_candidates: list[ObjectCandidate] = Field(default_factory=list)
+    ambiguous_sets: list[AmbiguousObjectSet] = Field(default_factory=list)
 
 
 class ResolvedObjectState(_ObjectsModel):
@@ -50,7 +62,7 @@ class ResolvedObjectState(_ObjectsModel):
     secondary_objects: list[ObjectCandidate] = Field(default_factory=list)
     ambiguous_sets: list[AmbiguousObjectSet] = Field(default_factory=list)
     candidate_objects: list[ObjectCandidate] = Field(default_factory=list)
-    active_object: ObjectRef | None = None
+    active_object: ObjectCandidate | None = None
     used_stateful_anchor: bool = False
     resolution_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    reason: str = ""
+    resolution_reason: str = ""

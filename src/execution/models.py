@@ -38,6 +38,7 @@ class ExecutionPlan(_ExecutionModel):
 class ExecutedToolCall(_ExecutionModel):
     call_id: str = ""
     tool_name: str
+    role: ToolCallRole = "primary"
     status: ExecutionStatus = "empty"
     request: ToolRequest
     result: ToolResult | None = None

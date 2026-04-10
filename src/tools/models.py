@@ -10,7 +10,27 @@ from src.routing.models import DialogueActResult, DialogueActType, ModalityDecis
 
 
 class _ToolModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+
+class ToolConstraints(_ToolModel):
+    common: dict[str, Any] = Field(default_factory=dict)
+    scope: dict[str, Any] = Field(default_factory=dict)
+    retrieval: dict[str, Any] = Field(default_factory=dict)
+    tool: dict[str, Any] = Field(default_factory=dict)
+    debug: dict[str, Any] = Field(default_factory=dict)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        setattr(self, key, value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
 
 
 class ToolRequest(_ToolModel):
@@ -20,7 +40,7 @@ class ToolRequest(_ToolModel):
     secondary_objects: list[ObjectCandidate] = Field(default_factory=list)
     dialogue_act: DialogueActResult = Field(default_factory=DialogueActResult)
     modality_decision: ModalityDecision = Field(default_factory=ModalityDecision)
-    constraints: dict[str, Any] = Field(default_factory=dict)
+    constraints: ToolConstraints = Field(default_factory=ToolConstraints)
 
 
 class ToolResult(_ToolModel):

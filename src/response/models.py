@@ -8,7 +8,7 @@ from src.common.models import SourceAttribution
 from src.execution.models import ExecutionRun
 from src.memory.models import MemoryUpdate, ResponseMemory
 from src.objects.models import ResolvedObjectState
-from src.routing.models import DialogueActResult
+from src.routing.models import ClarificationPayload, DialogueActResult, TopLevelRouteName
 
 
 ResponseMode = Literal[
@@ -39,6 +39,8 @@ class ResponseInput(_ResponseModel):
     resolved_object_state: ResolvedObjectState | None = None
     dialogue_act: DialogueActResult = Field(default_factory=DialogueActResult)
     response_memory: ResponseMemory | None = None
+    route_name: TopLevelRouteName = "execution"
+    clarification: ClarificationPayload | None = None
 
 
 class ResponsePlan(_ResponseModel):
@@ -57,3 +59,21 @@ class ComposedResponse(_ResponseModel):
     content_blocks: list[ContentBlock] = Field(default_factory=list)
     citations: list[SourceAttribution] = Field(default_factory=list)
     debug_info: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResponseResolution(_ResponseModel):
+    topic_type: str = ""
+    answer_focus: str = ""
+    primary_action_type: str = ""
+    supporting_action_types: list[str] = Field(default_factory=list)
+    reply_style: str = "direct"
+    should_ask_clarification: bool = False
+
+
+class ResponseBundle(_ResponseModel):
+    composed_response: ComposedResponse
+    response_plan: ResponsePlan
+    response_resolution: ResponseResolution
+    response_topic: str = ""
+    response_content_summary: str = ""
+    response_path: str = "deterministic"

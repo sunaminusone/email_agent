@@ -6,9 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from langchain_core.runnables import RunnableLambda # 把普通Python函数包装成 LangChain runnable
 from langserve import add_routes # 自动生成 API（不用自己写 /chat）
 
+from src.app.service import run_email_agent
+from src.api_models import AgentPrototypeResponse, AgentRequest
 from src.integrations import QuickBooksClient, QuickBooksConfigError
-from src.schemas.chat_schema import AgentPrototypeResponse, AgentRequest
-from src.orchestration.prototype_service import run_email_agent
 from src.documents.service import DOCUMENT_ROOT
 
 BASE_DIR = Path(__file__).resolve().parent.parent
