@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from functools import lru_cache
 
+from src.ingestion import detect_document_types
 from src.rag.service_page_ingestion import load_service_page_documents
 from src.schemas import (
     ActiveEntityPayload,
@@ -19,7 +20,6 @@ from src.schemas import (
     RoutingSignals,
     TurnResolution,
 )
-from src.strategies import detect_document_types
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:

@@ -11,15 +11,15 @@ It focuses on one concrete problem:
 Example:
 
 - user query: `What is the service plan?`
-- resolved scope: `mRNA-LNP Gene Delivery`
+- resolved object constraint: `service = mRNA-LNP Gene Delivery`
 - desired retrieval target: `service_plan`, `plan_summary`, `service_phase`, or `timeline_overview`
 
-Today the system can often resolve the scope correctly, but retrieval may still rank generic sections such as `service_overview` or `faq` above the intended plan chunk.
+Today the system can often resolve the intended object constraint correctly, but retrieval may still rank generic sections such as `service_overview` or `faq` above the intended plan chunk.
 
 ## Goals
 
 - improve retrieval quality for short multi-turn follow-up questions
-- preserve the current route and scope resolution behavior
+- preserve current technical retrieval behavior while aligning retrieval with the new object-centric stack
 - keep retrieval enhancement deterministic by default
 - add optional LLM-based contextualization only for cases that need it
 - make rewritten and expanded retrieval queries observable in logs and tests
@@ -27,7 +27,7 @@ Today the system can often resolve the scope correctly, but retrieval may still 
 ## Non-Goals
 
 - replacing the existing routing pipeline
-- moving scope resolution into the retriever
+- moving object resolution into the retriever
 - rewriting every query with an LLM
 - broad semantic paraphrasing with no guardrails
 - changing the service-page authoring standard in this phase
@@ -43,27 +43,68 @@ Relevant modules:
 - [service.py](/Users/promab/anaconda_projects/email_agent/src/rag/service.py)
 - [retriever.py](/Users/promab/anaconda_projects/email_agent/src/rag/retriever.py)
 
-Current behavior:
+Current implementation behavior:
 
 - `resolve_effective_scope(...)` determines whether the current turn is scoped to a `service`, `product`, or `scientific_target`
 - route preconditions use that result to decide whether clarification is needed
-- commercial tool selection can choose `technical_rag` when active service scope is valid
+- commercial tool selection can choose `technical_rag` when an active service object constraint is valid
 - `retrieve_chunks(...)` builds query variants from the raw query plus active names and entity lists
 - reranking uses `BAAI/bge-reranker-base`
 
 Current gap:
 
-- scope resolution may succeed, but retrieval still does not always retrieve the best section for broad follow-ups such as `What is your service plan?`
+- object resolution may succeed, but retrieval still does not always retrieve the best section for broad follow-ups such as `What is your service plan?`
+
+## Architectural Alignment
+
+In the current implementation, technical retrieval still talks in terms of
+`effective_scope` and route-time object-constraint checks.
+
+In the target architecture, technical RAG should instead consume:
+
+- `ResolvedObjectState`
+- object-scoped constraints injected by routing or execution planning
+- modality decisions that indicate when unstructured retrieval is needed
+
+So the architectural rule is:
+
+- object resolution happens before RAG
+- RAG consumes resolved object constraints
+- RAG does not own scope resolution as a separate world
+
+### Terminology Note
+
+This document still references `scope` and `resolve_effective_scope(...)` in a
+few places because that is the current implementation vocabulary.
+
+When read against the new architecture, interpret:
+
+- `effective scope`
+  as the current resolved object constraint
+- `scope-gated`
+  as object-gated or object-scoped
+- `scope resolution`
+  as object resolution performed upstream of retrieval
+
+Canonical terms for the target architecture are:
+
+- `ResolvedObjectState`
+- `resolved object constraint`
+- `ExecutionIntent`
+- `ModalityDecision`
 
 ## Design Summary
 
 The enhancement is a hybrid approach:
 
-1. use existing scope resolution as the source of truth
+1. use resolved object constraints as the source of truth
 2. deterministically rewrite short follow-up queries into standalone retrieval queries
 3. optionally add intent-specific keyword expansion
 4. optionally run a small LLM contextualizer only for hard follow-up cases
 5. preserve the original query and perform multi-query retrieval
+
+In the current implementation, step 1 is still powered by `resolve_effective_scope(...)`.
+In the target architecture, that role should move to upstream object resolution.
 
 This keeps the system production-friendly:
 
@@ -78,7 +119,7 @@ The retrieval stack should not treat parser output and raw query text as equally
 
 Instead, retrieval should follow a strict three-tier policy:
 
-### Tier 1: Structured Exact Scope
+### Tier 1: Structured Exact Object Constraint
 
 Use this tier when the parser or registry has already produced a high-confidence structured object:
 
@@ -91,7 +132,7 @@ Expected behavior:
 
 - seed exact identifiers as early as possible
 - prefer exact lookup over alias lookup
-- do not let raw query terms compete with the structured scope
+- do not let raw query terms compete with the structured object constraint
 
 Example:
 
@@ -100,7 +141,7 @@ Example:
 - registry output: unique catalog resolution to `20001`
 - retrieval behavior: exact lookup for `20001`
 
-### Tier 2: Structured but Non-Unique Scope
+### Tier 2: Structured but Non-Unique Object Constraint
 
 Use this tier when the parser has produced a meaningful object, but the object is not unique.
 
@@ -119,7 +160,7 @@ This tier should not fall back to broad raw-query fuzzy retrieval just because m
 
 ### Tier 3: Raw-Query Recovery
 
-Use this tier only when parser output does not provide a stable product or service scope.
+Use this tier only when parser output does not provide a stable product or service object constraint.
 
 Examples:
 
@@ -522,7 +563,7 @@ Suggested rollout:
 3. apply weighted token scoring in Tier 3 only
 4. compare rank shifts on a golden retrieval set before wider rollout
 
-## Step 1: Scope-Gated Deterministic Rewrite
+## Step 1: Object-Gated Deterministic Rewrite
 
 This is the default path.
 
@@ -530,7 +571,7 @@ This is the default path.
 
 Apply deterministic rewrite only when all are true:
 
-- `resolve_effective_scope(...)` returns a non-empty scope
+- upstream object resolution yields a non-empty object-scoped constraint
 - current query is short or context-dependent
 - current query does not already contain the resolved entity name
 - current query is in a technical or technical-adjacent path
@@ -559,14 +600,14 @@ Examples:
 
 Rules:
 
-- only inject the resolved scope name
+- only inject the resolved object name
 - do not invent new details
 - do not convert service questions into product questions
 - keep the rewrite to a single standalone sentence
 
 ## Step 2: Intent Bucket Detection
 
-After scope resolution, classify the retrieval query into a small controlled intent bucket.
+After object resolution, classify the retrieval query into a small controlled intent bucket.
 
 Initial buckets:
 
@@ -592,7 +633,7 @@ Example mappings:
 
 ## Step 3: Controlled Keyword Expansion
 
-When the scope is known and an intent bucket is detected, generate a small set of expansion queries.
+When the object-scoped constraint is known and an intent bucket is detected, generate a small set of expansion queries.
 
 ### `service_plan`
 
@@ -646,7 +687,7 @@ Recommended expansion terms:
 Rules:
 
 - keep expansion lists small
-- expand only when scope is already resolved
+- expand only when the object constraint is already resolved
 - preserve the original query
 - do not expand operational or support-routing questions such as `contact support`
 
@@ -659,7 +700,7 @@ The goal is not to paraphrase broadly. The goal is to increase the odds that ret
 Example:
 
 - user query: `What is your service plan?`
-- resolved scope: `mRNA-LNP Gene Delivery`
+- resolved object constraint: `service = mRNA-LNP Gene Delivery`
 - rewritten query from Phase 1: `What is the service plan for mRNA-LNP Gene Delivery?`
 - desired Phase 2 variants:
   - `mRNA-LNP Gene Delivery discovery services plan`
@@ -670,7 +711,7 @@ This is especially useful when user wording is natural but the indexed documents
 
 ### Problem Statement
 
-The current retriever performs better once scope is resolved, but it can still miss the most relevant chunk when:
+The current retriever performs better once the object constraint is resolved, but it can still miss the most relevant chunk when:
 
 - the user uses broad language such as `plan`, `models`, or `what happens next`
 - the corpus uses richer labels such as `Discovery Services Plan`, `workflow overview`, or `model support`
@@ -678,7 +719,7 @@ The current retriever performs better once scope is resolved, but it can still m
 
 Phase 2 addresses this by generating a few high-signal retrieval variants derived from:
 
-- resolved scope
+- resolved object constraint
 - retrieval intent bucket
 - small curated keyword packs
 
@@ -686,16 +727,16 @@ Phase 2 addresses this by generating a few high-signal retrieval variants derive
 
 - preserve the original query
 - keep all expansion deterministic
-- expand only after effective scope is resolved
+- expand only after the relevant object constraint is resolved
 - keep the number of variants intentionally small
 - prefer section vocabulary already present in the corpus
 - never use expansion to override routing or clarification logic
 
-### Scope Guardrails
+### Object-Constraint Guardrails
 
 Keyword expansion should run only when all of the following are true:
 
-- `resolve_effective_scope(...)` returns a non-empty scope
+- upstream object resolution has already produced a usable scoped constraint
 - the retrieval path is technical or technical-adjacent
 - the query is not clearly operational, sales-contact, or support-routing language
 - the expansion bucket is one of the explicitly supported buckets
@@ -759,7 +800,7 @@ The words should be taken from existing indexed section labels and chunk tags wh
 
 ### Query Construction Strategy
 
-For each supported bucket, expansion queries should be generated from the resolved scope name plus each term in the pack.
+For each supported bucket, expansion queries should be generated from the resolved object name plus each term in the pack.
 
 Example for `service_plan`:
 
@@ -775,7 +816,7 @@ Example for `service_plan`:
 
 The construction rule should be simple:
 
-- use `"{scope_name} {expansion_term}"` for most variants
+- use `"{object_name} {expansion_term}"` for most variants
 - dedupe against the original query and rewritten query
 - cap the total number of expansion variants per request
 
@@ -828,25 +869,25 @@ In [service.py](/Users/promab/anaconda_projects/email_agent/src/rag/service.py):
 Add a helper such as:
 
 ```python
-def _build_expanded_queries(scope: Mapping[str, str], intent_bucket: str) -> list[str]:
+def _build_expanded_queries(resolved_object: Mapping[str, str], intent_bucket: str) -> list[str]:
     ...
 ```
 
 Responsibilities:
 
-- return an empty list when no scope is available
+- return an empty list when no object-scoped constraint is available
 - return an empty list when the bucket is unsupported
-- combine scope name with expansion terms
+- combine resolved object name with expansion terms
 - dedupe and cap the final result
 
 #### 3. Integrate It Into `build_retrieval_queries(...)`
 
 Flow:
 
-1. resolve effective scope
+1. consume resolved object constraint
 2. detect intent bucket
 3. perform deterministic rewrite
-4. build expanded queries from scope + bucket
+4. build expanded queries from object name + bucket
 5. return the plan
 
 This keeps all retrieval-prep logic in one place.
@@ -929,7 +970,7 @@ Mitigations:
 
 - small fixed packs
 - hard cap on variant count
-- scope gating
+- object gating
 - explicit support-intent denylist
 - regression tests built around expected section families
 
@@ -954,7 +995,7 @@ Suggested triggers:
 
 - query contains pronouns or nominal references
 - query is short and ambiguous
-- scope is known but deterministic rewrite would still be awkward
+- the resolved object constraint is known but deterministic rewrite would still be awkward
 - no explicit entity appears in the current turn
 
 ### Prompt Contract
@@ -978,8 +1019,8 @@ Rules:
 - Do not add facts not present in the current turn or resolved context.
 - Return one standalone search query only.
 
-Resolved scope:
-- scope_type: service
+Resolved object constraint:
+- object_type: service
 - name: mRNA-LNP Gene Delivery
 
 Current user query:
@@ -1047,9 +1088,9 @@ Every retrieval run should expose enough metadata to explain what happened.
 
 Recommended debug fields:
 
-- `effective_scope_type`
-- `effective_scope_name`
-- `effective_scope_source`
+- `resolved_object_type`
+- `resolved_object_name`
+- `resolved_object_source`
 - `rewrite_reason`
 - `intent_bucket`
 - `rewritten_query`
@@ -1062,7 +1103,7 @@ These fields should be easy to surface in:
 - test snapshots
 - future routing or retrieval debug traces
 
-## Response-Level Scope Acknowledgement
+## Response-Level Object Acknowledgement
 
 The retrieval layer should remain structured and machine-oriented, but the final user-facing response may lightly acknowledge the resolved object type when doing so improves clarity.
 
@@ -1071,7 +1112,7 @@ This is especially useful when:
 - the current turn is a short follow-up
 - the system resolved the object from active context
 - the conversation switched from one object type to another
-- the user would benefit from seeing that the system recognized the intended scope correctly
+- the user would benefit from seeing that the system recognized the intended object correctly
 
 ### Design Principle
 
@@ -1079,20 +1120,20 @@ Do not put user-facing phrasing into `RetrievalQueryPlan`.
 
 `RetrievalQueryPlan` should only carry structured fields such as:
 
-- `effective_scope`
+- `resolved_object_constraint`
 - `rewritten_query`
 - `rewrite_reason`
 - `intent_bucket`
 
-The final response layer may consume those fields and decide whether to briefly acknowledge the resolved scope.
+The final response layer may consume those fields and decide whether to briefly acknowledge the resolved object naturally.
 
 ### Example Phrasing
 
-For product scope:
+For product responses:
 
 - `Regarding the product you mentioned, Mouse Monoclonal antibody to Nucleophosmin (Catalog #20001), here is the relevant information.`
 
-For service scope:
+For service responses:
 
 - `Regarding the service you mentioned, mRNA-LNP Gene Delivery, here is the relevant information.`
 
@@ -1104,20 +1145,20 @@ For active-context fallback when the current turn is still somewhat implicit:
 
 - keep the acknowledgement to one short clause
 - do not repeat the object name in every reply
-- do not sound overly certain when the scope came from fallback rather than an explicit current-turn mention
-- do not expose internal labels such as `effective_scope` or `intent_bucket`
+- do not sound overly certain when the object constraint came from fallback rather than an explicit current-turn mention
+- do not expose internal labels such as `resolved_object_constraint` or `intent_bucket`
 - prefer this acknowledgement when the system resolved a non-obvious type switch such as `service -> product` or `product -> service`
 
 ### Recommended Data Contract
 
 The response layer should have access to:
 
-- `effective_scope_type`
-- `effective_scope_name`
-- `effective_scope_source`
+- `resolved_object_type`
+- `resolved_object_name`
+- `resolved_object_source`
 - optional product identifier details when available, such as catalog number
 
-This allows the renderer to express the resolved scope naturally without coupling response wording to retrieval internals.
+This allows the renderer to express the resolved object naturally without coupling response wording to retrieval internals.
 
 ## MVP Stability Notes
 
@@ -1137,9 +1178,9 @@ Mitigation:
 
 - keep the internal type switch deterministic and structured
 - optionally add one short user-facing acknowledgement in the response layer
-- prefer this acknowledgement when the resolved scope came from active context or when the type changed relative to the prior turn
+- prefer this acknowledgement when the resolved object came from active context or when the type changed relative to the prior turn
 
-This is why response-level scope acknowledgement is included in this design.
+This is why response-level object acknowledgement is included in this design.
 
 ### 2. Multi-Entity Turns
 
@@ -1194,18 +1235,18 @@ Risk:
 
 Mitigation:
 
-- if there is no valid effective scope, do not inject any entity into the retrieval query
+- if there is no valid resolved object constraint, do not inject any entity into the retrieval query
 - if the active context is unavailable or unusable, do not generate contextual rewrites
 - fall back to the original query only
 - allow route-level clarification to ask the user which product or service they mean
 
 Required behavior:
 
-- no valid active scope
+- no valid active object constraint
   - `rewritten_query = ""`
-  - no scope-based expansion
-  - `rewrite_reason` should explain that no valid scope was available
-- referential query with no usable scope
+  - no object-based expansion
+  - `rewrite_reason` should explain that no valid object constraint was available
+- referential query with no usable object constraint
   - do not guess
   - do not revive stale entities
   - prefer clarification over speculative retrieval
@@ -1220,9 +1261,9 @@ This is a deliberate safe-failure policy:
 Recommended order:
 
 1. stop service/product type pollution in active context
-2. add response-level scope acknowledgement for non-obvious type continuity or type switches
+2. add response-level object acknowledgement for non-obvious type continuity or type switches
 3. add conservative identifier normalization
-4. add safe failure behavior when referential queries have no valid active scope
+4. add safe failure behavior when referential queries have no valid active object constraint
 5. defer multi-entity active-state redesign until after the first production evaluation
 
 This keeps the first implementation small, testable, and easy to reason about.
@@ -1241,10 +1282,10 @@ Skip rewrite when:
 
 Do not inject old entities when:
 
-- current turn has a new scope
+- current turn has a new explicit object
 - continuity gates fail
 - active entity type conflicts with the current turn
-- no valid active scope is available for a referential follow-up
+- no valid active object constraint is available for a referential follow-up
 - active context appears stale, expired, or otherwise unusable
 
 ### Avoid Hallucinated Context
@@ -1252,7 +1293,7 @@ Do not inject old entities when:
 The rewrite layer may only use:
 
 - original retrieval query
-- resolved effective scope
+- resolved object constraint
 - bounded retrieval intent heuristics
 
 It may not invent:
@@ -1261,15 +1302,15 @@ It may not invent:
 - prices
 - phase counts
 - model names
-- fallback entities when no valid scope exists
+- fallback entities when no valid object constraint exists
 
 ## Evaluation Plan
 
 Before rollout, define a compact eval set with:
 
 - original query
-- active scope
-- expected scope type
+- active object constraint
+- expected object type
 - expected top service
 - expected top section types
 
@@ -1299,7 +1340,7 @@ Metrics:
 ### Phase 1
 
 - add `RetrievalQueryPlan`
-- deterministic scope-based rewrite only
+- deterministic object-based rewrite only
 - preserve original query
 - add debug fields
 - add eval cases
@@ -1341,7 +1382,7 @@ Metrics:
 
 Start with the smallest production-safe change:
 
-- deterministic scope-based rewrite
+- deterministic object-based rewrite
 - `service_plan` intent expansion
 - debug trace output
 - eval set for top section-type hit rate

@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.ingestion import classify_identifier_candidates, strip_identifier_missing_information
 from src.schemas import ParsedResult, ReferenceResolution, TurnResolution
-from src.strategies import (
-    classify_identifier_candidates,
-    strip_identifier_missing_information,
-)
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:

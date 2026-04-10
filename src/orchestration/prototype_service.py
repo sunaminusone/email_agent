@@ -6,11 +6,10 @@ from src.context import ContextProvider
 from src.memory import SessionStore
 from src.schemas import AgentContext
 from src.schemas.chat_schema import AgentPrototypeResponse, AgentRequest
-from src.conversation.agent_input_service import build_agent_input
+from src.conversation.agent_input_service import make_agent_input
 from src.decision.response_service import build_response_artifacts
 from src.decision.route_decision_service import route_agent_input
 from src.orchestration.executor_service import execute_plan
-from src.parser.service import parse_user_input
 from src.orchestration.planner_service import build_execution_plan
 
 
@@ -193,16 +192,9 @@ def run_email_agent(request: Union[AgentRequest, dict]) -> AgentPrototypeRespons
     history = _merge_histories(persisted_history, request_history)
     attachments = [attachment.model_dump() for attachment in request.attachments]
 
-    parsed = parse_user_input(
+    agent_input = make_agent_input(
         user_query=request.user_query,
-        conversation_history=history,
-        attachments=attachments,
-    )
-
-    agent_input = build_agent_input(
         thread_id=request.thread_id,
-        original_query=request.user_query,
-        parsed=parsed,
         conversation_history=history,
         attachments=attachments,
     )

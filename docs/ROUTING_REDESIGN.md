@@ -17,6 +17,28 @@ Instead, routing should become a layered decision stack that answers four questi
 3. what information modality is needed?
 4. what tools should be executed?
 
+## Canonical Naming
+
+To keep the design documents aligned, the routing stack should use the
+following standard terms:
+
+- `IngestionBundle`
+  - the output of the ingestion layer
+- `ResolvedObjectState`
+  - the output of the objects layer
+- `DialogueActResult`
+  - the normalized interaction-act subcontract resolved inside routing
+- `ModalityDecision`
+  - the normalized information-modality subcontract resolved inside routing
+- `ExecutionIntent`
+  - the output of routing and the input to execution planning
+- `resolved object constraint`
+  - the preferred term for the object-scoped constraint passed into tools,
+    instead of older vocabulary such as `effective scope` or `resolved scope`
+
+Avoid mixing these with older names when the new architecture is being
+described.
+
 ## Boundary Contract
 
 Routing sits after `objects`, not above it.
@@ -25,7 +47,7 @@ That means:
 
 - `ingestion` produces `IngestionBundle`
 - `objects` consumes `IngestionBundle` and produces `ResolvedObjectState`
-- `routing` consumes `ResolvedObjectState` and decides what to do next
+- `routing` consumes `ResolvedObjectState`, performs its internal decision steps, and emits `ExecutionIntent`
 
 So routing should not directly:
 
@@ -85,9 +107,9 @@ It should coordinate the flow like this:
 2. classify dialogue act
 3. choose modality
 4. choose tools
-5. execute tools
-6. assemble tool results
-7. synthesize the answer
+5. emit one execution intent
+6. let downstream execution run tools
+7. let downstream response synthesize the answer
 
 The orchestrator should not embed lookup logic itself.
 
@@ -190,8 +212,11 @@ Only after those are answered should the system choose tools.
 Routing should consume:
 
 - `ResolvedObjectState`
+
+Routing should internally resolve:
+
 - `DialogueActResult`
-- optional modality hints derived from the resolved object and current turn
+- `ModalityDecision`
 
 Routing should not consume:
 
@@ -199,6 +224,101 @@ Routing should not consume:
 - direct session storage
 - direct registry lookups
 - ad hoc object candidates that bypass the objects layer
+
+Routing should emit:
+
+- `ExecutionIntent`
+
+## Internal Routing Subcontracts
+
+### `DialogueActResult`
+
+Suggested fields:
+
+```python
+{
+    "act": "INQUIRY" | "SELECTION" | "ACKNOWLEDGE" | "TERMINATE" | "ELABORATE" | "UNKNOWN",
+    "confidence": float,
+    "reason": str,
+    "matched_signals": list[str],
+    "requires_active_object": bool,
+    "selection_value": str,
+}
+```
+
+Recommended interpretation:
+
+- `act`
+  - the normalized interaction type for the current turn
+- `matched_signals`
+  - lightweight traceability for why the act was chosen
+- `requires_active_object`
+  - whether the act only makes sense in the presence of an already-resolved object
+- `selection_value`
+  - the raw selection token when the act is `SELECTION`
+
+This contract should be narrow. It should describe the interaction move, not
+the full object or tool plan.
+
+Important note:
+
+- this is a routing-internal subcontract
+- it should normally be embedded into `ExecutionIntent`, not exposed as a separate top-level layer boundary
+
+### `ModalityDecision`
+
+Suggested fields:
+
+```python
+{
+    "primary_modality": "structured_lookup" | "unstructured_retrieval" | "external_api" | "hybrid" | "unknown",
+    "supporting_modalities": list[str],
+    "confidence": float,
+    "reason": str,
+    "requires_structured_facts": bool,
+    "requires_unstructured_context": bool,
+    "requires_external_system": bool,
+}
+```
+
+Recommended interpretation:
+
+- `primary_modality`
+  - the main information modality needed for this turn
+- `supporting_modalities`
+  - additional modalities allowed or preferred for hybrid execution
+- `requires_*`
+  - execution-facing convenience flags for tool planning
+
+This contract should come after object resolution and dialogue-act resolution.
+It should not be derived directly from parser output.
+
+Important note:
+
+- this is a routing-internal subcontract
+- it should normally be embedded into `ExecutionIntent`, not exposed as a separate upstream boundary
+
+## External Routing Contract
+
+### `ExecutionIntent`
+
+Routing should ultimately emit one compact execution-facing contract, for example:
+
+```python
+{
+    "primary_object": ObjectCandidate | None,
+    "secondary_objects": list[ObjectCandidate],
+    "ambiguous_sets": list[AmbiguousObjectSet],
+    "dialogue_act": DialogueActResult,
+    "modality_decision": ModalityDecision,
+    "selected_tools": list[str],
+    "needs_clarification": bool,
+    "handoff_required": bool,
+    "reason": str,
+}
+```
+
+This keeps the router focused on decision-making rather than direct execution.
 
 ### Layer 1: Object Routing
 

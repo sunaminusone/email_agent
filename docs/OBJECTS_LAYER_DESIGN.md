@@ -223,14 +223,55 @@ Suggested fields:
     "object_type": "product" | "service" | "order" | "invoice" | "shipment" | "document" | "customer" | "scientific_target",
     "raw_value": str,
     "canonical_value": str,
+    "display_name": str,
     "identifier": str,
     "identifier_type": str,
+    "business_line": str,
     "confidence": float,
-    "source": str,
+    "recency": "CURRENT_TURN" | "CONTEXTUAL",
+    "source_type": "parser" | "deterministic" | "stateful_anchor",
+    "evidence_spans": list[EntitySpan],
     "metadata": dict,
     "is_ambiguous": bool,
 }
 ```
+
+Recommended interpretation:
+
+- `raw_value`
+  - the unresolved surface form that triggered this candidate
+- `canonical_value`
+  - the normalized lookup value or canonical object name
+- `display_name`
+  - the human-friendly label preferred for responses and UI
+- `identifier` and `identifier_type`
+  - the strongest structured anchor currently available
+- `recency` and `source_type`
+  - preserve the evidentiary strength of the candidate
+- `evidence_spans`
+  - preserve traceability back to ingestion-time signals
+
+This is important because the objects layer should not flatten away the
+provenance information already captured by ingestion.
+
+### `AmbiguousObjectSet`
+
+Suggested fields:
+
+```python
+{
+    "object_type": "product" | "service" | "order" | "invoice" | "shipment" | "document" | "customer" | "scientific_target",
+    "trigger_value": str,
+    "reason": str,
+    "candidates": list[ObjectCandidate],
+}
+```
+
+Use this when:
+
+- one alias maps to many products
+- one service alias maps to many service candidates
+- the system must preserve a clarification-worthy ambiguity set
 
 ### `ObjectBundle`
 
@@ -253,11 +294,28 @@ Suggested fields:
 {
     "primary_object": ObjectCandidate | None,
     "secondary_objects": list[ObjectCandidate],
-    "ambiguous_objects": list[ObjectCandidate],
+    "ambiguous_sets": list[AmbiguousObjectSet],
     "active_object": ObjectCandidate | None,
+    "used_stateful_anchor": bool,
+    "resolution_confidence": float,
     "resolution_reason": str,
 }
 ```
+
+Recommended interpretation:
+
+- `primary_object`
+  - the current best object for execution
+- `secondary_objects`
+  - additional resolved objects that remain relevant but not dominant
+- `ambiguous_sets`
+  - clarification-worthy unresolved candidate groups
+- `active_object`
+  - the object that should remain active for follow-up continuity
+- `used_stateful_anchor`
+  - whether resolution required contextual reuse
+- `resolution_confidence`
+  - the confidence of the final resolved object state, not the parser alone
 
 ## Extraction Rules
 
@@ -344,9 +402,9 @@ This layer should later feed:
 - `memory/`
   - for active object persistence
 - `tools/`
-  - as scoped constraints
+  - as resolved object constraints
 - `response/`
-  - as resolved scope/context metadata
+  - as resolved object/context metadata
 
 ## Migration Strategy
 
