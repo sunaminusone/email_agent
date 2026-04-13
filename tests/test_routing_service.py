@@ -5,16 +5,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ingestion.models import IngestionBundle, ParserContext, ParserSignals, TurnCore, TurnSignals
+from src.ingestion.models import (
+    IngestionBundle,
+    ParserContext,
+    ParserRequestFlags,
+    ParserSignals,
+    TurnCore,
+    TurnSignals,
+)
+from src.common.models import IntentGroup
+from src.ingestion import build_demand_profile
 from src.objects.models import AmbiguousObjectSet, ObjectCandidate, ResolvedObjectState
+from src.routing.orchestrator import route
 from src.routing.runtime import (
-    build_execution_intent_from_ingestion_bundle,
     build_routing_input_from_ingestion,
-    route_from_ingestion_bundle,
+    route_v3_from_ingestion_bundle,
 )
 
 
-def test_product_technical_question_routes_to_hybrid_tools():
+def test_product_inquiry_routes_to_execute():
     ingestion_bundle = IngestionBundle(
         turn_core=TurnCore(
             raw_query="What applications is this antibody validated for?",
@@ -36,18 +45,17 @@ def test_product_technical_question_routes_to_hybrid_tools():
         resolution_reason="Selected the strongest current-turn object candidate.",
     )
 
-    intent = build_execution_intent_from_ingestion_bundle(
+    decision = route_v3_from_ingestion_bundle(
         ingestion_bundle=ingestion_bundle,
         resolved_object_state=resolved,
     )
 
-    assert intent.dialogue_act.act == "INQUIRY"
-    assert intent.modality_decision.primary_modality == "hybrid"
-    assert intent.selected_tools == ["catalog_lookup_tool", "technical_rag_tool"]
-    assert intent.needs_clarification is False
+    assert decision.action == "execute"
+    assert decision.dialogue_act.act == "inquiry"
+    assert decision.clarification is None
 
 
-def test_service_plan_routes_to_technical_rag():
+def test_service_inquiry_routes_to_execute():
     ingestion_bundle = IngestionBundle(
         turn_core=TurnCore(
             raw_query="What is your service plan for this workflow?",
@@ -67,16 +75,16 @@ def test_service_plan_routes_to_technical_rag():
         resolution_reason="Selected the strongest current-turn object candidate.",
     )
 
-    intent = build_execution_intent_from_ingestion_bundle(
+    decision = route_v3_from_ingestion_bundle(
         ingestion_bundle=ingestion_bundle,
         resolved_object_state=resolved,
     )
 
-    assert intent.modality_decision.primary_modality == "unstructured_retrieval"
-    assert intent.selected_tools == ["technical_rag_tool"]
+    assert decision.action == "execute"
+    assert decision.dialogue_act.act == "inquiry"
 
 
-def test_ambiguous_object_routes_to_clarification():
+def test_ambiguous_object_routes_to_clarify():
     ingestion_bundle = IngestionBundle(
         turn_core=TurnCore(
             raw_query="Tell me about cd19",
@@ -100,16 +108,16 @@ def test_ambiguous_object_routes_to_clarification():
         resolution_reason="No primary object was selected because clarification-worthy ambiguity remains.",
     )
 
-    intent = build_execution_intent_from_ingestion_bundle(
+    decision = route_v3_from_ingestion_bundle(
         ingestion_bundle=ingestion_bundle,
         resolved_object_state=resolved,
     )
 
-    assert intent.needs_clarification is True
-    assert intent.selected_tools == []
+    assert decision.action == "clarify"
+    assert decision.clarification is not None
 
 
-def test_order_tracking_routes_to_external_tools():
+def test_order_tracking_routes_to_execute():
     ingestion_bundle = IngestionBundle(
         turn_core=TurnCore(
             raw_query="Can you check the shipping status for order SO-12345?",
@@ -130,44 +138,189 @@ def test_order_tracking_routes_to_external_tools():
         resolution_reason="Selected the strongest current-turn object candidate.",
     )
 
-    intent = build_execution_intent_from_ingestion_bundle(
+    decision = route_v3_from_ingestion_bundle(
         ingestion_bundle=ingestion_bundle,
         resolved_object_state=resolved,
     )
 
-    assert intent.modality_decision.primary_modality == "external_api"
-    assert intent.selected_tools == ["order_lookup_tool", "shipping_lookup_tool"]
+    assert decision.action == "execute"
+    assert decision.dialogue_act.act == "inquiry"
 
 
-def test_runtime_returns_routing_decision_directly():
+def test_acknowledgement_routes_to_respond():
     ingestion_bundle = IngestionBundle(
         turn_core=TurnCore(
-            raw_query="What applications is this antibody validated for?",
-            normalized_query="What applications is this antibody validated for?",
+            raw_query="Thanks, got it",
+            normalized_query="Thanks, got it",
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(context=ParserContext())
         ),
     )
     resolved = ResolvedObjectState(
-        primary_object=ObjectCandidate(
-            object_type="product",
-            canonical_value="Rabbit Polyclonal antibody to MSH2",
-            display_name="Rabbit Polyclonal antibody to MSH2",
-            identifier="P06329",
-            identifier_type="catalog_number",
-            confidence=0.95,
-        ),
-        resolution_reason="Selected the strongest current-turn object candidate.",
+        resolution_reason="No object found.",
     )
 
-    decision = route_from_ingestion_bundle(
+    decision = route_v3_from_ingestion_bundle(
         ingestion_bundle=ingestion_bundle,
         resolved_object_state=resolved,
     )
 
-    assert decision.route_name == "execution"
-    assert decision.execution_intent.selected_tools == ["catalog_lookup_tool", "technical_rag_tool"]
+    assert decision.action == "respond"
+    assert decision.dialogue_act.act == "closing"
+
+
+def test_termination_routes_to_respond():
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="bye",
+            normalized_query="bye",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(context=ParserContext())
+        ),
+    )
+    resolved = ResolvedObjectState(
+        resolution_reason="No object found.",
+    )
+
+    decision = route_v3_from_ingestion_bundle(
+        ingestion_bundle=ingestion_bundle,
+        resolved_object_state=resolved,
+    )
+
+    assert decision.action == "respond"
+    assert decision.dialogue_act.act == "closing"
+    assert "terminate_pattern" in decision.dialogue_act.matched_signals
+
+
+def test_technical_question_without_object_routes_to_execute():
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="What is the CAR-T cell therapy development workflow?",
+            normalized_query="What is the CAR-T cell therapy development workflow?",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(primary_intent="technical_question"),
+                request_flags=ParserRequestFlags(needs_protocol=True),
+            )
+        ),
+    )
+    resolved = ResolvedObjectState(
+        resolution_reason="No object found.",
+    )
+    focus_group = IntentGroup(
+        intent="technical_question",
+        request_flags=["needs_protocol"],
+        confidence=0.8,
+    )
+    demand_profile = build_demand_profile(
+        ingestion_bundle.turn_signals.parser_signals, [focus_group],
+    )
+
+    decision = route(
+        ingestion_bundle, resolved,
+        focus_group=focus_group, demand_profile=demand_profile,
+    )
+
+    assert decision.action == "execute"
+    assert decision.dialogue_act.act == "inquiry"
+
+
+def test_troubleshooting_without_object_routes_to_execute():
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="How should I troubleshoot this product?",
+            normalized_query="How should I troubleshoot this product?",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(primary_intent="troubleshooting"),
+                request_flags=ParserRequestFlags(needs_troubleshooting=True),
+            )
+        ),
+    )
+    resolved = ResolvedObjectState(
+        resolution_reason="No object found.",
+    )
+    focus_group = IntentGroup(
+        intent="troubleshooting",
+        request_flags=["needs_troubleshooting"],
+        confidence=0.8,
+    )
+    demand_profile = build_demand_profile(
+        ingestion_bundle.turn_signals.parser_signals, [focus_group],
+    )
+
+    decision = route(
+        ingestion_bundle, resolved,
+        focus_group=focus_group, demand_profile=demand_profile,
+    )
+
+    assert decision.action == "execute"
+    assert decision.dialogue_act.act == "inquiry"
+
+
+def test_recommendation_without_object_routes_to_execute():
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="What technical recommendations do you have for this target?",
+            normalized_query="What technical recommendations do you have for this target?",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(primary_intent="technical_question"),
+                request_flags=ParserRequestFlags(needs_recommendation=True),
+            )
+        ),
+    )
+    resolved = ResolvedObjectState(
+        resolution_reason="No object found.",
+    )
+    focus_group = IntentGroup(
+        intent="technical_question",
+        request_flags=["needs_recommendation"],
+        confidence=0.8,
+    )
+    demand_profile = build_demand_profile(
+        ingestion_bundle.turn_signals.parser_signals, [focus_group],
+    )
+
+    decision = route(
+        ingestion_bundle, resolved,
+        focus_group=focus_group, demand_profile=demand_profile,
+    )
+
+    assert decision.action == "execute"
+    assert decision.dialogue_act.act == "inquiry"
+
+
+def test_high_risk_routes_to_handoff():
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="I need to report a serious quality issue",
+            normalized_query="I need to report a serious quality issue",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(
+                    risk_level="high",
+                    needs_human_review=True,
+                )
+            )
+        ),
+    )
+    resolved = ResolvedObjectState(
+        resolution_reason="No object found.",
+    )
+
+    decision = route_v3_from_ingestion_bundle(
+        ingestion_bundle=ingestion_bundle,
+        resolved_object_state=resolved,
+    )
+
+    assert decision.action == "handoff"
 
 
 def test_runtime_projects_routing_input_from_ingestion_bundle():
@@ -207,40 +360,111 @@ def test_runtime_projects_routing_input_from_ingestion_bundle():
     assert routing_input.needs_human_review is True
 
 
-def test_runtime_can_route_directly_from_ingestion_bundle():
+def test_weak_technical_confidence_cannot_execute_without_object():
+    """C3: demand_confidence < 0.3 blocks execution without object — routes to respond."""
     ingestion_bundle = IngestionBundle(
         turn_core=TurnCore(
-            raw_query="Can you check the shipping status for order SO-12345?",
-            normalized_query="Can you check the shipping status for order SO-12345?",
+            raw_query="hmm maybe something technical",
+            normalized_query="hmm maybe something technical",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(context=ParserContext())
+        ),
+    )
+    resolved = ResolvedObjectState(
+        resolution_reason="No object found.",
+    )
+    focus_group = IntentGroup(
+        intent="unknown",
+        confidence=0.3,
+    )
+    demand_profile = build_demand_profile(
+        ingestion_bundle.turn_signals.parser_signals, [focus_group],
+    )
+    # Verify confidence is indeed weak (0.4 from unknown intent, no flags)
+    assert demand_profile.group_demands[0].demand_confidence < 0.5
+
+    decision = route(
+        ingestion_bundle, resolved,
+        focus_group=focus_group, demand_profile=demand_profile,
+    )
+
+    # Without object AND weak confidence → cannot execute → respond
+    assert decision.action == "respond"
+
+
+def test_technical_with_resolved_object_routes_to_execute():
+    """C4: Technical demand + resolved product object → execute (straightforward)."""
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="What is the protocol for this CD3 antibody?",
+            normalized_query="What is the protocol for this CD3 antibody?",
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(
-                    risk_level="low",
-                    needs_human_review=False,
-                )
+                context=ParserContext(primary_intent="technical_question"),
+                request_flags=ParserRequestFlags(needs_protocol=True),
             )
         ),
     )
     resolved = ResolvedObjectState(
         primary_object=ObjectCandidate(
-            object_type="order",
-            display_name="Order SO-12345",
-            identifier="SO-12345",
-            identifier_type="order_number",
-            confidence=0.94,
+            object_type="product",
+            canonical_value="Anti-CD3 Antibody",
+            display_name="Anti-CD3 Antibody",
+            identifier="AB-100",
+            identifier_type="catalog_number",
+            confidence=0.95,
         ),
         resolution_reason="Selected the strongest current-turn object candidate.",
     )
+    focus_group = IntentGroup(
+        intent="technical_question",
+        request_flags=["needs_protocol"],
+        object_type="product",
+        object_identifier="AB-100",
+        object_display_name="Anti-CD3 Antibody",
+        confidence=0.85,
+    )
+    demand_profile = build_demand_profile(
+        ingestion_bundle.turn_signals.parser_signals, [focus_group],
+    )
 
-    decision = route_from_ingestion_bundle(
+    decision = route(
+        ingestion_bundle, resolved,
+        focus_group=focus_group, demand_profile=demand_profile,
+    )
+
+    # Has object + technical demand → execute
+    assert decision.action == "execute"
+    assert decision.dialogue_act.act == "inquiry"
+
+
+def test_elaboration_routes_to_execute_with_continuation():
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="Tell me more about this",
+            normalized_query="Tell me more about this",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(context=ParserContext())
+        ),
+    )
+    resolved = ResolvedObjectState(
+        primary_object=ObjectCandidate(
+            object_type="product",
+            canonical_value="Anti-CD3 Antibody",
+            display_name="Anti-CD3 Antibody",
+            confidence=0.90,
+        ),
+        resolution_reason="Active object reused.",
+    )
+
+    decision = route_v3_from_ingestion_bundle(
         ingestion_bundle=ingestion_bundle,
         resolved_object_state=resolved,
     )
-    intent = build_execution_intent_from_ingestion_bundle(
-        ingestion_bundle=ingestion_bundle,
-        resolved_object_state=resolved,
-    )
 
-    assert decision.route_name == "execution"
-    assert intent.selected_tools == ["order_lookup_tool", "shipping_lookup_tool"]
+    assert decision.action == "execute"
+    assert decision.dialogue_act.act == "inquiry"
+    assert decision.dialogue_act.is_continuation is True

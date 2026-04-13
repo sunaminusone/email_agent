@@ -15,12 +15,13 @@ from src.ingestion.models import (
     SourceAttribution,
     StatefulAnchors,
     TurnSignals,
-    ValueSignal,
 )
+from src.common.models import ObjectRef
+from src.memory.models import ScoredObjectRef
 from src.objects.constraint_matching import candidate_matches_constraint
 from src.objects.extraction import extract_object_bundle
 from src.objects.models import ObjectCandidate
-from src.objects.resolution import resolve_object_state
+from src.objects.resolution import resolve_object_state, resolve_objects
 
 
 def _constraint(attribute: str, value: str) -> AttributeConstraint:
@@ -28,6 +29,17 @@ def _constraint(attribute: str, value: str) -> AttributeConstraint:
         attribute=attribute,
         value=value,
         attribution=SourceAttribution(source_type="deterministic", recency="CURRENT_TURN"),
+    )
+
+
+def _scored_ref(display_name: str, identifier: str, salience: float, object_type: str = "product") -> ScoredObjectRef:
+    return ScoredObjectRef(
+        object_ref=ObjectRef(
+            object_type=object_type,
+            identifier=identifier,
+            display_name=display_name,
+        ),
+        salience=salience,
     )
 
 
@@ -64,14 +76,12 @@ def test_referential_constraints_target_context_candidates_only():
                 attribute_constraints=[_constraint("species", "human")],
             ),
         ),
-        stateful_anchors=StatefulAnchors(
-            active_entity_kind=ValueSignal(value="product"),
-            active_entity_identifier=ValueSignal(value="P00001"),
-            active_entity_display_name=ValueSignal(value="Rabbit Polyclonal antibody to ACTB"),
-        ),
     )
+    recent = [
+        _scored_ref("Rabbit Polyclonal antibody to ACTB", "P00001", salience=0.8),
+    ]
 
-    resolved = resolve_object_state(bundle, extract_object_bundle(bundle))
+    resolved = resolve_objects(bundle, recent_objects=recent)
 
     assert resolved.primary_object is None
     assert (
@@ -194,3 +204,136 @@ def test_service_species_constraint_does_not_reuse_product_style_matching():
     )
 
     assert candidate_matches_constraint(candidate, _constraint("species", "human")) is False
+
+
+# ---------------------------------------------------------------------------
+# v3: Phase-aware resolution
+# ---------------------------------------------------------------------------
+
+def test_fresh_start_blocks_context_reuse():
+    """On fresh_start, context objects should not be reused even if reference signals allow it."""
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(
+            reference_signals=ReferenceSignals(
+                is_context_dependent=True,
+                reference_mode="active",
+            ),
+        ),
+    )
+    recent = [_scored_ref("Some Product", "P00001", salience=0.8)]
+
+    resolved = resolve_objects(bundle, trajectory_phase="fresh_start", recent_objects=recent)
+
+    assert resolved.primary_object is None
+    assert resolved.resolution_phase == "unresolved"
+
+
+def test_follow_up_allows_context_reuse():
+    """On follow_up, context objects should be reused when reference signals support it."""
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(
+            reference_signals=ReferenceSignals(
+                is_context_dependent=True,
+                reference_mode="active",
+            ),
+        ),
+    )
+    recent = [_scored_ref("Some Product", "P00001", salience=0.8)]
+
+    resolved = resolve_objects(bundle, trajectory_phase="follow_up", recent_objects=recent)
+
+    assert resolved.primary_object is not None
+    assert resolved.primary_object.display_name == "Some Product"
+    assert resolved.resolution_phase == "context_reuse"
+
+
+def test_topic_switch_demotes_context_candidates():
+    """On topic_switch, context candidates get confidence penalty and context reuse is blocked."""
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(
+            reference_signals=ReferenceSignals(
+                is_context_dependent=True,
+                reference_mode="active",
+            ),
+        ),
+    )
+    recent = [_scored_ref("Some Product", "P00001", salience=0.8)]
+
+    resolved = resolve_objects(bundle, trajectory_phase="topic_switch", recent_objects=recent)
+
+    # topic_switch blocks context reuse
+    assert resolved.primary_object is None
+    assert resolved.resolution_phase == "unresolved"
+
+
+def test_resolution_phase_current_turn():
+    """When a current-turn candidate wins, resolution_phase should be 'current_turn'."""
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                entities=ParserEntitySignals(
+                    service_names=[EntitySpan(text="Flow Cytometry")],
+                )
+            ),
+        )
+    )
+
+    resolved = resolve_object_state(bundle, extract_object_bundle(bundle))
+
+    assert resolved.primary_object is not None
+    assert resolved.resolution_phase == "current_turn"
+
+
+# ---------------------------------------------------------------------------
+# v3: active_object decoupled from primary_object
+# ---------------------------------------------------------------------------
+
+def test_active_object_from_memory_when_no_primary():
+    """When no primary_object is resolved, active_object should come from memory recent_objects."""
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(),
+    )
+    recent = [
+        _scored_ref("Anti-CD3 Antibody", "P00042", salience=0.8),
+        _scored_ref("Anti-CD19 Antibody", "P00051", salience=0.4),
+    ]
+
+    resolved = resolve_objects(bundle, recent_objects=recent)
+
+    assert resolved.primary_object is None
+    assert resolved.active_object is not None
+    assert resolved.active_object.display_name == "Anti-CD3 Antibody"
+    assert resolved.active_object.identifier == "P00042"
+
+
+def test_active_object_equals_primary_when_primary_exists():
+    """When primary_object exists, active_object should equal primary_object."""
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                entities=ParserEntitySignals(
+                    service_names=[EntitySpan(text="Flow Cytometry")],
+                )
+            ),
+        )
+    )
+    recent = [
+        _scored_ref("Anti-CD3 Antibody", "P00042", salience=0.8),
+    ]
+
+    resolved = resolve_objects(bundle, recent_objects=recent)
+
+    assert resolved.primary_object is not None
+    assert resolved.active_object == resolved.primary_object
+
+
+def test_active_object_none_when_no_primary_and_no_memory():
+    """When no primary and no memory context, active_object should be None."""
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(),
+    )
+
+    resolved = resolve_objects(bundle)
+
+    assert resolved.primary_object is None
+    assert resolved.active_object is None

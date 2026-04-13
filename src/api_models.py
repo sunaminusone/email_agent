@@ -27,6 +27,7 @@ class RequestAttachment(_ApiModel):
 class AgentRequest(_ApiModel):
     thread_id: str = ""
     user_query: str
+    locale: str = "en"
     conversation_history: list[ConversationMessage] = Field(default_factory=list)
     attachments: list[RequestAttachment] = Field(default_factory=list)
 
@@ -52,9 +53,5 @@ class AgentPrototypeResponse(_ApiModel):
     response_content_blocks: list[dict[str, Any]] = Field(default_factory=list)
     response_content_summary: str = ""
     response_path: str = "deterministic"
-    legacy_fallback_used: bool = False
-    legacy_fallback_route: str = ""
-    legacy_fallback_responder: str = ""
-    legacy_fallback_reason: str = ""
     final_response: FinalResponsePayload = Field(default_factory=FinalResponsePayload)
     assistant_message: dict[str, Any] = Field(default_factory=dict)

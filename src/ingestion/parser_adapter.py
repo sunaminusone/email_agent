@@ -17,7 +17,6 @@ from src.ingestion.models import (
     ParserRetrievalHints,
     ParserRequestFlags,
     ParserSignals,
-    ParserToolHints,
     SourceAttribution,
 )
 from src.ingestion.parser_prompt import get_parser_prompt
@@ -247,7 +246,6 @@ def _map_parser_context(payload: Mapping[str, Any]) -> ParserContext:
         language=str(context.get("language", "other") or "other"),
         channel=str(context.get("channel", "internal_qa") or "internal_qa"),
         primary_intent=str(context.get("primary_intent", "unknown") or "unknown"),
-        secondary_intents=[str(intent) for intent in context.get("secondary_intents", []) or []],
         intent_confidence=float(context.get("intent_confidence", 0.0) or 0.0),
         query_type=str(context.get("query_type", "question") or "question"),
         urgency=str(context.get("urgency", "low") or "low"),
@@ -317,16 +315,6 @@ def _map_parser_retrieval_hints(payload: Mapping[str, Any]) -> ParserRetrievalHi
     )
 
 
-def _map_parser_tool_hints(payload: Mapping[str, Any]) -> ParserToolHints:
-    hints = payload.get("tool_hints", {}) or {}
-    return ParserToolHints(
-        suggested_tools=list(hints.get("suggested_tools", []) or []),
-        requires_database_lookup=bool(hints.get("requires_database_lookup", False)),
-        requires_file_lookup=bool(hints.get("requires_file_lookup", False)),
-        requires_order_system=bool(hints.get("requires_order_system", False)),
-    )
-
-
 def adapt_parsed_result_to_parser_signals(
     payload: Mapping[str, Any],
     *,
@@ -352,7 +340,6 @@ def adapt_parsed_result_to_parser_signals(
         constraints=_map_parser_constraints(payload),
         open_slots=_map_parser_open_slots(payload),
         retrieval_hints=_map_parser_retrieval_hints(payload),
-        tool_hints=_map_parser_tool_hints(payload),
         missing_information=list(payload.get("missing_information", []) or []),
         extra_instructions=payload.get("extra_instructions"),
     )

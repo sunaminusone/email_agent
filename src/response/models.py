@@ -1,23 +1,28 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.common.models import SourceAttribution
-from src.execution.models import ExecutionRun
+from src.common.models import DemandProfile, SourceAttribution
+from src.common.execution_models import ExecutionResult
 from src.memory.models import MemoryUpdate, ResponseMemory
 from src.objects.models import ResolvedObjectState
-from src.routing.models import ClarificationPayload, DialogueActResult, TopLevelRouteName
+from src.routing.models import ClarificationPayload, DialogueActResult
+
+if TYPE_CHECKING:
+    from src.agent.state import GroupOutcome
 
 
 ResponseMode = Literal[
     "clarification",
     "direct_answer",
     "hybrid_answer",
+    "knowledge_answer",
     "acknowledgement",
     "termination",
     "handoff",
+    "partial_answer",
 ]
 
 
@@ -34,13 +39,18 @@ class ContentBlock(_ResponseModel):
 
 
 class ResponseInput(_ResponseModel):
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
     query: str = ""
-    execution_run: ExecutionRun
+    locale: str = "en"
+    execution_result: ExecutionResult = Field(default_factory=ExecutionResult)
     resolved_object_state: ResolvedObjectState | None = None
     dialogue_act: DialogueActResult = Field(default_factory=DialogueActResult)
     response_memory: ResponseMemory | None = None
-    route_name: TopLevelRouteName = "execution"
+    action: Literal["execute", "respond", "clarify", "handoff"] = "execute"
     clarification: ClarificationPayload | None = None
+    group_outcomes: list[Any] = Field(default_factory=list)  # list[GroupOutcome]
+    demand_profile: DemandProfile | None = None
 
 
 class ResponsePlan(_ResponseModel):

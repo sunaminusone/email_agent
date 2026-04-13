@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.common.messages import get_message
 from src.response.models import ComposedResponse, ResponseInput, ResponsePlan
 
 
@@ -7,9 +8,13 @@ def render_handoff_response(
     response_input: ResponseInput,
     response_plan: ResponsePlan,
 ) -> ComposedResponse:
-    message = "This request needs human review before a final email reply is prepared."
-    if response_input.execution_run.reason:
-        message = f"{message} Reason: {response_input.execution_run.reason}"
+    locale = response_input.locale
+    message = get_message("response_handoff", locale)
+    if response_input.execution_result.reason:
+        message = get_message(
+            "response_handoff_reason", locale,
+            base=message, reason=response_input.execution_result.reason,
+        )
 
     return ComposedResponse(
         message=message,

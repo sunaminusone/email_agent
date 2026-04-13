@@ -1,58 +1,37 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-try:
-    import redis
-except ImportError:  # pragma: no cover - optional dependency
-    redis = None
-
 from src.config import get_memory_settings
+from src.memory.adapters.redis_store import RedisSessionAdapter
+from src.memory.models import MemorySnapshot
+from src.memory.store import load_memory_snapshot, serialize_memory_snapshot, snapshot_to_route_state
 
 
 class SessionStore:
     def __init__(self) -> None:
         self.settings = get_memory_settings()
-        self._client = None
+        self.adapter = RedisSessionAdapter(self.settings)
 
     def is_configured(self) -> bool:
-        return bool(self.settings.get("is_configured")) and redis is not None
+        return self.adapter.is_configured()
 
     def _get_client(self):
-        if self._client is None and self.is_configured():
-            self._client = redis.Redis.from_url(
-                self.settings["redis_url"],
-                decode_responses=True,
-            )
-        return self._client
+        return self.adapter.get_client()
 
     def _session_key(self, thread_id: str) -> str:
-        return f"{self.settings['key_prefix']}:{thread_id}"
+        return self.adapter.session_key(thread_id)
 
     def load_session(self, thread_id: str | None) -> Dict[str, Any]:
-        if not thread_id or not self.is_configured():
-            return self._empty_session(thread_id)
-
-        client = self._get_client()
-        if client is None:
-            return self._empty_session(thread_id)
-
-        payload = client.get(self._session_key(thread_id))
-        if not payload:
-            return self._empty_session(thread_id)
-
-        try:
-            data = json.loads(payload)
-        except json.JSONDecodeError:
-            return self._empty_session(thread_id)
-        if not isinstance(data, dict):
+        data = self.adapter.load(thread_id)
+        if data is None:
             return self._empty_session(thread_id)
 
         return {
             "thread_id": thread_id,
             "recent_turns": data.get("recent_turns", []),
+            "memory_snapshot": data.get("memory_snapshot", {}),
             "route_state": data.get("route_state", {}),
             "updated_at": data.get("updated_at", ""),
         }
@@ -61,12 +40,13 @@ class SessionStore:
         session = self.load_session(thread_id)
         return session.get("recent_turns", [])
 
+    def load_memory_snapshot(self, thread_id: str | None) -> MemorySnapshot:
+        session = self.load_session(thread_id)
+        snapshot_source = session.get("memory_snapshot") or session.get("route_state")
+        return load_memory_snapshot(snapshot_source, thread_id=thread_id)
+
     def append_turns(self, thread_id: str | None, turns: List[Dict[str, Any]]) -> None:
         if not thread_id or not turns or not self.is_configured():
-            return
-
-        client = self._get_client()
-        if client is None:
             return
 
         session = self.load_session(thread_id)
@@ -74,42 +54,78 @@ class SessionStore:
         merged_turns = self._dedupe_turns(existing_turns + turns)
         max_messages = max(int(self.settings.get("max_turns", 10)) * 2, 2)
         persisted_turns = merged_turns[-max_messages:]
-        updated_at = datetime.now(timezone.utc).isoformat()
-        payload = json.dumps(
+        self.adapter.save(
+            thread_id,
             {
-                "thread_id": thread_id,
                 "recent_turns": persisted_turns,
+                "memory_snapshot": session.get("memory_snapshot", {}),
                 "route_state": session.get("route_state", {}),
-                "updated_at": updated_at,
             },
-            ensure_ascii=False,
         )
-        client.set(self._session_key(thread_id), payload, ex=int(self.settings.get("ttl_seconds", 7200)))
 
     def update_route_state(self, thread_id: str | None, route_state: Dict[str, Any]) -> None:
         if not thread_id or not self.is_configured():
             return
 
-        client = self._get_client()
-        if client is None:
+        session = self.load_session(thread_id)
+        self.adapter.save(
+            thread_id,
+            {
+                "recent_turns": session.get("recent_turns", []),
+                "memory_snapshot": session.get("memory_snapshot", {}),
+                "route_state": route_state,
+            },
+        )
+
+    def update_memory_snapshot(self, thread_id: str | None, snapshot: MemorySnapshot) -> None:
+        if not thread_id or not self.is_configured():
             return
 
         session = self.load_session(thread_id)
-        payload = json.dumps(
+        self.adapter.save(
+            thread_id,
             {
-                "thread_id": thread_id,
                 "recent_turns": session.get("recent_turns", []),
-                "route_state": route_state,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "memory_snapshot": serialize_memory_snapshot(snapshot),
+                "route_state": session.get("route_state", {}),
             },
-            ensure_ascii=False,
         )
-        client.set(self._session_key(thread_id), payload, ex=int(self.settings.get("ttl_seconds", 7200)))
+
+    def persist_memory_snapshot(
+        self,
+        thread_id: str | None,
+        snapshot: MemorySnapshot,
+        *,
+        route_phase: str = "active",
+        last_assistant_prompt_type: str = "",
+        session_payload: Dict[str, Any] | None = None,
+        extra_updates: Dict[str, Any] | None = None,
+    ) -> None:
+        route_state = snapshot_to_route_state(
+            snapshot,
+            route_phase=route_phase,
+            last_assistant_prompt_type=last_assistant_prompt_type,
+            session_payload=session_payload,
+            extra_updates=extra_updates,
+        )
+        if not thread_id or not self.is_configured():
+            return
+
+        session = self.load_session(thread_id)
+        self.adapter.save(
+            thread_id,
+            {
+                "recent_turns": session.get("recent_turns", []),
+                "memory_snapshot": serialize_memory_snapshot(snapshot),
+                "route_state": route_state,
+            },
+        )
 
     def _empty_session(self, thread_id: str | None) -> Dict[str, Any]:
         return {
             "thread_id": thread_id,
             "recent_turns": [],
+            "memory_snapshot": {},
             "route_state": {},
             "updated_at": "",
         }

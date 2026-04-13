@@ -43,9 +43,6 @@ def _safe_product_lookup_keys(agent_input: dict[str, Any]) -> dict[str, Any]:
     return agent_input.get("product_lookup_keys", {})
 
 
-def _safe_secondary_intents(agent_input: dict[str, Any]) -> list[str]:
-    return agent_input.get("context", {}).get("secondary_intents", [])
-
 
 def _safe_routing_memory(agent_input: dict[str, Any]) -> dict[str, Any]:
     return agent_input.get("routing_memory", {})
@@ -292,6 +289,5 @@ def build_routing_debug_info(agent_input: dict[str, Any]) -> dict[str, Any]:
         },
         "gray_zone_reasons": debug_gray_zone_reasons,
         "is_gray_zone": bool(debug_gray_zone_reasons),
-        "secondary_intents": _safe_secondary_intents(agent_input),
         "routing_memory": _safe_routing_memory(agent_input),
     }

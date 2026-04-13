@@ -1,101 +1,146 @@
 from __future__ import annotations
 
-from src.routing.models import ExecutionIntent, RoutingDecision, RoutingInput
-from src.routing.policies import build_result_assembly_policy, decide_clarification, decide_handoff
-from src.routing.stages import resolve_dialogue_act, resolve_modality, resolve_object_routing, select_tools
+from src.common.models import DemandProfile, IntentGroup
+from src.ingestion.models import IngestionBundle
+from src.ingestion.demand_profile import narrow_demand_profile
+from src.objects.models import ResolvedObjectState
+from src.routing.models import RouteDecision
+from src.routing.policies import decide_clarification, decide_handoff
+from src.routing.stages import resolve_dialogue_act, resolve_object_routing
 
 
-def route(routing_input: RoutingInput) -> RoutingDecision:
-    object_routing = resolve_object_routing(routing_input.resolved_object_state)
-    dialogue_act = resolve_dialogue_act(routing_input.query, object_routing)
-    modality_decision = resolve_modality(routing_input.query, object_routing, dialogue_act)
-
-    # These are internal routing controls, not public routing contracts.
-    clarification = decide_clarification(object_routing, dialogue_act)
-    needs_clarification = clarification is not None
-    handoff_required, handoff_reason = decide_handoff(
-        risk_level=routing_input.risk_level,
-        needs_human_review=routing_input.needs_human_review,
-    )
-    selected_tools, tool_selection_reason = (
-        select_tools(routing_input.query, object_routing, dialogue_act, modality_decision)
-        if not needs_clarification and not handoff_required
-        else ([], "Tool execution is deferred because clarification or handoff takes priority.")
-    )
-    assembly_policy_reason = build_result_assembly_policy(modality_decision, selected_tools)
-    execution_intent = _build_execution_intent(
-        query=routing_input.query,
-        object_routing=object_routing,
-        dialogue_act=dialogue_act,
-        modality_decision=modality_decision,
-        selected_tools=selected_tools,
-        clarification_required=needs_clarification,
-        handoff_required=handoff_required,
-        reason_parts=[
-            object_routing.reason,
-            dialogue_act.reason,
-            modality_decision.reason,
-            tool_selection_reason,
-            clarification.reason if clarification is not None else "",
-            handoff_reason,
-            assembly_policy_reason,
-        ],
-    )
-
-    route_name = "execution"
-    if needs_clarification:
-        route_name = "clarification"
-    elif handoff_required:
-        route_name = "handoff"
-
-    return RoutingDecision(
-        route_name=route_name,
-        execution_intent=execution_intent,
-        clarification=clarification,
-        reason=execution_intent.reason,
-    )
-
-
-def build_execution_intent(routing_input: RoutingInput) -> ExecutionIntent:
-    return route(routing_input).execution_intent
-
-
-def _build_execution_intent(
+def route(
+    ingestion_bundle: IngestionBundle,
+    resolved_object_state: ResolvedObjectState,
     *,
-    query: str,
-    object_routing,
-    dialogue_act,
-    modality_decision,
-    selected_tools,
-    clarification_required: bool,
-    handoff_required: bool,
-    reason_parts: list[str],
-) -> ExecutionIntent:
-    primary_object = object_routing.primary_object or object_routing.active_object
-    return ExecutionIntent(
-        query=query,
-        primary_object=primary_object,
-        secondary_objects=list(object_routing.secondary_objects),
-        ambiguous_objects=list(object_routing.ambiguous_objects),
-        resolved_object_constraints=_resolved_object_constraints(primary_object),
+    focus_group: IntentGroup | None = None,
+    demand_profile: DemandProfile | None = None,
+) -> RouteDecision:
+    """Route a customer message to an action: execute / respond / clarify / handoff.
+
+    When *focus_group* is provided the routing decision is scoped to that
+    single intent group.  Missing-information checks are narrowed to the
+    group's object type so that a clarification needed by one group does
+    not block execution of another.
+    """
+    parser_signals = ingestion_bundle.turn_signals.parser_signals
+    query = (
+        ingestion_bundle.turn_core.normalized_query
+        or ingestion_bundle.turn_core.raw_query
+        or ""
+    )
+
+    object_routing = resolve_object_routing(resolved_object_state)
+    dialogue_act = resolve_dialogue_act(
+        query,
+        object_routing,
+        stateful_anchors=ingestion_bundle.stateful_anchors,
+    )
+
+    missing_information = _narrow_missing_information(
+        parser_signals.missing_information, focus_group,
+    )
+
+    clarification = decide_clarification(
+        object_routing,
+        dialogue_act,
+        missing_information=missing_information or None,
+    )
+    handoff_required, handoff_reason = decide_handoff(
+        risk_level=parser_signals.context.risk_level,
+        needs_human_review=parser_signals.context.needs_human_review,
+    )
+
+    has_object = (
+        object_routing.primary_object is not None
+        or object_routing.active_object is not None
+    )
+    can_execute_without_object = _can_execute_without_object(
+        focus_group=focus_group,
+        demand_profile=demand_profile,
+    )
+    action = _determine_action(
+        dialogue_act,
+        clarification,
+        handoff_required,
+        has_object,
+        can_execute_without_object,
+    )
+
+    reason_parts = [
+        object_routing.reason,
+        dialogue_act.reason,
+        handoff_reason,
+        clarification.reason if clarification is not None else "",
+    ]
+
+    return RouteDecision(
+        action=action,
         dialogue_act=dialogue_act,
-        modality_decision=modality_decision,
-        selected_tools=selected_tools,
-        needs_clarification=clarification_required,
-        handoff_required=handoff_required,
+        clarification=clarification,
         reason=" ".join(part for part in reason_parts if part).strip(),
     )
 
 
-def _resolved_object_constraints(primary_object) -> dict[str, str]:
-    if primary_object is None:
-        return {}
-    constraints = {
-        "object_type": primary_object.object_type,
-        "canonical_value": primary_object.canonical_value,
-        "display_name": primary_object.display_name,
-        "identifier": primary_object.identifier,
-        "identifier_type": primary_object.identifier_type,
-        "business_line": primary_object.business_line,
+def _narrow_missing_information(
+    missing_information: list[str] | None,
+    focus_group: IntentGroup | None,
+) -> list[str] | None:
+    """When routing a specific intent group, only surface missing info
+    relevant to that group's object type and request flags."""
+    if focus_group is None or not missing_information:
+        return missing_information
+
+    # Map object types to their critical field prefixes
+    relevant_prefixes: dict[str, set[str]] = {
+        "order": {"order_number", "customer_identifier"},
+        "invoice": {"invoice_number", "customer_identifier"},
+        "shipment": {"order_number", "tracking_number"},
     }
-    return {key: value for key, value in constraints.items() if value}
+
+    allowed = relevant_prefixes.get(focus_group.object_type, set())
+    if not allowed:
+        return None
+
+    narrowed = [info for info in missing_information if info in allowed]
+    return narrowed or None
+
+def _can_execute_without_object(
+    *,
+    focus_group: IntentGroup | None,
+    demand_profile: DemandProfile | None,
+) -> bool:
+    """Decide if execution can proceed without a resolved object.
+
+    Reads only from GroupDemand (the semantic layer) — raw request_flags
+    and primary_intent are builder inputs, not routing judgment sources.
+    """
+    scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+    if scoped_demand is None:
+        return False
+
+    if scoped_demand.demand_confidence < 0.3:
+        return False
+
+    return (
+        scoped_demand.primary_demand == "technical"
+        or "technical" in scoped_demand.secondary_demands
+    )
+
+
+def _determine_action(
+    dialogue_act,
+    clarification,
+    handoff_required: bool,
+    has_object: bool,
+    can_execute_without_object: bool,
+) -> str:
+    if handoff_required:
+        return "handoff"
+    if clarification is not None:
+        return "clarify"
+    if dialogue_act.act == "closing":
+        return "respond"
+    if has_object or can_execute_without_object:
+        return "execute"
+    return "respond"

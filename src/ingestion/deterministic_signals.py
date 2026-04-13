@@ -119,8 +119,13 @@ _TIMELINE_CONTEXT_TERMS = (
 _TECHNICAL_CONTEXT_TERMS = (
     "technical",
     "protocol",
+    "workflow",
+    "development",
+    "mechanism",
     "validation",
     "assay",
+    "supported models",
+    "model support",
     "elisa",
     "western blot",
     "wb",

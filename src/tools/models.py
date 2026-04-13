@@ -4,9 +4,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.common.models import ObjectType
+from src.common.models import DemandType, ObjectType
 from src.objects.models import ObjectCandidate
-from src.routing.models import DialogueActResult, DialogueActType, ModalityDecision, ModalityType
+from src.routing.models import DialogueActResult
 
 
 class _ToolModel(BaseModel):
@@ -39,7 +39,6 @@ class ToolRequest(_ToolModel):
     primary_object: ObjectCandidate | None = None
     secondary_objects: list[ObjectCandidate] = Field(default_factory=list)
     dialogue_act: DialogueActResult = Field(default_factory=DialogueActResult)
-    modality_decision: ModalityDecision = Field(default_factory=ModalityDecision)
     constraints: ToolConstraints = Field(default_factory=ToolConstraints)
 
 
@@ -57,9 +56,13 @@ class ToolResult(_ToolModel):
 
 class ToolCapability(_ToolModel):
     tool_name: str
+    description: str = ""
     supported_object_types: list[ObjectType] = Field(default_factory=list)
-    supported_dialogue_acts: list[DialogueActType] = Field(default_factory=list)
-    supported_modalities: list[ModalityType] = Field(default_factory=list)
+    supported_demands: list[DemandType] = Field(default_factory=list)
+    supported_dialogue_acts: list[str] = Field(default_factory=list)
+    supported_modalities: list[str] = Field(default_factory=list)
+    supported_request_flags: list[str] = Field(default_factory=list)
+    required_params: list[str] = Field(default_factory=list)
     can_run_in_parallel: bool = False
     returns_structured_facts: bool = False
     returns_unstructured_snippets: bool = False

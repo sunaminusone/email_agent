@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.common.utils import dedupe_strings
 from src.tools.models import ToolRequest
 
 
 def build_quickbooks_lookup_params(request: ToolRequest) -> dict[str, Any]:
     primary_object = request.primary_object
-    common_constraints = request.constraints.common
-    tool_constraints = request.constraints.tool.get("quickbooks", {})
-    resolved_constraints = common_constraints.get("resolved_object_constraints", {})
+    resolved_constraints = request.constraints.common.get("resolved_object_constraints", {})
 
     customer_names: list[str] = []
     order_numbers: list[str] = []
@@ -21,46 +20,38 @@ def build_quickbooks_lookup_params(request: ToolRequest) -> dict[str, Any]:
         if primary_object.object_type in {"order", "invoice", "shipment"} and primary_object.identifier:
             order_numbers.append(primary_object.identifier)
 
-    customer_name = (
-        tool_constraints.get("customer_name")
-        or resolved_constraints.get("customer_name")
-        or ""
-    ).strip()
+    customer_name = _first_non_empty(
+        resolved_constraints.get("customer_name"),
+        resolved_constraints.get("company_name"),
+    )
     if customer_name:
         customer_names.append(customer_name)
 
-    order_number = (
-        tool_constraints.get("order_number")
-        or resolved_constraints.get("order_number")
-        or ""
-    ).strip()
+    order_number = _first_non_empty(
+        resolved_constraints.get("order_number"),
+        resolved_constraints.get("doc_number"),
+        resolved_constraints.get("invoice_number"),
+    )
     if order_number:
         order_numbers.append(order_number)
 
-    invoice_number = ""
-    if invoice_number:
-        order_numbers.append(invoice_number)
-
-    destination = (
-        tool_constraints.get("destination")
-        or resolved_constraints.get("destination")
-        or ""
-    ).strip()
+    destination = _first_non_empty(
+        resolved_constraints.get("destination"),
+        resolved_constraints.get("ship_to"),
+    )
 
     return {
-        "customer_names": _dedupe(customer_names),
-        "order_numbers": _dedupe(order_numbers),
+        "customer_names": dedupe_strings(customer_names),
+        "order_numbers": dedupe_strings(order_numbers),
         "destination": destination,
     }
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    ordered: list[str] = []
-    seen: set[str] = set()
+def _first_non_empty(*values: Any) -> str:
     for value in values:
-        cleaned = value.strip()
-        if not cleaned or cleaned in seen:
-            continue
-        seen.add(cleaned)
-        ordered.append(cleaned)
-    return ordered
+        cleaned = str(value or "").strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+

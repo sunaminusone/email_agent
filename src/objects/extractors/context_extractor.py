@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.ingestion.models import IngestionBundle
+from src.memory.models import SALIENCE_HIGH
 from src.objects.constraint_matching import attach_constraints_to_ambiguous_sets, attach_constraints_to_candidates
 from src.objects.models import AmbiguousObjectSet, ExtractorOutput, ObjectCandidate
 
+if TYPE_CHECKING:
+    from src.memory.models import ScoredObjectRef
 
-def extract_context_candidates(ingestion_bundle: IngestionBundle) -> ExtractorOutput:
+
+def extract_context_candidates(
+    ingestion_bundle: IngestionBundle,
+    recent_objects: list[ScoredObjectRef] | None = None,
+) -> ExtractorOutput:
     anchors = ingestion_bundle.stateful_anchors
     reference_signals = ingestion_bundle.turn_signals.reference_signals
     reference_constraints = reference_signals.attribute_constraints
@@ -20,33 +29,38 @@ def extract_context_candidates(ingestion_bundle: IngestionBundle) -> ExtractorOu
         or bool(anchors.pending_clarification_field)
     )
 
-    active_kind = _coerce_object_type(anchors.active_entity_kind.value if anchors.active_entity_kind else "")
-    active_identifier = anchors.active_entity_identifier.value if anchors.active_entity_identifier else ""
-    active_display_name = anchors.active_entity_display_name.value if anchors.active_entity_display_name else ""
-    business_line = anchors.active_business_line.value if anchors.active_business_line else ""
+    # --- Context candidates from memory recent_objects ---
+    if recent_objects:
+        if should_reuse_context:
+            # Full injection: all recent objects as context candidates
+            base = 0.6 if reference_signals.is_context_dependent else 0.45
+            for scored_ref in recent_objects:
+                ref = scored_ref.object_ref
+                if not (ref.identifier or ref.display_name):
+                    continue
+                salience_factor = min(scored_ref.salience / SALIENCE_HIGH, 1.0)
+                candidates.append(_scored_ref_to_candidate(
+                    scored_ref,
+                    confidence=round(base * salience_factor, 4),
+                    reference_constraints=reference_constraints,
+                    active_route=anchors.active_route,
+                    reference_mode=reference_signals.reference_mode,
+                ))
+        else:
+            # Background injection: only top-1 at low confidence for active_object derivation
+            top = recent_objects[0]
+            ref = top.object_ref
+            if ref.identifier or ref.display_name:
+                salience_factor = min(top.salience / SALIENCE_HIGH, 1.0)
+                candidates.append(_scored_ref_to_candidate(
+                    top,
+                    confidence=round(0.3 * salience_factor, 4),
+                    reference_constraints=[],
+                    active_route=anchors.active_route,
+                    reference_mode="none",
+                ))
 
-    if should_reuse_context and (active_identifier or active_display_name):
-        candidates.append(
-            ObjectCandidate(
-                object_type=active_kind,
-                raw_value=active_display_name or active_identifier,
-                canonical_value=active_display_name or active_identifier,
-                display_name=active_display_name or active_identifier,
-                identifier=active_identifier,
-                identifier_type="stateful_anchor",
-                business_line=business_line,
-                confidence=0.6 if reference_signals.is_context_dependent else 0.45,
-                recency="CONTEXTUAL",
-                source_type="stateful_anchor",
-                attribute_constraints=reference_constraints,
-                used_stateful_anchor=True,
-                metadata={
-                    "active_route": anchors.active_route,
-                    "reference_mode": reference_signals.reference_mode,
-                },
-            )
-        )
-
+    # --- Pending clarification options (still from stateful_anchors) ---
     if anchors.pending_clarification_field and anchors.pending_candidate_options:
         option_candidates = [
             ObjectCandidate(
@@ -85,19 +99,35 @@ def extract_context_candidates(ingestion_bundle: IngestionBundle) -> ExtractorOu
     )
 
 
-def _coerce_object_type(value: str) -> str:
-    normalized = (value or "").strip().lower()
-    allowed = {
-        "product",
-        "service",
-        "order",
-        "invoice",
-        "shipment",
-        "document",
-        "customer",
-        "scientific_target",
-    }
-    return normalized if normalized in allowed else "unknown"
+def _scored_ref_to_candidate(
+    scored_ref: ScoredObjectRef,
+    *,
+    confidence: float,
+    reference_constraints: list,
+    active_route: str,
+    reference_mode: str,
+) -> ObjectCandidate:
+    ref = scored_ref.object_ref
+    return ObjectCandidate(
+        object_type=ref.object_type,
+        raw_value=ref.display_name or ref.identifier,
+        canonical_value=ref.display_name or ref.identifier,
+        display_name=ref.display_name or ref.identifier,
+        identifier=ref.identifier,
+        identifier_type=ref.identifier_type or "memory",
+        business_line=ref.business_line,
+        confidence=confidence,
+        recency="CONTEXTUAL",
+        source_type="stateful_anchor",
+        attribute_constraints=reference_constraints,
+        used_stateful_anchor=True,
+        metadata={
+            "active_route": active_route,
+            "reference_mode": reference_mode,
+            "source": "memory_recent_objects",
+            "salience": scored_ref.salience,
+        },
+    )
 
 
 def _infer_pending_object_type(field_name: str) -> str:

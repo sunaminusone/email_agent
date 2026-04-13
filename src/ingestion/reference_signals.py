@@ -8,9 +8,9 @@ from src.ingestion.models import (
     ReferenceMode,
     ReferenceSignals,
     SourceAttribution,
-    StatefulAnchors,
     ValueSignal,
 )
+from src.memory.models import StatefulAnchors
 
 
 _REFERENTIAL_PATTERNS: dict[ReferenceMode, tuple[str, ...]] = {
@@ -194,27 +194,25 @@ def extract_reference_attribute_constraints(query: str) -> list[AttributeConstra
 def requires_active_context_for_safe_resolution(
     reference_mode: ReferenceMode,
     is_context_dependent: bool,
-    stateful_anchors: StatefulAnchors,
+    *,
+    has_recent_objects: bool = False,
+    has_pending_candidates: bool = False,
 ) -> bool:
     if not is_context_dependent:
         return False
-    has_active_context = bool(
-        stateful_anchors.active_entity_identifier
-        or stateful_anchors.active_entity_display_name
-        or stateful_anchors.active_business_line
-    )
-    has_candidate_context = bool(stateful_anchors.pending_candidate_options)
     if reference_mode == "active":
-        return not has_active_context
+        return not has_recent_objects
     if reference_mode in {"other", "first", "second", "previous", "all"}:
-        return not (has_active_context or has_candidate_context)
-    return not has_active_context
+        return not (has_recent_objects or has_pending_candidates)
+    return not has_recent_objects
 
 
 def extract_reference_signals(
     query: str,
     parser_signals: ParserSignals,
     stateful_anchors: StatefulAnchors | None = None,
+    *,
+    has_recent_objects: bool = False,
 ) -> ReferenceSignals:
     anchors = stateful_anchors or StatefulAnchors()
     reference_mode = detect_reference_mode(query)
@@ -242,6 +240,7 @@ def extract_reference_signals(
         requires_active_context_for_safe_resolution=requires_active_context_for_safe_resolution(
             reference_mode,
             is_context_dependent,
-            anchors,
+            has_recent_objects=has_recent_objects,
+            has_pending_candidates=bool(anchors.pending_candidate_options),
         ),
     )

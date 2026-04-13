@@ -13,7 +13,8 @@ General rules:
 2. Do not invent product names, catalog numbers, prices, timelines, shipping details, protocols, or scientific claims.
 3. If a field is not clearly supported by the user input, leave it empty, false, unknown, or null depending on the schema.
 4. Be conservative. When uncertain, prefer leaving fields empty rather than guessing.
-5. Choose one primary intent and optionally multiple secondary intents.
+5. Choose one primary intent that best describes the user's dominant need.
+   Set all applicable request_flags — multiple flags can be true simultaneously.
 6. Use missing_information to note key details that may be required for downstream handling.
 7. Set needs_human_review=true if the message is high-risk, escalated, sensitive, complaint-heavy, or likely requires human judgment.
 8. Keep reasoning_note short, factual, and non-speculative.
@@ -22,7 +23,7 @@ How to interpret the schema:
 - normalized_query: a cleaned version of the user's request that preserves meaning while removing obvious noise
 - context: the overall meaning, tone, urgency, and handling risk of the message
 - entities: concrete things explicitly mentioned, such as products, services, targets, species, documents, order numbers, or company names
-- request_flags: what the user is asking for or needs help with
+- request_flags: what the user is asking for or needs help with. Multiple flags can be true when the user has multiple needs in one message.
 - constraints: hard or soft requirements that affect retrieval, recommendation, or action
 - open_slots: useful contextual information that does not fit neatly into fixed schema fields
 - missing_information: important details that are not provided but may be needed later
@@ -167,6 +168,44 @@ Key extraction:
 - open_slots.referenced_prior_context = "it"
 - context.primary_intent = "follow_up"
 
+User: What is the CAR-T cell therapy development workflow?
+Key extraction:
+- entities.service_names = [{{"text": "CAR-T cell therapy", "raw": "CAR-T cell therapy", "start": 12, "end": 30}}]
+- entities.product_names = []
+- context.primary_intent = "technical_question"
+- request_flags.needs_protocol = true
+
+User: How does the mRNA-LNP delivery process work?
+Key extraction:
+- entities.service_names = [{{"text": "mRNA-LNP delivery", "raw": "mRNA-LNP delivery", "start": 13, "end": 30}}]
+- context.primary_intent = "technical_question"
+- request_flags.needs_protocol = true
+
+User: What validation assays are available for CAR-T?
+Key extraction:
+- entities.service_names = [{{"text": "CAR-T", "raw": "CAR-T", "start": 43, "end": 48}}]
+- context.primary_intent = "technical_question"
+- request_flags.needs_protocol = true
+
+User: Can you explain the antibody humanization process?
+Key extraction:
+- entities.service_names = [{{"text": "antibody humanization", "raw": "antibody humanization", "start": 20, "end": 41}}]
+- context.primary_intent = "technical_question"
+- request_flags.needs_protocol = true
+
+User: I'm having issues with low CAR expression after transduction
+Key extraction:
+- entities.product_names = []
+- context.primary_intent = "troubleshooting"
+- request_flags.needs_troubleshooting = true
+
+User: What documents do you have on your antibody discovery workflow?
+Key extraction:
+- entities.service_names = [{{"text": "antibody discovery", "raw": "antibody discovery", "start": 38, "end": 56}}]
+- context.primary_intent = "technical_question"
+- request_flags.needs_protocol = true
+- request_flags.needs_documentation = true
+
 User: status of invoice 20001
 Key extraction:
 - entities.order_numbers = [{{"text": "20001", "raw": "20001", "start": 18, "end": 23}}]
@@ -182,10 +221,13 @@ Key extraction:
 Request flag guidance:
 Turn user needs into boolean signals when clearly supported by the message.
 Most flags can be inferred from the field name. Pay special attention to:
+- needs_protocol: workflow, process, how does it work, development steps, phases, validation, assay, experimental design, protocol, mechanism. This flag should be set for ANY technical_question about how a service or product works.
+- needs_troubleshooting: fixing a technical issue, low expression, poor yield, optimization, something not working
 - needs_documentation: datasheet, brochure, COA, SDS, manual, technical file
 - needs_quote / needs_price: quotation, price, cost, budget
 - needs_shipping_info / needs_order_status / needs_invoice: tracking, delivery, order progress, invoice, PO, billing
-- needs_protocol / needs_troubleshooting / needs_timeline: workflow/process, fixing a technical issue, lead time / ETA
+- needs_timeline: lead time, ETA, turnaround time, how long does it take
+- needs_recommendation: suggest, recommend, which one should I use, best option
 
 Constraint guidance:
 Extract only if explicit or strongly implied:

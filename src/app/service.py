@@ -3,14 +3,27 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from src.agent.state import AgentState
 from src.api_models import AgentPrototypeResponse, AgentRequest, FinalResponsePayload
-from src.execution.runtime import build_execution_plan, run_execution_plan
+from src.common.messages import get_message
+from src.common.models import DemandProfile, IntentGroup, ObjectRef
+from src.executor import empty_execution_result, run_executor
+from src.common.execution_models import ExecutionResult
+from src.ingestion import assemble_intent_groups, build_demand_profile
 from src.ingestion.pipeline import build_ingestion_bundle
-from src.memory import SessionStore
-from src.memory.models import ResponseMemory
+from src.memory import (
+    SessionStore,
+    serialize_memory_snapshot,
+    snapshot_to_route_state,
+    recall,
+    reflect,
+    MemoryContribution,
+)
+from src.memory.models import ClarificationMemory, MemoryContext
 from src.objects.resolution import resolve_objects
 from src.response import ResponseInput, build_response_bundle
-from src.routing.runtime import route_from_ingestion_bundle
+from src.routing import route
+
 
 
 def _message_signature(message: dict[str, Any]) -> tuple[str, str, str]:
@@ -67,25 +80,26 @@ def _extract_output_payload(result: Any | None) -> dict[str, Any]:
     return output
 
 
-def _compat_execution_plan(plan) -> dict[str, Any]:
-    payload = plan.model_dump(mode="json")
-    payload["planned_actions"] = [
-        {
-            "action_id": call.call_id,
-            "action_type": _tool_action_type(call.tool_name),
-            "tool_name": call.tool_name,
-            "role": call.role,
-            "priority": call.priority,
-            "depends_on": list(call.depends_on),
-            "can_run_in_parallel": call.can_run_in_parallel,
-        }
-        for call in plan.planned_calls
-    ]
-    return payload
+def _serialize_execution_plan(result: ExecutionResult) -> dict[str, Any]:
+    """Serialize ExecutionResult into the plan payload for the frontend."""
+    return {
+        "planned_actions": [
+            {
+                "action_id": call.call_id,
+                "action_type": _tool_action_type(call.tool_name),
+                "tool_name": call.tool_name,
+                "role": call.role,
+            }
+            for call in result.executed_calls
+        ],
+        "iterations": 1,
+        "reason": result.reason,
+    }
 
 
-def _compat_execution_run(run) -> dict[str, Any]:
-    payload = run.model_dump(mode="json")
+def _serialize_execution_run(result: ExecutionResult) -> dict[str, Any]:
+    """Serialize ExecutionResult into the run payload for the frontend."""
+    payload = result.model_dump(mode="json")
     payload["executed_actions"] = [
         {
             "action_id": call.call_id,
@@ -97,9 +111,9 @@ def _compat_execution_run(run) -> dict[str, Any]:
             "latency_ms": call.latency_ms,
             "error": call.error,
         }
-        for call in run.executed_calls
+        for call in result.executed_calls
     ]
-    payload["overall_status"] = run.final_status
+    payload["overall_status"] = result.final_status
     return payload
 
 
@@ -113,242 +127,502 @@ def _serialize_content_blocks(content_blocks) -> list[dict[str, Any]]:
     return serialized
 
 
-def _build_reply_preview(query: str, route, execution_run_payload: dict[str, Any], final_response: FinalResponsePayload) -> str:
+def _build_reply_preview(query: str, overall_action: str, execution_run_payload: dict[str, Any], final_response: FinalResponsePayload, *, locale: str = "zh") -> str:
     if final_response.message:
         return final_response.message
-    if route.route_name == "clarification":
-        return f"已收到你的请求：{query}。当前仍需要补充信息后才能继续。"
-    if route.route_name == "handoff":
-        return f"已收到你的请求：{query}。当前需要人工复核。"
+    if overall_action == "clarify":
+        return get_message("reply_preview_clarify", locale, query=query)
+    if overall_action == "handoff":
+        return get_message("reply_preview_handoff", locale, query=query)
     action_count = len(execution_run_payload.get("executed_actions", []))
-    return f"已围绕“{query}”完成初步检索，本轮共执行 {action_count} 个工具。"
+    return get_message("reply_preview_done", locale, query=query, action_count=action_count)
 
 
-def _build_route_state(
+def _to_object_ref(candidate) -> ObjectRef | None:
+    if candidate is None:
+        return None
+    return ObjectRef(
+        object_type=candidate.object_type,
+        identifier=candidate.identifier,
+        identifier_type=getattr(candidate, "identifier_type", ""),
+        display_name=candidate.display_name or getattr(candidate, "canonical_value", ""),
+        business_line=candidate.business_line,
+    )
+
+
+def _build_objects_contribution(
+    resolved_object_state,
+    should_soft_reset: bool,
+) -> MemoryContribution:
+    active_object = (
+        None if should_soft_reset
+        else (resolved_object_state.primary_object or resolved_object_state.active_object)
+    )
+    recent_objects = [
+        item
+        for item in [
+            _to_object_ref(resolved_object_state.primary_object),
+            _to_object_ref(resolved_object_state.active_object),
+            *[_to_object_ref(obj) for obj in resolved_object_state.secondary_objects],
+        ]
+        if item is not None
+    ]
+    return MemoryContribution(
+        source="objects",
+        set_active_object=_to_object_ref(active_object),
+        secondary_active_objects=[
+            item
+            for item in (_to_object_ref(obj) for obj in resolved_object_state.secondary_objects)
+            if item is not None
+        ],
+        append_recent_objects=recent_objects,
+        soft_reset_current_topic=should_soft_reset,
+        reason="objects: resolved from current turn",
+    )
+
+
+def _build_ingestion_contribution(
+    intent_groups: list[IntentGroup],
+) -> MemoryContribution:
+    return MemoryContribution(
+        source="ingestion",
+        intent_groups=list(intent_groups),
+        reason=f"ingestion: assembled {len(intent_groups)} intent group(s)",
+    )
+
+
+def _build_routing_contribution(
+    route,
+    current_snapshot,
+    final_response: FinalResponsePayload,
+    active_object: ObjectRef | None,
+    should_soft_reset: bool,
+) -> MemoryContribution:
+    clarification = route.clarification
+    resume_route = (
+        current_snapshot.thread_memory.active_route
+        if current_snapshot.thread_memory.active_route and current_snapshot.thread_memory.active_route != "clarify"
+        else "execute"
+    )
+    return MemoryContribution(
+        source="routing",
+        active_route=route.action,
+        route_phase="waiting_for_user" if final_response.response_type == "clarification" else "active",
+        active_business_line=getattr(active_object, "business_line", "") if active_object is not None else "",
+        set_pending_clarification=(
+            ClarificationMemory(
+                pending_clarification_type=clarification.kind,
+                pending_candidate_options=[option.label or option.value for option in clarification.options],
+                pending_identifier=(clarification.options[0].value if clarification.options else ""),
+                pending_question=clarification.prompt,
+                pending_route_after_clarification=resume_route,
+            )
+            if not should_soft_reset and clarification is not None
+            else None
+        ),
+        clear_pending_clarification=should_soft_reset or clarification is None,
+        reason=f"routing: action={route.action}",
+    )
+
+
+def _build_response_contribution(
+    response_plan,
+) -> MemoryContribution:
+    if response_plan is None or response_plan.memory_update is None:
+        return MemoryContribution(source="response", reason="response: no memory update")
+
+    mu = response_plan.memory_update
+    return MemoryContribution(
+        source="response",
+        mark_revealed_attributes=(
+            list(mu.response_memory.revealed_attributes) if mu.response_memory else None
+        ),
+        set_last_tool_results=(
+            list(mu.response_memory.last_tool_results) if mu.response_memory else None
+        ),
+        set_last_response_topics=(
+            list(mu.response_memory.last_response_topics) if mu.response_memory else None
+        ),
+        set_last_demand_type=(
+            mu.response_memory.last_demand_type if mu.response_memory else None
+        ),
+        set_last_demand_flags=(
+            list(mu.response_memory.last_demand_flags) if mu.response_memory else None
+        ),
+        soft_reset_current_topic=mu.soft_reset_current_topic,
+        reason=mu.reason or "response: plan applied",
+    )
+
+
+def _build_agent_input_payload(
     ingestion_bundle,
     resolved_object_state,
-    route,
-    final_response: FinalResponsePayload,
-    response_plan=None,
+    agent_state: AgentState,
+    demand_profile: DemandProfile | None,
 ) -> dict[str, Any]:
-    should_soft_reset = bool(
-        response_plan is not None
-        and response_plan.memory_update is not None
-        and response_plan.memory_update.soft_reset_current_topic
-    )
-    active_object = None if should_soft_reset else (resolved_object_state.primary_object or resolved_object_state.active_object)
-    clarification = route.clarification
-    route_state = {
-        "active_route": route.route_name,
-        "route_phase": "waiting_for_user" if final_response.response_type == "clarification" else "active",
-        "last_assistant_prompt_type": final_response.response_type,
-        "thread_memory": {
-            "active_route": route.route_name,
-            "active_business_line": getattr(active_object, "business_line", "") if active_object is not None else "",
-        },
-        "object_memory": {
-            "active_object": (
-                {
-                    "object_type": active_object.object_type,
-                    "identifier": active_object.identifier,
-                    "display_name": active_object.display_name or active_object.canonical_value,
-                    "business_line": active_object.business_line,
-                }
-                if active_object is not None
-                else {}
-            ),
-        },
-        "clarification_memory": {
-            "pending_clarification_type": "" if should_soft_reset else (clarification.kind if clarification is not None else ""),
-            "pending_candidate_options": [] if should_soft_reset else [option.label or option.value for option in (clarification.options if clarification is not None else [])],
-            "pending_identifier": "",
-        },
-        "response_memory": (
-            response_plan.memory_update.response_memory.model_dump(mode="json")
-            if response_plan is not None and response_plan.memory_update is not None and response_plan.memory_update.response_memory is not None
-            else {}
-        ),
-        "session_payload": {
-            "thread_id": ingestion_bundle.turn_core.thread_id,
-            "active_query": ingestion_bundle.turn_core.normalized_query,
-        },
-    }
-    return route_state
-
-
-def _build_agent_input_payload(ingestion_bundle, resolved_object_state, route) -> dict[str, Any]:
     parser_context = ingestion_bundle.turn_signals.parser_signals.context
-    intent = route.execution_intent
+    primary_object = resolved_object_state.primary_object or resolved_object_state.active_object
+    route_decision = agent_state.primary_route_decision
+    clarification = agent_state.primary_clarification
     return {
         "thread_id": ingestion_bundle.turn_core.thread_id,
         "query": ingestion_bundle.turn_core.normalized_query,
         "raw_query": ingestion_bundle.turn_core.raw_query,
         "primary_intent": parser_context.primary_intent,
         "missing_information": (
-            list(route.clarification.missing_information)
-            if route.clarification is not None
+            list(clarification.missing_information)
+            if clarification is not None
             else list(ingestion_bundle.turn_signals.parser_signals.missing_information)
         ),
         "resolved_object_state": resolved_object_state.model_dump(mode="json"),
         "routing_debug": {
-            "route_name": route.route_name,
-            "active_route": route.route_name,
+            "action": agent_state.overall_action,
+            "dialogue_act": route_decision.dialogue_act.act,
+            "dialogue_act_confidence": route_decision.dialogue_act.confidence,
             "intent": parser_context.primary_intent,
             "intent_confidence": parser_context.intent_confidence,
-            "business_line": getattr(intent.primary_object, "business_line", "") if intent.primary_object is not None else "",
+            "business_line": getattr(primary_object, "business_line", "") if primary_object is not None else "",
             "business_line_confidence": resolved_object_state.resolution_confidence,
-            "engagement_type": intent.dialogue_act.act,
-            "selected_tools": list(intent.selected_tools),
-            "needs_clarification": intent.needs_clarification,
-            "handoff_required": intent.handoff_required,
+            "has_clarification": clarification is not None,
         },
+        "agent_debug": agent_state.debug_summary(),
+        "semantic_debug": (
+            demand_profile.model_dump(mode="json")
+            if demand_profile is not None
+            else {}
+        ),
     }
 
 
-def _build_suggested_workflow(route, execution_plan_payload: dict[str, Any]) -> list[str]:
+def _build_suggested_workflow(overall_action: str, execution_plan_payload: dict[str, Any], *, locale: str = "zh") -> list[str]:
+    m = lambda key, **kw: get_message(key, locale, **kw)
     workflow = [
-        "解析用户输入",
-        "抽取对象与约束",
-        "执行路由决策",
+        m("workflow_parse_input"),
+        m("workflow_extract_objects"),
+        m("workflow_route"),
     ]
-    if route.route_name == "clarification":
-        workflow.append("生成补充信息请求")
+    if overall_action == "clarify":
+        workflow.append(m("workflow_clarify"))
         return workflow
-    if route.route_name == "handoff":
-        workflow.append("升级到人工复核")
+    if overall_action == "handoff":
+        workflow.append(m("workflow_handoff"))
+        return workflow
+    if overall_action == "respond":
+        workflow.append(m("workflow_respond"))
         return workflow
 
     planned_actions = execution_plan_payload.get("planned_actions", [])
     if planned_actions:
-        workflow.extend([f"执行 {action['action_type']}" for action in planned_actions])
-    workflow.append("生成邮件回复草稿")
+        workflow.extend([m("workflow_execute_tool", action_type=action["action_type"]) for action in planned_actions])
+    workflow.append(m("workflow_draft_reply"))
     return workflow
 
 
-def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeResponse:
-    if isinstance(request, dict):
-        request = AgentRequest.model_validate(request)
-
+def _load_session_context(request: AgentRequest):
     session_store = SessionStore()
     session = session_store.load_session(request.thread_id)
+    memory_snapshot = session_store.load_memory_snapshot(request.thread_id)
     persisted_history = session.get("recent_turns", [])
-    request_history = [message.model_dump(mode="json") for message in request.conversation_history]
+    request_history = [msg.model_dump(mode="json") for msg in request.conversation_history]
     merged_history = _merge_histories(persisted_history, request_history)
-    attachments = [attachment.model_dump(mode="json") for attachment in request.attachments]
+    attachments = [att.model_dump(mode="json") for att in request.attachments]
+    return session_store, memory_snapshot, merged_history, attachments
 
-    ingestion_bundle = build_ingestion_bundle(
-        thread_id=request.thread_id,
-        user_query=request.user_query,
-        conversation_history=merged_history,
-        attachments=attachments,
-        prior_state=session.get("route_state"),
-    )
-    resolved_object_state = resolve_objects(ingestion_bundle)
-    route = route_from_ingestion_bundle(
-        ingestion_bundle=ingestion_bundle,
-        resolved_object_state=resolved_object_state,
-    )
-    execution_plan = build_execution_plan(route.execution_intent)
-    execution_run = run_execution_plan(execution_plan)
-    stored_response_memory = ResponseMemory.model_validate(
-        (session.get("route_state", {}) or {}).get("response_memory", {}) or {}
-    )
 
-    response_input = ResponseInput(
-        query=ingestion_bundle.turn_core.normalized_query or request.user_query,
-        execution_run=execution_run,
-        resolved_object_state=resolved_object_state,
-        dialogue_act=route.execution_intent.dialogue_act,
-        response_memory=stored_response_memory,
-        route_name=route.route_name,
-        clarification=route.clarification,
-    )
-    response_bundle = build_response_bundle(response_input)
-
-    execution_plan_payload = _compat_execution_plan(execution_plan)
-    execution_run_payload = _compat_execution_run(execution_run)
-    response_content_blocks = _serialize_content_blocks(response_bundle.composed_response.content_blocks)
-    response_resolution = response_bundle.response_resolution.model_dump(mode="json")
-    response_topic = response_bundle.response_topic
-    response_content_summary = response_bundle.response_content_summary
-    final_response = FinalResponsePayload(
+def _build_final_response_payload(agent_state: AgentState, execution_result: ExecutionResult, response_bundle) -> FinalResponsePayload:
+    clarification = agent_state.primary_clarification
+    return FinalResponsePayload(
         message=response_bundle.composed_response.message,
         response_type=response_bundle.composed_response.response_type,
         grounded_action_types=[
             _tool_action_type(call.tool_name)
-            for call in execution_run.executed_calls
+            for call in execution_result.executed_calls
             if call.status != "error"
         ],
         needs_human_handoff=response_bundle.composed_response.response_type == "handoff",
         missing_information_requested=(
-            list(route.clarification.missing_information)
-            if route.clarification is not None
+            list(clarification.missing_information)
+            if clarification is not None
             else []
         ),
     )
-    reply_preview = _build_reply_preview(
-        ingestion_bundle.turn_core.normalized_query or request.user_query,
-        route,
-        execution_run_payload,
-        final_response,
+
+
+def _persist_session_state(
+    session_store: SessionStore,
+    thread_id: str,
+    user_query: str,
+    memory_context: MemoryContext,
+    ingestion_bundle,
+    resolved_object_state,
+    intent_groups: list[IntentGroup],
+    demand_profile: DemandProfile,
+    agent_state: AgentState,
+    final_response: FinalResponsePayload,
+    response_bundle,
+    reply_preview: str,
+    response_content_blocks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    should_soft_reset = bool(
+        response_bundle.response_plan is not None
+        and response_bundle.response_plan.memory_update is not None
+        and response_bundle.response_plan.memory_update.soft_reset_current_topic
     )
-    route_state = _build_route_state(
-        ingestion_bundle,
-        resolved_object_state,
-        route,
-        final_response,
-        response_bundle.response_plan,
+    active_object = (
+        None if should_soft_reset
+        else (resolved_object_state.primary_object or resolved_object_state.active_object)
+    )
+
+    primary_route = agent_state.primary_route_decision
+    contributions = [
+        _build_ingestion_contribution(intent_groups),
+        _build_objects_contribution(resolved_object_state, should_soft_reset),
+        _build_routing_contribution(primary_route, memory_context.snapshot, final_response, _to_object_ref(active_object), should_soft_reset),
+        _build_response_contribution(response_bundle.response_plan),
+    ]
+
+    updated_snapshot = reflect(
+        current_snapshot=memory_context.snapshot,
+        contributions=contributions,
+        thread_id=thread_id,
+        normalized_query=ingestion_bundle.turn_core.normalized_query or ingestion_bundle.turn_core.raw_query,
+        last_turn_type=final_response.response_type,
+    )
+    waiting_for_user = final_response.response_type in ("clarification", "partial_answer")
+    route_phase = "waiting_for_user" if waiting_for_user else "active"
+    route_state = snapshot_to_route_state(
+        updated_snapshot,
+        route_phase=route_phase,
+        last_assistant_prompt_type=final_response.response_type,
     )
     assistant_message = {
         "role": "assistant",
         "content": final_response.message or reply_preview,
         "metadata": {
             "response_type": final_response.response_type,
-            "response_topic": response_topic,
+            "response_topic": response_bundle.response_topic,
             "response_path": response_bundle.response_path,
-            "legacy_fallback_used": False,
-            "legacy_fallback_route": "",
-            "legacy_fallback_responder": "",
-            "legacy_fallback_reason": "",
             "grounded_action_types": list(final_response.grounded_action_types),
             "content_blocks": list(response_content_blocks),
             "needs_human_handoff": final_response.needs_human_handoff,
             "response_debug": response_bundle.composed_response.debug_info,
+            "agent_debug": agent_state.debug_summary(),
+            "semantic_debug": demand_profile.model_dump(mode="json"),
+            "memory_snapshot": serialize_memory_snapshot(updated_snapshot),
             "route_state": route_state,
         },
     }
-
     session_store.append_turns(
-        request.thread_id,
+        thread_id,
         [
-            {"role": "user", "content": request.user_query, "metadata": {}},
+            {"role": "user", "content": user_query, "metadata": {}},
             assistant_message,
         ],
     )
-    session_store.update_route_state(request.thread_id, route_state)
+    session_store.persist_memory_snapshot(
+        thread_id, updated_snapshot,
+        route_phase=route_phase,
+        last_assistant_prompt_type=final_response.response_type,
+    )
+    return assistant_message
 
+
+def _assemble_agent_response(
+    ingestion_bundle,
+    resolved_object_state,
+    intent_groups: list[IntentGroup],
+    demand_profile: DemandProfile,
+    agent_state: AgentState,
+    execution_plan_payload: dict[str, Any],
+    execution_run_payload: dict[str, Any],
+    response_bundle,
+    response_content_blocks: list[dict[str, Any]],
+    final_response: FinalResponsePayload,
+    reply_preview: str,
+    assistant_message: dict[str, Any],
+    *,
+    locale: str = "zh",
+) -> AgentPrototypeResponse:
+    primary_route = agent_state.primary_route_decision
     return AgentPrototypeResponse(
         parsed={
             "turn_core": ingestion_bundle.turn_core.model_dump(mode="json"),
             "parser_signals": ingestion_bundle.turn_signals.parser_signals.model_dump(mode="json"),
             "deterministic_signals": ingestion_bundle.turn_signals.deterministic_signals.model_dump(mode="json"),
             "reference_signals": ingestion_bundle.turn_signals.reference_signals.model_dump(mode="json"),
+            "intent_groups": [group.model_dump(mode="json") for group in intent_groups],
+            "demand_profile": demand_profile.model_dump(mode="json"),
         },
-        agent_input=_build_agent_input_payload(ingestion_bundle, resolved_object_state, route),
-        route=route.model_dump(mode="json"),
-        suggested_workflow=_build_suggested_workflow(route, execution_plan_payload),
+        agent_input=_build_agent_input_payload(
+            ingestion_bundle,
+            resolved_object_state,
+            agent_state,
+            demand_profile,
+        ),
+        route=primary_route.model_dump(mode="json"),
+        suggested_workflow=_build_suggested_workflow(agent_state.overall_action, execution_plan_payload, locale=locale),
         reply_preview=reply_preview,
         execution_plan=execution_plan_payload,
         execution_run=execution_run_payload,
-        response_resolution=response_resolution,
-        response_topic=response_topic,
+        response_resolution=response_bundle.response_resolution.model_dump(mode="json"),
+        response_topic=response_bundle.response_topic,
         response_content_blocks=response_content_blocks,
-        response_content_summary=response_content_summary,
+        response_content_summary=response_bundle.response_content_summary,
         response_path=response_bundle.response_path,
-        legacy_fallback_used=False,
-        legacy_fallback_route="",
-        legacy_fallback_responder="",
-        legacy_fallback_reason="",
         final_response=final_response,
         assistant_message=assistant_message,
+    )
+
+
+def _run_agent_loop(
+    intent_groups: list[IntentGroup],
+    demand_profile: DemandProfile,
+    ingestion_bundle,
+    resolved_object_state,
+    memory_context: MemoryContext,
+) -> AgentState:
+    """Phase 2: iterate over intent groups, route and execute each independently.
+
+    A shared ToolCallCache enables:
+    - Deduplication: if group A already called catalog_lookup_tool for "CAR-T",
+      group B reuses the cached result instead of calling again.
+    - Cross-group observation: facts discovered by group A (e.g., product name,
+      business_line) are passed to group B's tool requests as enriched context.
+    """
+    from src.agent.tool_call_cache import ToolCallCache
+
+    agent_state = AgentState()
+    cache = ToolCallCache()
+
+    for group in intent_groups:
+        route_decision = route(
+            ingestion_bundle,
+            resolved_object_state,
+            focus_group=group,
+            demand_profile=demand_profile,
+        )
+
+        if route_decision.action == "execute":
+            execution_result = run_executor(
+                ingestion_bundle=ingestion_bundle,
+                resolved_object_state=resolved_object_state,
+                route_decision=route_decision,
+                memory_snapshot=memory_context.snapshot,
+                focus_group=group,
+                demand_profile=demand_profile,
+                tool_call_cache=cache,
+            )
+            status = (
+                "resolved"
+                if execution_result.final_status in ("ok", "partial")
+                else "needs_clarification"
+            )
+        elif route_decision.action == "handoff":
+            execution_result = empty_execution_result(reason="needs handoff")
+            status = "needs_handoff"
+        elif route_decision.action == "clarify":
+            execution_result = empty_execution_result(reason="needs clarification")
+            status = "needs_clarification"
+        else:
+            execution_result = empty_execution_result(
+                reason=f"No execution needed: action={route_decision.action}",
+            )
+            status = "resolved"
+
+        agent_state.record(group, route_decision, execution_result, status=status)
+
+    return agent_state
+
+
+def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeResponse:
+    if isinstance(request, dict):
+        request = AgentRequest.model_validate(request)
+
+    # --- Phase 1: Understand ---
+    session_store, memory_snapshot, merged_history, attachments = _load_session_context(request)
+
+    memory_context = recall(
+        thread_id=request.thread_id,
+        user_query=request.user_query,
+        prior_state=memory_snapshot,
+    )
+
+    ingestion_bundle = build_ingestion_bundle(
+        thread_id=request.thread_id,
+        user_query=request.user_query,
+        conversation_history=merged_history,
+        attachments=attachments,
+        prior_state=memory_context.snapshot,
+        stateful_anchors=memory_context.stateful_anchors,
+        has_recent_objects=bool(memory_context.recent_objects_by_relevance),
+    )
+    resolved_object_state = resolve_objects(
+        ingestion_bundle,
+        trajectory_phase=memory_context.trajectory.phase,
+        recent_objects=memory_context.recent_objects_by_relevance,
+    )
+    intent_groups = assemble_intent_groups(
+        request_flags=ingestion_bundle.turn_signals.parser_signals.request_flags,
+        resolved_objects=[
+            resolved_object_state.primary_object,
+            *resolved_object_state.secondary_objects,
+        ],
+        primary_intent=ingestion_bundle.turn_signals.parser_signals.context.primary_intent,
+    )
+    demand_profile = build_demand_profile(
+        ingestion_bundle.turn_signals.parser_signals,
+        intent_groups,
+        prior_demand_type=memory_context.prior_demand_type,
+        prior_demand_flags=memory_context.prior_demand_flags,
+        continuity_confidence=memory_context.intent_continuity_confidence,
+    )
+    query = ingestion_bundle.turn_core.normalized_query or request.user_query
+
+    # --- Phase 2: Agent loop — route and execute each intent group ---
+    agent_state = _run_agent_loop(
+        intent_groups, demand_profile, ingestion_bundle, resolved_object_state, memory_context,
+    )
+
+    # --- Phase 3: Respond — merge all group outcomes into one response ---
+    execution_result = agent_state.merged_execution_result
+
+    response_bundle = build_response_bundle(ResponseInput(
+        query=query,
+        locale=request.locale,
+        execution_result=execution_result,
+        resolved_object_state=resolved_object_state,
+        dialogue_act=agent_state.primary_dialogue_act,
+        response_memory=memory_context.snapshot.response_memory,
+        action=agent_state.overall_action,
+        clarification=agent_state.primary_clarification,
+        group_outcomes=list(agent_state.outcomes),
+        demand_profile=demand_profile,
+    ))
+
+    # --- Phase 4: Serialize ---
+    execution_plan_payload = _serialize_execution_plan(execution_result)
+    execution_run_payload = _serialize_execution_run(execution_result)
+    response_content_blocks = _serialize_content_blocks(response_bundle.composed_response.content_blocks)
+    final_response = _build_final_response_payload(agent_state, execution_result, response_bundle)
+    reply_preview = _build_reply_preview(
+        query, agent_state.overall_action, execution_run_payload, final_response,
+        locale=request.locale,
+    )
+
+    # --- Phase 5: Reflect + persist ---
+    assistant_message = _persist_session_state(
+        session_store, request.thread_id, request.user_query,
+        memory_context, ingestion_bundle, resolved_object_state,
+        intent_groups, demand_profile, agent_state,
+        final_response, response_bundle,
+        reply_preview, response_content_blocks,
+    )
+
+    # --- Phase 6: Assemble HTTP response ---
+    return _assemble_agent_response(
+        ingestion_bundle, resolved_object_state, intent_groups, demand_profile, agent_state,
+        execution_plan_payload, execution_run_payload,
+        response_bundle, response_content_blocks,
+        final_response, reply_preview, assistant_message,
+        locale=request.locale,
     )

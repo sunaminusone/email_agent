@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from src.tools.contracts import RegistryEntry, ToolExecutor
-from src.tools.errors import ToolRegistrationError, UnknownToolError
+from src.tools.contracts import RegistryEntry, ToolExecutor, ToolRegistrationError, UnknownToolError
 from src.tools.models import ToolCapability
 
 

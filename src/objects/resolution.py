@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from typing import TYPE_CHECKING
 
 from src.ingestion.models import IngestionBundle
 from src.objects.constraint_matching import (
@@ -12,15 +13,29 @@ from src.objects.constraint_matching import (
 from src.objects.extraction import extract_object_bundle
 from src.objects.models import AmbiguousObjectSet, ObjectBundle, ObjectCandidate, ResolvedObjectState
 
+if TYPE_CHECKING:
+    from src.memory.models import ScoredObjectRef
 
-def resolve_objects(ingestion_bundle: IngestionBundle) -> ResolvedObjectState:
-    object_bundle = extract_object_bundle(ingestion_bundle)
-    return resolve_object_state(ingestion_bundle, object_bundle)
+
+def resolve_objects(
+    ingestion_bundle: IngestionBundle,
+    *,
+    trajectory_phase: str | None = None,
+    recent_objects: list[ScoredObjectRef] | None = None,
+) -> ResolvedObjectState:
+    object_bundle = extract_object_bundle(ingestion_bundle, recent_objects=recent_objects)
+    return resolve_object_state(
+        ingestion_bundle,
+        object_bundle,
+        trajectory_phase=trajectory_phase,
+    )
 
 
 def resolve_object_state(
     ingestion_bundle: IngestionBundle,
     object_bundle: ObjectBundle | None = None,
+    *,
+    trajectory_phase: str | None = None,
 ) -> ResolvedObjectState:
     bundle = object_bundle or extract_object_bundle(ingestion_bundle)
     reference_constraints = ingestion_bundle.turn_signals.reference_signals.attribute_constraints
@@ -29,7 +44,7 @@ def resolve_object_state(
     ambiguous_sets = bundle.ambiguous_sets
 
     pending_clarification = bool(ingestion_bundle.stateful_anchors.pending_clarification_field)
-    can_reuse_context = _can_reuse_context(ingestion_bundle)
+    can_reuse_context = _can_reuse_context(ingestion_bundle, trajectory_phase)
     constraints_applied = False
     pending_resolved_candidate: ObjectCandidate | None = None
     constraint_target_mode = _constraint_target_mode(
@@ -63,32 +78,52 @@ def resolve_object_state(
             if filtered_context or filtered_ambiguous_sets or promoted_candidates:
                 constraints_applied = True
 
+    # --- Phase-aware context scoring ---
+    if trajectory_phase == "topic_switch":
+        context_candidates = [
+            candidate.model_copy(update={"confidence": max(0.0, candidate.confidence - 0.15)})
+            for candidate in context_candidates
+        ]
+
+    # --- Select primary object ---
     primary_object: ObjectCandidate | None = None
     used_stateful_anchor = False
     resolution_reason = ""
+    resolution_phase = ""
 
     if current_candidates:
         primary_object = max(current_candidates, key=_candidate_score)
         resolution_reason = "Selected the strongest current-turn object candidate."
+        resolution_phase = "current_turn"
     elif pending_resolved_candidate is not None:
         primary_object = pending_resolved_candidate
         used_stateful_anchor = True
         resolution_reason = "Resolved the pending clarification to a single object candidate."
+        resolution_phase = "pending_resolved"
     elif not pending_clarification and can_reuse_context and context_candidates:
         primary_object = max(context_candidates, key=_candidate_score)
         used_stateful_anchor = True
         resolution_reason = "Reused contextual object state because the turn depends on prior context."
+        resolution_phase = "context_reuse"
     elif ambiguous_sets:
         resolution_reason = "No primary object was selected because clarification-worthy ambiguity remains."
+        resolution_phase = "unresolved"
     elif reference_constraints and constraint_target_mode != "none" and not constraints_applied:
         resolution_reason = "Reference attribute constraints did not match the targeted contextual candidates."
+        resolution_phase = "unresolved"
     elif reference_constraints and constraint_target_mode == "none":
         resolution_reason = "Reference attribute constraints were present, but the turn did not require contextual filtering."
+        resolution_phase = "unresolved"
     else:
         resolution_reason = "No object candidates were strong enough to resolve a primary object."
+        resolution_phase = "unresolved"
 
     ambiguous_sets = [_decorate_ambiguous_set(item) for item in ambiguous_sets]
 
+    # --- Derive active_object ---
+    active_object = _derive_active_object(primary_object, context_candidates)
+
+    # --- Assemble secondary objects ---
     secondary_objects: list[ObjectCandidate] = []
     seen_keys: set[tuple[str, str, str]] = set()
     if primary_object is not None:
@@ -107,15 +142,43 @@ def resolve_object_state(
         primary_object=primary_object,
         secondary_objects=secondary_objects,
         ambiguous_sets=ambiguous_sets,
-        candidate_objects=bundle.all_candidates,
-        active_object=primary_object,
+        active_object=active_object,
         used_stateful_anchor=used_stateful_anchor or (
             primary_object.used_stateful_anchor if primary_object is not None else False
         ),
         resolution_confidence=resolution_confidence,
         resolution_reason=resolution_reason,
+        resolution_phase=resolution_phase,
     )
 
+
+# ---------------------------------------------------------------------------
+# Active object derivation
+# ---------------------------------------------------------------------------
+
+def _derive_active_object(
+    primary_object: ObjectCandidate | None,
+    context_candidates: list[ObjectCandidate],
+) -> ObjectCandidate | None:
+    """Derive active_object independently of primary_object.
+
+    - If primary_object exists, it becomes the active object (current turn takes priority).
+    - Otherwise, use the highest-scoring context candidate (already populated from
+      recent_objects by context_extractor).
+    - If no context candidates, fall back to None.
+    """
+    if primary_object is not None:
+        return primary_object
+
+    if not context_candidates:
+        return None
+
+    return max(context_candidates, key=_candidate_score)
+
+
+# ---------------------------------------------------------------------------
+# Candidate scoring
+# ---------------------------------------------------------------------------
 
 def _candidate_score(candidate: ObjectCandidate) -> float:
     score = candidate.confidence
@@ -144,7 +207,17 @@ def _secondary_key(candidate: ObjectCandidate) -> tuple[str, str, str]:
     )
 
 
-def _can_reuse_context(ingestion_bundle: IngestionBundle) -> bool:
+# ---------------------------------------------------------------------------
+# Context reuse (phase-aware)
+# ---------------------------------------------------------------------------
+
+def _can_reuse_context(ingestion_bundle: IngestionBundle, trajectory_phase: str | None = None) -> bool:
+    # Phase-aware override: fresh_start and topic_switch block context reuse
+    if trajectory_phase == "fresh_start":
+        return False
+    if trajectory_phase == "topic_switch":
+        return False
+
     reference_signals = ingestion_bundle.turn_signals.reference_signals
     return (
         reference_signals.is_context_dependent
@@ -201,6 +274,10 @@ def _has_strong_explicit_object(candidates: list[ObjectCandidate]) -> bool:
             return True
     return False
 
+
+# ---------------------------------------------------------------------------
+# Ambiguity classification
+# ---------------------------------------------------------------------------
 
 def _decorate_ambiguous_set(ambiguous_set: AmbiguousObjectSet) -> AmbiguousObjectSet:
     ambiguity_kind = _classify_ambiguity_kind(ambiguous_set)

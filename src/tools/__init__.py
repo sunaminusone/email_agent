@@ -2,10 +2,16 @@ from . import catalog as _catalog_tools  # noqa: F401
 from . import documents as _document_tools  # noqa: F401
 from . import quickbooks as _quickbooks_tools  # noqa: F401
 from . import rag as _rag_tools  # noqa: F401
-from .base import BaseTool
-from .contracts import RegistryEntry, ToolExecutor, ToolLike
+from .contracts import (
+    BaseTool,
+    RegistryEntry,
+    ToolError,
+    ToolExecutionError,
+    ToolExecutor,
+    ToolRegistrationError,
+    UnknownToolError,
+)
 from .dispatcher import dispatch_tool, safe_dispatch_tool
-from .errors import ToolError, ToolExecutionError, ToolRegistrationError, UnknownToolError
 from .models import ToolCapability, ToolConstraints, ToolRequest, ToolResult
 from .registry import (
     clear_registry,
@@ -23,7 +29,6 @@ __all__ = [
     "BaseTool",
     "RegistryEntry",
     "ToolExecutor",
-    "ToolLike",
     "ToolCapability",
     "ToolConstraints",
     "ToolRequest",

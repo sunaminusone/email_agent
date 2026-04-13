@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.common.utils import dedupe_strings
 from src.tools.models import ToolRequest
 
 
 def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
     primary_object = request.primary_object
-    common_constraints = request.constraints.common
     scope_constraints = request.constraints.scope
     retrieval_constraints = request.constraints.retrieval
-    tool_constraints = request.constraints.tool.get("rag", {})
-    resolved_constraints = common_constraints.get("resolved_object_constraints", {})
+    resolved_constraints = request.constraints.common.get("resolved_object_constraints", {})
 
     active_service_name = ""
     active_product_name = ""
@@ -35,10 +34,7 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
             if label:
                 targets.append(label)
 
-    product_name = (
-        resolved_constraints.get("product_name")
-        or ""
-    ).strip()
+    product_name = (resolved_constraints.get("product_name") or "").strip()
     if product_name:
         product_names.append(product_name)
 
@@ -52,7 +48,6 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
 
     business_line_hint = (
         (primary_object.business_line if primary_object is not None else "")
-        or tool_constraints.get("business_line")
         or retrieval_constraints.get("business_line")
         or resolved_constraints.get("business_line")
         or ""
@@ -61,28 +56,15 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
     return {
         "query": request.query,
         "business_line_hint": business_line_hint,
-        "retrieval_hints": tool_constraints.get(
-            "retrieval_hints",
-            retrieval_constraints.get("hints", {}),
-        ),
+        "retrieval_hints": retrieval_constraints.get("hints", {}),
         "active_service_name": active_service_name or scope_constraints.get("active_service_name", ""),
         "active_product_name": active_product_name or scope_constraints.get("active_product_name", ""),
         "active_target": active_target or scope_constraints.get("active_target", ""),
-        "product_names": _dedupe(product_names),
-        "service_names": _dedupe(service_names),
-        "targets": _dedupe(targets),
+        "product_names": dedupe_strings(product_names),
+        "service_names": dedupe_strings(service_names),
+        "targets": dedupe_strings(targets),
         "top_k": 5,
         "scope_context": scope_constraints,
     }
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    ordered: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        cleaned = value.strip()
-        if not cleaned or cleaned in seen:
-            continue
-        seen.add(cleaned)
-        ordered.append(cleaned)
-    return ordered

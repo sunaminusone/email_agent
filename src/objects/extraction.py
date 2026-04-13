@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.ingestion.models import IngestionBundle
 from src.objects.extractors.context_extractor import extract_context_candidates
 from src.objects.extractors.operational_extractor import extract_operational_candidates
@@ -8,13 +10,19 @@ from src.objects.extractors.service_extractor import extract_service_candidates
 from src.objects.models import AmbiguousObjectSet, ObjectBundle, ObjectCandidate
 from src.objects.normalizers import normalize_identifier, normalize_object_alias
 
+if TYPE_CHECKING:
+    from src.memory.models import ScoredObjectRef
 
-def extract_object_bundle(ingestion_bundle: IngestionBundle) -> ObjectBundle:
+
+def extract_object_bundle(
+    ingestion_bundle: IngestionBundle,
+    recent_objects: list[ScoredObjectRef] | None = None,
+) -> ObjectBundle:
     extractor_outputs = [
         extract_product_candidates(ingestion_bundle),
         extract_service_candidates(ingestion_bundle),
         extract_operational_candidates(ingestion_bundle),
-        extract_context_candidates(ingestion_bundle),
+        extract_context_candidates(ingestion_bundle, recent_objects=recent_objects),
     ]
 
     current_candidates: list[ObjectCandidate] = []
@@ -36,7 +44,6 @@ def extract_object_bundle(ingestion_bundle: IngestionBundle) -> ObjectBundle:
     ambiguous_sets = _dedupe_ambiguous_sets(ambiguous_sets)
 
     return ObjectBundle(
-        ingestion_bundle=ingestion_bundle,
         current_candidates=current_candidates,
         context_candidates=context_candidates,
         all_candidates=all_candidates,

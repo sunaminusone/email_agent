@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.tools.errors import ToolExecutionError, UnknownToolError
+from src.tools.contracts import ToolExecutionError, UnknownToolError
 from src.tools.models import ToolRequest, ToolResult
 from src.tools.registry import get_tool_executor
 from src.tools.result_builders import error_result

@@ -20,6 +20,8 @@ from src.response.renderers import (
     render_answer_response,
     render_clarification_response,
     render_handoff_response,
+    render_knowledge_response,
+    render_partial_answer_response,
     render_termination_response,
 )
 
@@ -33,13 +35,13 @@ def plan_response(response_input: ResponseInput) -> tuple[ResponsePlan, list[Con
 def compose_response(response_input: ResponseInput) -> tuple[ComposedResponse, ResponsePlan]:
     response_plan, _ = plan_response(response_input)
     draft = _render_response(response_input, response_plan)
-    return compose_final_response(draft, response_plan), response_plan
+    return compose_final_response(draft, response_plan, locale=response_input.locale), response_plan
 
 
 def build_response_bundle(response_input: ResponseInput) -> ResponseBundle:
     response_plan, content_blocks = plan_response(response_input)
     draft = _render_response(response_input, response_plan)
-    composed_response = compose_final_response(draft, response_plan)
+    composed_response = compose_final_response(draft, response_plan, locale=response_input.locale)
     response_resolution = build_response_resolution(response_plan, content_blocks)
     response_topic = derive_response_topic(response_plan, response_resolution)
     response_path = str(composed_response.debug_info.get("response_path", "deterministic"))
@@ -67,4 +69,8 @@ def _render_response(
         return render_acknowledgement_response(response_input, response_plan)
     if mode == "termination":
         return render_termination_response(response_input, response_plan)
+    if mode == "knowledge_answer":
+        return render_knowledge_response(response_input, response_plan)
+    if mode == "partial_answer":
+        return render_partial_answer_response(response_input, response_plan)
     return render_answer_response(response_input, response_plan)

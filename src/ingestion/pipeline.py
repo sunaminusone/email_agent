@@ -9,6 +9,7 @@ from src.ingestion.parser_adapter import build_parser_signals
 from src.ingestion.reference_signals import extract_reference_signals
 from src.ingestion.signal_refinement import refine_parser_signals
 from src.ingestion.stateful_anchors import extract_stateful_anchors
+from src.memory.models import StatefulAnchors
 
 
 def build_ingestion_bundle(
@@ -18,6 +19,8 @@ def build_ingestion_bundle(
     conversation_history: list[dict[str, Any]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
     prior_state: Any | None = None,
+    stateful_anchors: StatefulAnchors | None = None,
+    has_recent_objects: bool = False,
 ) -> IngestionBundle:
     turn_core, normalized_history, attachment_signals = normalize_turn_inputs(
         thread_id=thread_id,
@@ -44,7 +47,8 @@ def build_ingestion_bundle(
         }
     )
 
-    stateful_anchors = extract_stateful_anchors(prior_state)
+    if stateful_anchors is None:
+        stateful_anchors = extract_stateful_anchors(prior_state)
     deterministic_signals = extract_deterministic_signals(
         turn_core.normalized_query,
         parser_signals=parser_signals,
@@ -53,6 +57,7 @@ def build_ingestion_bundle(
         turn_core.normalized_query,
         parser_signals=parser_signals,
         stateful_anchors=stateful_anchors,
+        has_recent_objects=has_recent_objects,
     )
 
     return IngestionBundle(

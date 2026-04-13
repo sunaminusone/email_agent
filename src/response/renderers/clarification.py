@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.common.messages import get_message
 from src.response.models import ComposedResponse, ResponseInput, ResponsePlan
 
 
@@ -7,8 +8,9 @@ def render_clarification_response(
     response_input: ResponseInput,
     response_plan: ResponsePlan,
 ) -> ComposedResponse:
+    locale = response_input.locale
     clarification = response_input.clarification
-    message = "I need a bit more information before I can continue."
+    message = get_message("response_clarification_default", locale)
     if clarification is not None and clarification.prompt:
         message = clarification.prompt
 

@@ -45,14 +45,39 @@ SELECTION_PREFIXES = {
 }
 
 
-def resolve_dialogue_act(query: str, object_routing: RoutedObjectState) -> DialogueActResult:
+# ---------------------------------------------------------------------------
+# v3: simplified 3-act classification with stateful_anchors awareness
+# ---------------------------------------------------------------------------
+
+def resolve_dialogue_act(
+    query: str,
+    object_routing: RoutedObjectState,
+    *,
+    stateful_anchors=None,
+) -> DialogueActResult:
     text = normalize_routing_text(query or "").strip()
     if not text:
-        return DialogueActResult(reason="The turn did not contain enough text to classify a dialogue act.")
+        return DialogueActResult(
+            act="closing",
+            confidence=0.70,
+            reason="The turn did not contain enough text to classify a dialogue act.",
+        )
+
+    # Stateful anchors: pending clarification biases toward selection
+    if stateful_anchors and getattr(stateful_anchors, "pending_clarification_field", ""):
+        if _looks_like_selection(text, object_routing) or text in {"sure", "yes", "yeah", "yep"}:
+            return DialogueActResult(
+                act="selection",
+                confidence=0.90,
+                reason="Selection in response to pending clarification.",
+                matched_signals=["pending_clarification", "selection_pattern"],
+                requires_active_object=True,
+                selection_value=query.strip(),
+            )
 
     if any(pattern in text for pattern in TERMINATE_PATTERNS):
         return DialogueActResult(
-            act="TERMINATE",
+            act="closing",
             confidence=0.92,
             reason="The turn contains an explicit stop or closure signal.",
             matched_signals=["terminate_pattern"],
@@ -60,7 +85,7 @@ def resolve_dialogue_act(query: str, object_routing: RoutedObjectState) -> Dialo
 
     if _looks_like_selection(text, object_routing):
         return DialogueActResult(
-            act="SELECTION",
+            act="selection",
             confidence=0.88,
             reason="The turn appears to select one candidate from prior context.",
             matched_signals=["selection_pattern"],
@@ -70,7 +95,8 @@ def resolve_dialogue_act(query: str, object_routing: RoutedObjectState) -> Dialo
 
     if any(pattern in text for pattern in ELABORATE_PATTERNS):
         return DialogueActResult(
-            act="ELABORATE",
+            act="inquiry",
+            is_continuation=True,
             confidence=0.82,
             reason="The turn asks for expansion or deeper explanation.",
             matched_signals=["elaboration_pattern"],
@@ -79,7 +105,7 @@ def resolve_dialogue_act(query: str, object_routing: RoutedObjectState) -> Dialo
 
     if _looks_like_acknowledgement(text):
         return DialogueActResult(
-            act="ACKNOWLEDGE",
+            act="closing",
             confidence=0.81,
             reason="The turn mainly acknowledges the prior response.",
             matched_signals=["acknowledgement_pattern"],
@@ -87,18 +113,24 @@ def resolve_dialogue_act(query: str, object_routing: RoutedObjectState) -> Dialo
 
     if _looks_like_inquiry(text):
         return DialogueActResult(
-            act="INQUIRY",
+            act="inquiry",
             confidence=0.84,
             reason="The turn asks for information or action-oriented detail.",
             matched_signals=["inquiry_pattern"],
         )
 
+    # No pattern matched -> fallback to inquiry with low confidence
+    # (Level 2 LLM classifier will be wired here in Phase B)
     return DialogueActResult(
-        act="UNKNOWN",
-        confidence=0.35,
-        reason="The turn did not strongly match the current dialogue-act heuristics.",
+        act="inquiry",
+        confidence=0.40,
+        reason="No strong pattern matched; defaulting to inquiry for Level 2 resolution.",
     )
 
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
 def _looks_like_selection(text: str, object_routing: RoutedObjectState) -> bool:
     if re.fullmatch(r"\d+", text):

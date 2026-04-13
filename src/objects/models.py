@@ -4,7 +4,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.ingestion.models import IngestionBundle
 from src.ingestion.models import AttributeConstraint, EntitySpan, RecencyType, SourceType
 from src.common.models import ObjectType
 
@@ -41,7 +40,6 @@ class AmbiguousObjectSet(_ObjectsModel):
     resolution_strategy: str = "clarify"
     reason: str = ""
     attribute_constraints: list[AttributeConstraint] = Field(default_factory=list)
-    needs_user_clarification: bool = True
 
 
 class ExtractorOutput(_ObjectsModel):
@@ -50,7 +48,6 @@ class ExtractorOutput(_ObjectsModel):
 
 
 class ObjectBundle(_ObjectsModel):
-    ingestion_bundle: IngestionBundle | None = None
     current_candidates: list[ObjectCandidate] = Field(default_factory=list)
     context_candidates: list[ObjectCandidate] = Field(default_factory=list)
     all_candidates: list[ObjectCandidate] = Field(default_factory=list)
@@ -61,8 +58,8 @@ class ResolvedObjectState(_ObjectsModel):
     primary_object: ObjectCandidate | None = None
     secondary_objects: list[ObjectCandidate] = Field(default_factory=list)
     ambiguous_sets: list[AmbiguousObjectSet] = Field(default_factory=list)
-    candidate_objects: list[ObjectCandidate] = Field(default_factory=list)
     active_object: ObjectCandidate | None = None
     used_stateful_anchor: bool = False
     resolution_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     resolution_reason: str = ""
+    resolution_phase: str = ""

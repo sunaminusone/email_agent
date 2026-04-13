@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from src.common.models import SourceAttribution as CommonSourceAttribution, ValueSignal as CommonValueSignal
+from src.memory.models import StatefulAnchors
 
 
 class _IngestionModel(BaseModel):
@@ -13,17 +15,11 @@ RecencyType = Literal["CURRENT_TURN", "CONTEXTUAL"]
 SourceType = Literal["deterministic", "parser", "attachment", "stateful_anchor"]
 
 
-class SourceAttribution(_IngestionModel):
-    source_type: SourceType = "parser"
-    recency: RecencyType = "CURRENT_TURN"
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    source_label: str = ""
+class SourceAttribution(CommonSourceAttribution):
+    pass
 
 
-class ValueSignal(_IngestionModel):
-    value: str = ""
-    raw: str = ""
-    normalized_value: str | None = None
+class ValueSignal(CommonValueSignal):
     attribution: SourceAttribution = Field(default_factory=SourceAttribution)
 
 
@@ -63,7 +59,6 @@ class ParserContext(_IngestionModel):
     language: str = "other"
     channel: str = "internal_qa"
     primary_intent: str = "unknown"
-    secondary_intents: list[str] = Field(default_factory=list)
     intent_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     query_type: str = "question"
     urgency: str = "low"
@@ -120,13 +115,6 @@ class ParserRetrievalHints(_IngestionModel):
     filters: list[str] = Field(default_factory=list)
 
 
-class ParserToolHints(_IngestionModel):
-    suggested_tools: list[str] = Field(default_factory=list)
-    requires_database_lookup: bool = False
-    requires_file_lookup: bool = False
-    requires_order_system: bool = False
-
-
 class ParserEntitySignals(_IngestionModel):
     product_names: list[EntitySpan] = Field(default_factory=list)
     catalog_numbers: list[EntitySpan] = Field(default_factory=list)
@@ -162,7 +150,6 @@ class ParserSignals(_IngestionModel):
     constraints: ParserConstraints = Field(default_factory=ParserConstraints)
     open_slots: ParserOpenSlots = Field(default_factory=ParserOpenSlots)
     retrieval_hints: ParserRetrievalHints = Field(default_factory=ParserRetrievalHints)
-    tool_hints: ParserToolHints = Field(default_factory=ParserToolHints)
     missing_information: list[str] = Field(default_factory=list)
     extra_instructions: str | None = None
 
@@ -175,7 +162,6 @@ class ParserOutput(_IngestionModel):
     constraints: ParserConstraints = Field(default_factory=ParserConstraints)
     open_slots: ParserOpenSlots = Field(default_factory=ParserOpenSlots)
     retrieval_hints: ParserRetrievalHints = Field(default_factory=ParserRetrievalHints)
-    tool_hints: ParserToolHints = Field(default_factory=ParserToolHints)
     missing_information: list[str] = Field(default_factory=list)
     extra_instructions: str | None = None
 
@@ -224,17 +210,6 @@ class AttachmentSignals(_IngestionModel):
     attachment_ids: list[str] = Field(default_factory=list)
     storage_uris: list[str] = Field(default_factory=list)
     attachments: list[AttachmentPointer] = Field(default_factory=list)
-
-
-class StatefulAnchors(_IngestionModel):
-    active_route: str = ""
-    active_business_line: ValueSignal | None = None
-    active_entity_kind: ValueSignal | None = None
-    active_entity_identifier: ValueSignal | None = None
-    active_entity_display_name: ValueSignal | None = None
-    pending_clarification_field: str = ""
-    pending_candidate_options: list[str] = Field(default_factory=list)
-    pending_identifier: str = ""
 
 
 class TurnSignals(_IngestionModel):

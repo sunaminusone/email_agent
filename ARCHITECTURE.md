@@ -1,501 +1,216 @@
 # Architecture
 
-This project is a modular biotech support agent built around typed Python services plus LangChain at the LLM boundaries.
+This document summarizes the current target architecture (v3).
 
-The guiding principle is:
+The canonical design lives at [docs/AGENT_ARCHITECTURE_V3.md](docs/AGENT_ARCHITECTURE_V3.md). This root document is a compact overview.
 
-- LangChain handles parsing, routing LLM fallback, and response generation boundaries.
-- Typed Python modules handle state, business rules, data access, and tool execution.
+## Design Philosophy
 
-## High-Level Runtime Flow
+This system is an **agent**, not a pipeline.
 
-```text
-user input
-  -> parser
-  -> conversation
-  -> context
-  -> decision
-  -> orchestration
-  -> tools / integrations / data capabilities
-  -> response
-  -> final assistant message
-```
+An agent:
+- understands the user's message
+- autonomously decides which tools to use
+- executes tools and observes results
+- iterates if results are insufficient
+- synthesizes a coherent response
 
-In more concrete terms:
+Each module is independent. Cross-module communication happens through typed Pydantic contracts. LangChain is used as an implementation framework where it adds value, but never replaces the architectural contracts.
 
-1. `parser/` converts the current turn into `ParsedResult`.
-2. `conversation/` combines `ParsedResult` with session state and produces `AgentContext`.
-3. `context/` assembles `RuntimeContext` for downstream routing and execution.
-4. `decision/` decides route and response strategy.
-5. `orchestration/` plans and executes the selected actions.
-6. `response/` builds grounded content and renders the final answer.
-
-## Module Boundaries
-
-### `src/orchestration/`
-
-Shared lifecycle and execution ordering.
-
-This layer answers:
-- What runs next?
-- In what order do parse, route, plan, execute, and respond happen?
-
-Current files:
-- [prototype_service.py](/Users/promab/anaconda_projects/email_agent/src/orchestration/prototype_service.py)
-- [planner_service.py](/Users/promab/anaconda_projects/email_agent/src/orchestration/planner_service.py)
-- [executor_service.py](/Users/promab/anaconda_projects/email_agent/src/orchestration/executor_service.py)
-
-This layer should not own:
-- business rules
-- route heuristics
-- storage logic
-- external API details
-
-### `src/parser/`
-
-Current-turn understanding only.
-
-This layer answers:
-- What does this single user turn mean on its own?
-
-Output:
-- `ParsedResult`
-
-Current structure:
-- [service.py](/Users/promab/anaconda_projects/email_agent/src/parser/service.py)
-- [chain.py](/Users/promab/anaconda_projects/email_agent/src/parser/chain.py)
-- [prompt.py](/Users/promab/anaconda_projects/email_agent/src/parser/prompt.py)
-- [preprocess.py](/Users/promab/anaconda_projects/email_agent/src/parser/preprocess.py)
-- [postprocess.py](/Users/promab/anaconda_projects/email_agent/src/parser/postprocess.py)
-- [intent_resolution.py](/Users/promab/anaconda_projects/email_agent/src/parser/intent_resolution.py)
-
-Parser is implemented as an LCEL-style pipeline:
+## Runtime Flow
 
 ```text
-preprocess -> prompt -> structured LLM -> postprocess
+user message + memory
+  -> ingestion        (understand)
+  -> objects           (resolve entities)
+  -> routing           (decide: execute / clarify / handoff)
+  -> executor          (reason + dispatch tools + observe, may loop)
+  -> responser         (synthesize reply)
+  -> memory update     (persist state)
 ```
 
-### `src/conversation/`
+In concrete terms:
 
-Multi-turn conversation interpretation.
+1. `ingestion` emits `IngestionBundle`
+2. `objects` emits `ResolvedObjectState`
+3. `routing` emits `RouteDecision`
+4. `executor` emits `ExecutionResult` (contains plan + tool results)
+5. `responser` emits `AgentResponse`
+6. `memory` persists `MemoryUpdate`
 
-This layer answers:
-- Is this a new request or follow-up?
-- Should prior payload be reused?
-- What does `this one` refer to?
-- What should the effective query be?
+## Agent Loop
 
-Output:
-- `AgentContext`
+```python
+def run_email_agent(request):
+    memory = load_memory(request.thread_id)
 
-Current structure:
-- [agent_input_service.py](/Users/promab/anaconda_projects/email_agent/src/conversation/agent_input_service.py)
-- [turn_resolution_service.py](/Users/promab/anaconda_projects/email_agent/src/conversation/turn_resolution_service.py)
-- [reference_resolution_service.py](/Users/promab/anaconda_projects/email_agent/src/conversation/reference_resolution_service.py)
-- [routing_state_service.py](/Users/promab/anaconda_projects/email_agent/src/conversation/routing_state_service.py)
-- [payload_builders.py](/Users/promab/anaconda_projects/email_agent/src/conversation/payload_builders.py)
-- [payload_merge_service.py](/Users/promab/anaconda_projects/email_agent/src/conversation/payload_merge_service.py)
-- [query_resolution.py](/Users/promab/anaconda_projects/email_agent/src/conversation/query_resolution.py)
+    # understand
+    parsed = ingestion.parse(request.query, memory)
+    objects = objects.resolve(parsed)
 
-### `src/context/`
+    # decide
+    route = routing.decide(parsed, objects)
 
-Runtime context assembly.
+    # execute (with reasoning loop)
+    results = None
+    if route.action == "execute":
+        results = executor.run(parsed, objects, memory)
 
-This layer answers:
-- What external/runtime context should the downstream system see?
+    # respond (all routes)
+    response = responser.respond(parsed, route, results)
 
-Current structure:
-- [context_provider.py](/Users/promab/anaconda_projects/email_agent/src/context/context_provider.py)
-- [providers.py](/Users/promab/anaconda_projects/email_agent/src/context/providers.py)
-- [formatter.py](/Users/promab/anaconda_projects/email_agent/src/context/formatter.py)
+    # remember
+    update_memory(memory, parsed, objects, route, results, response)
 
-Responsibilities:
-- combine memory, history, retrieval, and preferences
-- build prompt-ready sections for route and response stages
-
-### `src/memory/`
-
-Session persistence.
-
-This layer answers:
-- What should be remembered across turns?
-
-Current structure:
-- [session_store.py](/Users/promab/anaconda_projects/email_agent/src/memory/session_store.py)
-
-Responsibilities:
-- Redis-backed state by `thread_id`
-- persisted route state
-- persisted session payload
-- bounded recent history
-
-### `src/decision/`
-
-System decisions, not execution.
-
-This layer answers:
-- Which route should handle this turn?
-- What kind of answer should be produced?
-
-Current structure:
-- [route_decision_service.py](/Users/promab/anaconda_projects/email_agent/src/decision/route_decision_service.py)
-- [commercial_route_policy.py](/Users/promab/anaconda_projects/email_agent/src/decision/commercial_route_policy.py)
-- [operational_route_policy.py](/Users/promab/anaconda_projects/email_agent/src/decision/operational_route_policy.py)
-- [workflow_route_policy.py](/Users/promab/anaconda_projects/email_agent/src/decision/workflow_route_policy.py)
-- [route_preconditions.py](/Users/promab/anaconda_projects/email_agent/src/decision/route_preconditions.py)
-- [route_policy_shared.py](/Users/promab/anaconda_projects/email_agent/src/decision/route_policy_shared.py)
-- [routing_prompt.py](/Users/promab/anaconda_projects/email_agent/src/decision/routing_prompt.py)
-- [response_service.py](/Users/promab/anaconda_projects/email_agent/src/decision/response_service.py)
-
-#### `src/decision/response_resolution/`
-
-This is the response-strategy submodule.
-
-It answers:
-- What response topic is this?
-- What is the answer focus?
-- What style should be used?
-- Which fields should appear, and in what order?
-
-Current structure:
-- [service.py](/Users/promab/anaconda_projects/email_agent/src/decision/response_resolution/service.py)
-- [topic_policy.py](/Users/promab/anaconda_projects/email_agent/src/decision/response_resolution/topic_policy.py)
-- [focus_policy.py](/Users/promab/anaconda_projects/email_agent/src/decision/response_resolution/focus_policy.py)
-- [style_policy.py](/Users/promab/anaconda_projects/email_agent/src/decision/response_resolution/style_policy.py)
-- [content_policy.py](/Users/promab/anaconda_projects/email_agent/src/decision/response_resolution/content_policy.py)
-- [common.py](/Users/promab/anaconda_projects/email_agent/src/decision/response_resolution/common.py)
-
-The `service.py` file is intentionally thin. The actual policy logic lives in the topic/focus/style/content submodules.
-
-### Data and Capability Layers
-
-These modules answer factual questions. They are not orchestration layers.
-
-#### `src/catalog/`
-
-Structured product lookup.
-
-Responsibilities:
-- candidate retrieval
-- result ranking
-- final selection
-- service-level lookup interface
-- business line normalization
-
-Current structure:
-- [retrieval](/Users/promab/anaconda_projects/email_agent/src/catalog/retrieval)
-- [ranking.py](/Users/promab/anaconda_projects/email_agent/src/catalog/ranking.py)
-- [selection.py](/Users/promab/anaconda_projects/email_agent/src/catalog/selection.py)
-- [normalization.py](/Users/promab/anaconda_projects/email_agent/src/catalog/normalization.py)
-- [service.py](/Users/promab/anaconda_projects/email_agent/src/catalog/service.py)
-
-Inside `retrieval/`:
-- [shared.py](/Users/promab/anaconda_projects/email_agent/src/catalog/retrieval/shared.py)
-- [exact_lookup.py](/Users/promab/anaconda_projects/email_agent/src/catalog/retrieval/exact_lookup.py)
-- [alias_lookup.py](/Users/promab/anaconda_projects/email_agent/src/catalog/retrieval/alias_lookup.py)
-- [fuzzy_lookup.py](/Users/promab/anaconda_projects/email_agent/src/catalog/retrieval/fuzzy_lookup.py)
-
-The intended flow is:
-
-```text
-normalize -> retrieval -> ranking -> selection -> service
+    return response
 ```
 
-#### `src/documents/`
+## Module Responsibilities
 
-Structured document metadata and file matching.
+### `src/ingestion/`
 
-Responsibilities:
-- inventory retrieval
-- document-type and business-line normalization
-- result ranking
-- final selection
-- service-level lookup interface
+Purpose: parse user message, extract signals, resolve references
 
-Current structure:
-- [retrieval](/Users/promab/anaconda_projects/email_agent/src/documents/retrieval)
-- [ranking.py](/Users/promab/anaconda_projects/email_agent/src/documents/ranking.py)
-- [selection.py](/Users/promab/anaconda_projects/email_agent/src/documents/selection.py)
-- [normalization.py](/Users/promab/anaconda_projects/email_agent/src/documents/normalization.py)
-- [service.py](/Users/promab/anaconda_projects/email_agent/src/documents/service.py)
+Input: raw query, conversation history, attachments, prior state
 
-Inside `retrieval/`:
-- [shared.py](/Users/promab/anaconda_projects/email_agent/src/documents/retrieval/shared.py)
+Output: `IngestionBundle`
 
-This layer reads:
-- `document_catalog.csv`
-- local PDF inventory under `data/raw/pdf`
+Should not: resolve entities, select tools, generate replies
 
-The intended flow is:
+### `src/objects/`
 
-```text
-normalize -> retrieval -> ranking -> selection -> service
-```
+Purpose: resolve products, services, orders, invoices, and ambiguity
 
-#### `src/rag/`
+Input: `IngestionBundle`
 
-Semantic technical retrieval.
+Output: `ResolvedObjectState`
 
-Responsibilities:
-- service-page ingestion from curated `rag_ready` files
-- vector store loading and rebuild
-- chunk retrieval and reranking
-- technical/service knowledge grounding
-- thin deterministic retrieval post-processing for explicit workflow/phase cases
+Should not: select tools, execute retrieval, read session state directly
 
-Current structure:
-- [ingestion_config.py](/Users/promab/anaconda_projects/email_agent/src/rag/ingestion_config.py)
-- [service_page_ingestion.py](/Users/promab/anaconda_projects/email_agent/src/rag/service_page_ingestion.py)
-- [service.py](/Users/promab/anaconda_projects/email_agent/src/rag/service.py)
-- [retriever.py](/Users/promab/anaconda_projects/email_agent/src/rag/retriever.py)
-- [reranker.py](/Users/promab/anaconda_projects/email_agent/src/rag/reranker.py)
-- [vectorstore.py](/Users/promab/anaconda_projects/email_agent/src/rag/vectorstore.py)
+### `src/routing/`
 
-Current service-page source-of-truth:
-- [/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk](/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk)
+Purpose: decide the action route (execute / clarify / handoff)
 
-Current service-page authoring standard:
-- [SERVICE_PAGE_RAG_STANDARD.md](/Users/promab/anaconda_projects/email_agent/docs/SERVICE_PAGE_RAG_STANDARD.md)
+Input: `IngestionBundle`, `ResolvedObjectState`
 
-Current vector store:
-- Chroma collection built from service-page `rag_ready` files only
-- stored under [/Users/promab/anaconda_projects/email_agent/data/processed/chroma_rag_service_pages](/Users/promab/anaconda_projects/email_agent/data/processed/chroma_rag_service_pages)
+Output: `RouteDecision`
 
-Current retrieval flow:
+Should not: select tools (that is the executor's job), execute retrieval, generate replies
 
-```text
-service-page rag_ready files
-  -> service_page_ingestion
-  -> explicit prechunked Documents
-  -> Chroma recall
-  -> BGE reranker
-  -> thin deterministic post-processing
-  -> rag/service.py result payload
-```
+### `src/executor/`
 
-Current source-file conventions:
-- keep one `[DOCUMENT]` block and multiple `[SECTION]` blocks
-- author explicit subchunks in the source files instead of relying on parser-side guessing
-- use:
-  - `plan_summary`
-  - `service_plan`
-  - `service_phase`
-  - `workflow_step`
-- preserve workflow order with:
-  - `step`
-  - `previous_step`
-  - `next_step`
-- distinguish phase semantics with:
-  - `main_phase`
-  - `optional_main_phase`
-  - `optional_branch`
+Purpose: autonomously select tools, dispatch calls, observe results, iterate if needed
 
-Current retrieval rule:
-- let embedding + reranker do the main ranking work
-- keep only a small deterministic layer for:
-  - `business_line_hint`
-  - `after X -> next_step`
-  - exact `service_phase` resolution for explicit phase queries
+Input: `IngestionBundle`, `ResolvedObjectState`, `MemorySnapshot`
 
-#### `src/integrations/`
+Output: `ExecutionResult`
 
-Low-level external connectors.
+Contains an internal reasoning loop:
+1. read tool capabilities from registry
+2. decide which tools to call and with what parameters
+3. dispatch tool calls (parallel when possible)
+4. observe results, evaluate completeness
+5. if insufficient, plan additional tool calls
+6. return aggregated results
 
-Current focus:
-- QuickBooks
-
-QuickBooks structure:
-- [auth.py](/Users/promab/anaconda_projects/email_agent/src/integrations/quickbooks/auth.py)
-- [repository.py](/Users/promab/anaconda_projects/email_agent/src/integrations/quickbooks/repository.py)
-- [matching.py](/Users/promab/anaconda_projects/email_agent/src/integrations/quickbooks/matching.py)
-- [service.py](/Users/promab/anaconda_projects/email_agent/src/integrations/quickbooks/service.py)
-
-Boundary rule:
-- `integrations/` owns clients/connectors
-- `tools/` owns LLM-callable actions built on top of them
+Should not: perform ingestion, resolve entities, generate final replies
 
 ### `src/tools/`
 
-Atomic actions callable by the agent layer.
+Purpose: define self-describing tool capabilities, register tools, dispatch requests
 
-Examples:
-- catalog lookup
-- document lookup
-- technical retrieval
-- customer lookup
-- invoice lookup
-- order lookup
-- shipping lookup
+Input: `ToolRequest`
 
-These tools should call into:
-- `catalog/`
-- `documents/`
-- `rag/`
-- `integrations/`
+Output: `ToolResult`
 
-but should not own low-level connector logic themselves.
+Each tool declares its own `ToolCapability` (supported object types, intents, parameters). The executor reads these capabilities from the registry to make autonomous tool selection decisions.
 
-### `src/agents/`
+Adding a new tool = one file in `tools/` with implementation + capability declaration. No changes to executor, routing, or any other module.
 
-Domain-role implementations.
+Should not: resolve entities, select other tools, generate final replies
 
-This layer answers:
-- If a route selects a domain agent, which concrete tool sequence should that agent run?
+### `src/responser/`
 
-Current files:
-- [commercial_agent.py](/Users/promab/anaconda_projects/email_agent/src/agents/commercial_agent.py)
-- [operational_agent.py](/Users/promab/anaconda_projects/email_agent/src/agents/operational_agent.py)
-- [workflow_agent.py](/Users/promab/anaconda_projects/email_agent/src/agents/workflow_agent.py)
-- [constants.py](/Users/promab/anaconda_projects/email_agent/src/agents/constants.py)
-- [selector.py](/Users/promab/anaconda_projects/email_agent/src/agents/selector.py)
-- [utils.py](/Users/promab/anaconda_projects/email_agent/src/agents/utils.py)
+Purpose: synthesize coherent user-facing reply from any route's output
 
-Boundary rule:
-- `agents/` owns domain role behavior
-- `orchestration/` owns the shared lifecycle
+Input: `IngestionBundle`, `RouteDecision`, `ExecutionResult` (if any)
 
-### `src/response/`
+Output: `AgentResponse`
 
-Final response construction.
+Should not: select tools, execute retrieval, invent facts not grounded in execution results
 
-This layer answers:
-- Given route, execution results, and response strategy, what grounded content should be assembled?
-- Which response path should be used: deterministic, renderer, legacy fallback, or LLM chain?
+### `src/memory/`
 
-Current files:
-- [chain.py](/Users/promab/anaconda_projects/email_agent/src/response/chain.py)
-- [preprocess.py](/Users/promab/anaconda_projects/email_agent/src/response/preprocess.py)
-- [prompt.py](/Users/promab/anaconda_projects/email_agent/src/response/prompt.py)
-- [postprocess.py](/Users/promab/anaconda_projects/email_agent/src/response/postprocess.py)
+Purpose: preserve typed state across turns
 
-#### `src/response/content/`
+Primary contracts: `MemorySnapshot`, `MemoryUpdate`, `ThreadMemory`, `ObjectMemory`, `ClarificationMemory`, `ResponseMemory`, `StatefulAnchors`
 
-This is the content-building submodule.
+Should not: act as a routing layer, generate replies
 
-Responsibilities:
-- build atomic content blocks
-- build deterministic clarification/handoff responses
-- resolve legacy fallback
-- assemble response-content payload
+## Capability Layers
 
-Current structure:
-- [builder.py](/Users/promab/anaconda_projects/email_agent/src/response/content/builder.py)
-- [blocks.py](/Users/promab/anaconda_projects/email_agent/src/response/content/blocks.py)
-- [clarification.py](/Users/promab/anaconda_projects/email_agent/src/response/content/clarification.py)
-- [fallback.py](/Users/promab/anaconda_projects/email_agent/src/response/content/fallback.py)
+These modules answer domain questions. They are called by tools, not by orchestration layers.
 
-### `src/responders/`
+### `src/catalog/`
+- structured product lookup over PostgreSQL
+- candidate retrieval, ranking, and selection
 
-Rendering layer.
+### `src/documents/`
+- structured document inventory lookup
 
-The project currently uses a hybrid model:
-- new renderers for topic-based response rendering
-- limited legacy fallback for old summary responders
+### `src/rag/`
+- semantic technical retrieval
+- service-page vector search and reranking
 
-#### New renderers
+### `src/integrations/`
+- low-level external system connectors (QuickBooks)
 
-Located in:
-- [renderers](/Users/promab/anaconda_projects/email_agent/src/responders/renderers)
+## LangChain Integration
 
-Current topic coverage:
-- commercial quote
-- product info
-- document delivery
-- technical doc
-- workflow status
-- operational status
+LangChain is the implementation framework, not the architecture.
 
-#### Legacy fallback
+| Module | LangChain Usage |
+| --- | --- |
+| ingestion | parser chain (structured extraction) |
+| objects | mostly deterministic; optional LLM fallback for rare ambiguity |
+| routing | mostly deterministic; optional LLM classifier fallback |
+| executor | LangGraph for reasoning loop; LCEL for tool composition |
+| tools | wrap as LangChain Tools for standardized invocation |
+| responser | LLM-based response synthesis and rewrite |
+| memory | own typed contracts; LangChain memory not used |
 
-Located in:
-- [legacy_fallback.py](/Users/promab/anaconda_projects/email_agent/src/responders/legacy_fallback.py)
-- [legacy](/Users/promab/anaconda_projects/email_agent/src/responders/legacy)
+Core rule: all cross-module communication uses our own Pydantic contracts, never raw LangChain objects.
 
-Current intent:
-- keep only minimal summary fallback
-- continue shrinking legacy usage over time
+## Key Differences From v2
 
-## Response Pipeline
+| Aspect | v2 (previous) | v3 (current) |
+| --- | --- | --- |
+| Tool selection | routing rules + planner rules (two places) | executor reads tool capabilities from registry |
+| Execution | single pass, no iteration | reasoning loop with observation |
+| Adding a new tool | change routing + planner + requests + tool | add one file in tools/ |
+| Planner | separate module between routing and executor | absorbed into executor's reasoning step |
+| Response | `response/` | `responser/` |
+| Routing scope | decides route + selects tools | decides route only |
 
-The response stack is intentionally layered:
+## Canonical Vocabulary
 
-```text
-response_resolution(topic/style/focus)
-  -> content builder
-  -> topic-based renderer
-  -> legacy fallback if needed
-  -> LLM response chain if needed
-  -> postprocess
-```
+Preferred terms across docs and code:
 
-More concretely:
+- `IngestionBundle`
+- `ResolvedObjectState`
+- `RouteDecision`
+- `ToolCapability`
+- `ToolRequest` / `ToolResult`
+- `ExecutionResult`
+- `AgentResponse`
+- `MemorySnapshot` / `MemoryUpdate`
 
-1. `decision/response_resolution/` decides:
-   - topic
-   - focus
-   - style
-   - content policy
-2. `response/content/` builds:
-   - atomic content blocks
-   - clarification/handoff responses
-   - legacy fallback candidate
-3. `responders/renderers/` tries a typed renderer for the topic
-4. if no renderer is available, legacy fallback may be used
-5. if still unresolved, the LLM response chain is used
+## Reading Order
 
-## Conversation and Memory Relationship
-
-These layers are related but intentionally separate:
-
-- `memory/` stores session state
-- `context/` assembles runtime context
-- `conversation/` consumes that state for multi-turn interpretation
-
-This means:
-- `memory` remembers
-- `context` assembles
-- `conversation` interprets
-
-## Architectural Conventions
-
-These boundaries should remain stable:
-
-- `parser/` understands a single turn only.
-- `conversation/` handles cross-turn continuity.
-- `decision/` decides route and response strategy.
-- `orchestration/` executes the runtime lifecycle.
-- `catalog/`, `documents/`, `rag/`, and `integrations/` are capability layers.
-- `integrations/` contains connectors; `tools/` contains LLM-callable actions.
-- `agents/` contains domain-role implementations; `orchestration/` contains the shared lifecycle.
-- `responders/renderers/` should focus on expression, not business decision-making.
-
-## Current Testing Baseline
-
-Current regression suite:
-
-```bash
-pytest -q tests/test_turn_resolution_regression.py tests/test_response_generation_regression.py
-```
-
-This suite currently validates:
-- turn resolution
-- reference reuse
-- response focus selection
-- renderer coverage for key topics
-- workflow and operational response behavior
-
-## Known Next-Step Opportunities
-
-If the project continues evolving, the next high-value improvements are:
-
-1. expand regression coverage for:
-   - parser
-   - route decisions
-   - catalog retrieval/ranking/selection
-   - document retrieval/ranking/selection
-   - QuickBooks operational flows
-2. continue shrinking legacy responder fallback
-3. further split any growing hot files such as:
-   - `catalog/repository.py`
-   - `conversation/payload_builders.py`
-   - `conversation/payload_merge_service.py`
+1. [docs/AGENT_ARCHITECTURE_V3.md](docs/AGENT_ARCHITECTURE_V3.md) — this design
+2. [docs/INGESTION_LAYER_DESIGN.md](docs/INGESTION_LAYER_DESIGN.md) — signal contracts
+3. [docs/OBJECTS_LAYER_DESIGN.md](docs/OBJECTS_LAYER_DESIGN.md) — entity resolution
+4. [docs/TOOLS_LAYER_DESIGN.md](docs/TOOLS_LAYER_DESIGN.md) — capability contracts
+5. [docs/MEMORY_LAYER_DESIGN.md](docs/MEMORY_LAYER_DESIGN.md) — typed state
+6. [docs/RAG_RETRIEVAL_ENHANCEMENT_DESIGN.md](docs/RAG_RETRIEVAL_ENHANCEMENT_DESIGN.md) — technical retrieval
+7. [docs/SERVICE_PAGE_RAG_STANDARD.md](docs/SERVICE_PAGE_RAG_STANDARD.md) — corpus standard

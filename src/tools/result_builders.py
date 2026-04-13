@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from src.tools.models import ToolResult
-from src.tools.types import DEFAULT_TOOL_STATUS, ToolStatus
+from src.tools.contracts import ToolStatus
 
 
 def build_tool_result(
     *,
     tool_name: str,
-    status: ToolStatus = DEFAULT_TOOL_STATUS,
+    status: ToolStatus = "empty",
     primary_records: list[dict[str, Any]] | None = None,
     supporting_records: list[dict[str, Any]] | None = None,
     structured_facts: dict[str, Any] | None = None,

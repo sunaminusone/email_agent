@@ -3,35 +3,11 @@ from __future__ import annotations
 from typing import Literal
 
 
-DialogueActType = Literal[
-    "INQUIRY",
-    "SELECTION",
-    "ACKNOWLEDGE",
-    "TERMINATE",
-    "ELABORATE",
-    "UNKNOWN",
-]
+# v3: 3 dialogue acts (inquiry, selection, closing)
+DialogueActType = Literal["inquiry", "selection", "closing"]
 
-ModalityType = Literal[
-    "structured_lookup",
-    "unstructured_retrieval",
-    "external_api",
-    "hybrid",
-    "unknown",
-]
-
-TopLevelRouteName = Literal["clarification", "execution", "handoff"]
-
-ToolName = Literal[
-    "catalog_lookup_tool",
-    "technical_rag_tool",
-    "document_lookup_tool",
-    "pricing_lookup_tool",
-    "order_lookup_tool",
-    "shipping_lookup_tool",
-    "invoice_lookup_tool",
-    "customer_lookup_tool",
-]
+# v3: 4 actions
+ActionType = Literal["execute", "respond", "clarify", "handoff"]
 
 
 TECHNICAL_DEEP_DIVE_TERMS = {
@@ -86,4 +62,3 @@ EXTERNAL_TERMS = {
     "status",
     "balance",
 }
-

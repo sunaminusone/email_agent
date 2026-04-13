@@ -2,39 +2,86 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.execution.models import ExecutedToolCall
+from src.common.execution_models import ExecutedToolCall
+from src.common.messages import get_message
 from src.response.models import ContentBlock, ResponseInput
 
 
 def build_content_blocks(response_input: ResponseInput) -> list[ContentBlock]:
+    locale = response_input.locale
     blocks: list[ContentBlock] = []
 
-    object_block = _build_object_summary_block(response_input)
+    object_block = _build_object_summary_block(response_input, locale)
     if object_block is not None:
         blocks.append(object_block)
 
-    if response_input.route_name == "clarification":
-        blocks.extend(_build_clarification_blocks(response_input))
+    if response_input.action == "clarify":
+        blocks.extend(_build_clarification_blocks(response_input, locale))
         return blocks
 
-    if response_input.route_name == "handoff":
+    if response_input.action == "handoff":
         blocks.append(
             ContentBlock(
                 block_type="handoff_notice",
-                title="Human review required",
-                body="This request needs human review before a final reply can be sent.",
-                data={"reason": response_input.execution_run.reason or response_input.execution_run.intent.reason},
+                title=get_message("block_title_handoff", locale),
+                body=get_message("block_body_handoff", locale),
+                data={"reason": response_input.execution_result.reason},
             )
         )
         return blocks
 
-    for executed_call in response_input.execution_run.executed_calls:
-        blocks.extend(_build_blocks_for_call(executed_call))
+    # When group_outcomes are available, tag each block with its source group
+    if response_input.group_outcomes:
+        blocks.extend(_build_blocks_from_outcomes(response_input))
+    else:
+        for executed_call in response_input.execution_result.executed_calls:
+            blocks.extend(_build_blocks_for_call(executed_call))
 
     return blocks
 
 
-def _build_object_summary_block(response_input: ResponseInput) -> ContentBlock | None:
+def _build_blocks_from_outcomes(response_input: ResponseInput) -> list[ContentBlock]:
+    """Build content blocks from agent loop outcomes, tagging each with its group."""
+    blocks: list[ContentBlock] = []
+    for outcome in response_input.group_outcomes:
+        if outcome.status != "resolved":
+            continue
+        group = outcome.group
+        group_tag = {
+            "intent": group.intent,
+            "object_type": group.object_type,
+            "object_identifier": group.object_identifier,
+        }
+        source_demand = _lookup_group_demand(response_input, group)
+        for executed_call in outcome.execution_result.executed_calls:
+            for block in _build_blocks_for_call(executed_call):
+                block.data.setdefault("source_group", group_tag)
+                if source_demand:
+                    block.data.setdefault("source_demand", source_demand)
+                blocks.append(block)
+    return blocks
+
+
+def _lookup_group_demand(response_input: ResponseInput, group) -> dict[str, Any]:
+    demand_profile = response_input.demand_profile
+    if demand_profile is None:
+        return {}
+    for group_demand in demand_profile.group_demands:
+        if (
+            group_demand.intent == group.intent
+            and group_demand.object_type == group.object_type
+            and group_demand.object_identifier == group.object_identifier
+            and set(group_demand.request_flags) == set(group.request_flags)
+        ):
+            return {
+                "primary_demand": group_demand.primary_demand,
+                "secondary_demands": list(group_demand.secondary_demands),
+                "request_flags": list(group_demand.request_flags),
+            }
+    return {}
+
+
+def _build_object_summary_block(response_input: ResponseInput, locale: str) -> ContentBlock | None:
     resolved_object = None
     if response_input.resolved_object_state is not None:
         resolved_object = (
@@ -58,7 +105,7 @@ def _build_object_summary_block(response_input: ResponseInput) -> ContentBlock |
 
     return ContentBlock(
         block_type="object_summary",
-        title="Resolved object",
+        title=get_message("block_title_resolved_object", locale),
         body=" | ".join(body_parts),
         data={
             "object_type": resolved_object.object_type,
@@ -70,15 +117,15 @@ def _build_object_summary_block(response_input: ResponseInput) -> ContentBlock |
     )
 
 
-def _build_clarification_blocks(response_input: ResponseInput) -> list[ContentBlock]:
+def _build_clarification_blocks(response_input: ResponseInput, locale: str) -> list[ContentBlock]:
     clarification = response_input.clarification
     if clarification is None:
         return []
     return [
         ContentBlock(
             block_type="clarification_options",
-            title="Clarification needed",
-            body=clarification.prompt or "I need a bit more information before I can continue.",
+            title=get_message("block_title_clarification", locale),
+            body=clarification.prompt or get_message("block_body_clarification_default", locale),
             data={
                 "kind": clarification.kind,
                 "reason": clarification.reason,
@@ -154,16 +201,22 @@ def _build_technical_snippets_block(tool_name: str, snippets: list[dict[str, Any
     if not snippets:
         return None
 
-    previews = []
-    for snippet in snippets[:3]:
-        preview = str(
-            snippet.get("content_preview")
-            or snippet.get("text")
-            or snippet.get("snippet")
-            or ""
-        ).strip()
-        if preview:
-            previews.append(preview)
+    previews: list[str] = []
+    for snippet in snippets[:5]:
+        content = str(snippet.get("content") or snippet.get("content_preview") or "").strip()
+        title = str(snippet.get("title") or snippet.get("chunk_label") or "").strip()
+        section = str(snippet.get("section_type") or "").strip()
+
+        if not content:
+            continue
+
+        # Structure each snippet with its source context
+        if title and section:
+            previews.append(f"[{title} ({section})] {content}")
+        elif title:
+            previews.append(f"[{title}] {content}")
+        else:
+            previews.append(content)
 
     if not previews:
         return None
@@ -171,8 +224,8 @@ def _build_technical_snippets_block(tool_name: str, snippets: list[dict[str, Any
     return ContentBlock(
         block_type="technical_snippets",
         title=tool_name,
-        body=" ".join(previews),
-        data={"snippets": list(snippets[:3])},
+        body="\n\n".join(previews),
+        data={"snippets": list(snippets[:5])},
     )
 
 

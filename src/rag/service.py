@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Mapping
 
-from src.conversation.context_scope import (
+from src.rag.query_scope import (
     normalize_scope_query,
     query_has_product_scope_marker,
     query_matches_non_technical_fallback_path,

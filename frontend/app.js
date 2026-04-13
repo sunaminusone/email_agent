@@ -209,10 +209,6 @@ function normalizeAssistantMessage(output) {
       response_type: baseMessage.metadata?.response_type || output.final_response?.response_type || "answer",
       response_topic: baseMessage.metadata?.response_topic || output.response_topic || "",
       response_path: baseMessage.metadata?.response_path || output.response_path || "",
-      legacy_fallback_used: baseMessage.metadata?.legacy_fallback_used ?? output.legacy_fallback_used ?? false,
-      legacy_fallback_route: baseMessage.metadata?.legacy_fallback_route || output.legacy_fallback_route || "",
-      legacy_fallback_responder: baseMessage.metadata?.legacy_fallback_responder || output.legacy_fallback_responder || "",
-      legacy_fallback_reason: baseMessage.metadata?.legacy_fallback_reason || output.legacy_fallback_reason || "",
       documents,
     },
   };
@@ -394,10 +390,6 @@ function renderResponseTopic(output) {
     <p class="signal-line"><strong>Focus:</strong> ${escapeHtml(resolution.answer_focus || "n/a")}</p>
     <p class="signal-line"><strong>Primary Action:</strong> ${escapeHtml(resolution.primary_action_type || "n/a")}</p>
     <p class="signal-line"><strong>Response Path:</strong> ${escapeHtml(output.response_path || "n/a")}</p>
-    <p class="signal-line"><strong>Legacy Fallback:</strong> ${output.legacy_fallback_used ? "yes" : "no"}</p>
-    <p class="signal-line"><strong>Legacy Route:</strong> ${escapeHtml(output.legacy_fallback_route || "n/a")}</p>
-    <p class="signal-line"><strong>Legacy Responder:</strong> ${escapeHtml(output.legacy_fallback_responder || "n/a")}</p>
-    <p class="signal-line"><strong>Legacy Reason:</strong> ${escapeHtml(output.legacy_fallback_reason || "n/a")}</p>
   `;
 }
 
