@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.common.messages import get_message
-from src.response.models import ComposedResponse, ContentBlock, ResponseInput, ResponsePlan
+from src.responser.models import ComposedResponse, ContentBlock, ResponseInput, ResponsePlan
 
 
 def render_answer_response(

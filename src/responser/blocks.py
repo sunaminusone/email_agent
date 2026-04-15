@@ -4,7 +4,7 @@ from typing import Any
 
 from src.common.execution_models import ExecutedToolCall
 from src.common.messages import get_message
-from src.response.models import ContentBlock, ResponseInput
+from src.responser.models import ContentBlock, ResponseInput
 
 
 def build_content_blocks(response_input: ResponseInput) -> list[ContentBlock]:
@@ -52,7 +52,7 @@ def _build_blocks_from_outcomes(response_input: ResponseInput) -> list[ContentBl
             "object_type": group.object_type,
             "object_identifier": group.object_identifier,
         }
-        source_demand = _lookup_group_demand(response_input, group)
+        source_demand = _extract_outcome_demand(outcome)
         for executed_call in outcome.execution_result.executed_calls:
             for block in _build_blocks_for_call(executed_call):
                 block.data.setdefault("source_group", group_tag)
@@ -62,23 +62,20 @@ def _build_blocks_from_outcomes(response_input: ResponseInput) -> list[ContentBl
     return blocks
 
 
-def _lookup_group_demand(response_input: ResponseInput, group) -> dict[str, Any]:
-    demand_profile = response_input.demand_profile
-    if demand_profile is None:
+def _extract_outcome_demand(outcome: Any) -> dict[str, Any]:
+    """Read demand directly from GroupOutcome.scoped_demand.
+
+    No re-matching against DemandProfile — the scoped_demand was
+    computed once in the agent loop and carried through.
+    """
+    demand = getattr(outcome, "scoped_demand", None)
+    if demand is None:
         return {}
-    for group_demand in demand_profile.group_demands:
-        if (
-            group_demand.intent == group.intent
-            and group_demand.object_type == group.object_type
-            and group_demand.object_identifier == group.object_identifier
-            and set(group_demand.request_flags) == set(group.request_flags)
-        ):
-            return {
-                "primary_demand": group_demand.primary_demand,
-                "secondary_demands": list(group_demand.secondary_demands),
-                "request_flags": list(group_demand.request_flags),
-            }
-    return {}
+    return {
+        "primary_demand": demand.primary_demand,
+        "secondary_demands": list(demand.secondary_demands),
+        "request_flags": list(demand.request_flags),
+    }
 
 
 def _build_object_summary_block(response_input: ResponseInput, locale: str) -> ContentBlock | None:

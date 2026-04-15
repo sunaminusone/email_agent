@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING
 
-from src.ingestion.models import IngestionBundle
+from src.ingestion.models import IngestionBundle, SelectionResolution
 from src.objects.constraint_matching import (
     attach_constraints_to_ambiguous_sets,
     attach_constraints_to_candidates,
@@ -77,6 +77,30 @@ def resolve_object_state(
                 context_candidates.append(candidate)
             if filtered_context or filtered_ambiguous_sets or promoted_candidates:
                 constraints_applied = True
+
+    # --- LLM selection resolution ---
+    # When the parser resolved the user's selection from pending options,
+    # use it to pick a candidate from the ambiguous sets.
+    selection = ingestion_bundle.turn_signals.parser_signals.selection_resolution
+    if (
+        pending_clarification
+        and pending_resolved_candidate is None
+        and selection is not None
+        and selection.selection_confidence >= 0.5
+        and ambiguous_sets
+    ):
+        selected = _resolve_selection_from_ambiguous(
+            selection,
+            ambiguous_sets,
+            ingestion_bundle.stateful_anchors.pending_candidate_options,
+        )
+        if selected is not None:
+            pending_resolved_candidate = selected
+            # Remove the resolved set from ambiguous_sets
+            ambiguous_sets = [
+                s for s in ambiguous_sets
+                if not _ambiguous_set_contains(s, selected)
+            ]
 
     # --- Phase-aware context scoring ---
     if trajectory_phase == "topic_switch":
@@ -420,3 +444,62 @@ def _field_varies_across_candidates(candidates: list[ObjectCandidate], field: st
         if value:
             values.add(value)
     return len(values) > 1
+
+
+# ---------------------------------------------------------------------------
+# LLM selection resolution helpers
+# ---------------------------------------------------------------------------
+
+def _candidate_label(candidate: ObjectCandidate) -> str:
+    """Build the label string that would have been stored in pending_candidate_options."""
+    return candidate.display_name or candidate.identifier or candidate.canonical_value
+
+
+def _resolve_selection_from_ambiguous(
+    selection: SelectionResolution,
+    ambiguous_sets: list[AmbiguousObjectSet],
+    pending_options: list[str],
+) -> ObjectCandidate | None:
+    """Match the LLM selection result to an ObjectCandidate in ambiguous_sets.
+
+    Strategy (in priority order):
+    1. selected_index: if within bounds of pending_options, match the label
+       back to a candidate in the ambiguous sets.
+    2. selected_value: fuzzy-match against candidate labels.
+    """
+    # Strategy 1: index-based via pending_options labels
+    if selection.selected_index is not None and pending_options:
+        idx = selection.selected_index
+        if 0 <= idx < len(pending_options):
+            target_label = pending_options[idx].strip().lower()
+            for ambiguous_set in ambiguous_sets:
+                for candidate in ambiguous_set.candidates:
+                    if _candidate_label(candidate).strip().lower() == target_label:
+                        return candidate.model_copy(
+                            update={"is_ambiguous": False, "confidence": max(candidate.confidence, 0.8)},
+                        )
+
+    # Strategy 2: value-based match against candidate labels
+    if selection.selected_value:
+        target = selection.selected_value.strip().lower()
+        for ambiguous_set in ambiguous_sets:
+            for candidate in ambiguous_set.candidates:
+                label = _candidate_label(candidate).strip().lower()
+                if label == target or target in label or label in target:
+                    return candidate.model_copy(
+                        update={"is_ambiguous": False, "confidence": max(candidate.confidence, 0.8)},
+                    )
+
+    return None
+
+
+def _ambiguous_set_contains(ambiguous_set: AmbiguousObjectSet, candidate: ObjectCandidate) -> bool:
+    """Check if an ambiguous set contains a candidate (by identity fields)."""
+    for c in ambiguous_set.candidates:
+        if (
+            c.object_type == candidate.object_type
+            and c.canonical_value == candidate.canonical_value
+            and c.identifier == candidate.identifier
+        ):
+            return True
+    return False

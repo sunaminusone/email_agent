@@ -25,9 +25,82 @@ const currentConfidence = document.getElementById("current_confidence");
 const currentRoute = document.getElementById("current_route");
 const currentStatus = document.getElementById("current_status");
 const sessionHint = document.getElementById("session_hint");
+const questionSamples = document.getElementById("question_samples");
+const refreshSamplesButton = document.getElementById("refresh-samples-btn");
+const quickActionButtons = Array.from(document.querySelectorAll(".quick-card"));
 
 const CHAT_STORAGE_KEY = "email_agent.chat_messages";
 const THREAD_STORAGE_KEY = "email_agent.thread_id";
+
+const SAMPLE_QUESTIONS = {
+  product: [
+    "Can you tell me more about your CAR-T cell line development service?",
+    "What applications is your anti-CD3 antibody validated for?",
+    "Do you offer custom peptide synthesis for immunogenicity studies?",
+    "Please introduce your NPM1 mutation detection workflow.",
+    "Which product would you recommend for western blot detection of GFP-tagged proteins?",
+  ],
+  pricing: [
+    "Could you provide a quote for 5 mg custom peptide synthesis with HPLC purification?",
+    "What is the price range for monoclonal antibody generation in rabbits?",
+    "Please share the pricing for a pilot CAR construct design project.",
+    "How much would flow cytometry validation cost for three target markers?",
+    "Can you prepare a budgetary quote for ELISA kit development with two antigens?",
+  ],
+  technical: [
+    "How does your hybridoma screening workflow work after mouse immunization?",
+    "What QC checkpoints are included in your lentiviral packaging service?",
+    "Can you explain the difference between peptide conjugation and carrier protein coupling?",
+    "What readouts do you provide in your T cell functional assay package?",
+    "How do you validate specificity for a custom phospho-antibody project?",
+  ],
+  timeline: [
+    "What is the typical turnaround time for recombinant protein expression and purification?",
+    "How long does a standard monoclonal antibody project usually take?",
+    "When could you deliver a small-batch peptide order if we start this week?",
+    "What is the lead time for custom plasmid construction and sequence verification?",
+    "How many weeks are needed for CAR-T in vitro functional testing?",
+  ],
+  shipping: [
+    "Do you ship antibodies on dry ice to California, and what is the typical transit time?",
+    "Can you arrange international shipping for frozen PBMC samples to Singapore?",
+    "What shipping documents are needed for protein samples sent to the EU?",
+    "Do you provide tracking and temperature monitoring for cold-chain shipments?",
+    "Can you split delivery for a multi-batch peptide synthesis order?",
+  ],
+  documentation: [
+    "Could you send the datasheet and COA for your recombinant IL-2 protein?",
+    "Do you have a protocol or application note for your ELISA development service?",
+    "Please share any validation report for the anti-PD-1 antibody.",
+    "Can you provide technical documentation for your stable cell line generation workflow?",
+    "Is there a brochure or slide deck for your antibody humanization service?",
+  ],
+  order: [
+    "Can you check the status of order PO-20481 and confirm the expected ship date?",
+    "Has invoice INV-11892 already been issued for our last peptide order?",
+    "Please help confirm whether sample receipt was logged for our CRO project.",
+    "Can you verify if batch 2 of our recombinant protein order passed QC?",
+    "We need an update on the shipping status for our custom antibody project.",
+  ],
+  reply: [
+    "Draft a polite customer reply explaining that technical validation data will be shared after internal review.",
+    "Help me write a concise email to follow up on a pending quote for antibody development.",
+    "Please draft a customer-facing reply summarizing lead time, price, and shipping constraints.",
+    "Write a professional response asking the client to confirm antigen sequence and purification grade.",
+    "Generate a warm reply that offers both a datasheet and a call to discuss assay design.",
+  ],
+};
+
+const SAMPLE_CATEGORY_LABELS = {
+  product: "Product",
+  pricing: "Pricing",
+  technical: "Technical",
+  timeline: "Timeline",
+  shipping: "Shipping",
+  documentation: "Docs",
+  order: "Order",
+  reply: "Draft",
+};
 
 let messages = [];
 let threadId = "";
@@ -64,6 +137,62 @@ function syncStoredMessages() {
 function renderSessionHint() {
   const activeThreadId = ensureThreadId();
   sessionHint.textContent = `Session linked to ${activeThreadId.slice(0, 18)}...`;
+}
+
+function shuffleArray(items) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
+function pickSampleQuestions(count = 6) {
+  const categories = shuffleArray(Object.keys(SAMPLE_QUESTIONS)).slice(0, count);
+  return categories.map((category) => {
+    const options = SAMPLE_QUESTIONS[category] || [];
+    const question = options[Math.floor(Math.random() * options.length)] || "";
+    return {
+      category,
+      label: SAMPLE_CATEGORY_LABELS[category] || category,
+      question,
+    };
+  });
+}
+
+function applySampleQuestion(question) {
+  const userQueryField = document.getElementById("user_query");
+  userQueryField.value = question;
+  userQueryField.focus();
+  userQueryField.setSelectionRange(userQueryField.value.length, userQueryField.value.length);
+}
+
+function renderQuestionSamples() {
+  const samples = pickSampleQuestions();
+  questionSamples.innerHTML = samples.map((sample) => `
+    <button type="button" class="question-sample-card" data-question="${escapeHtml(sample.question)}">
+      <span class="question-sample-tag">${escapeHtml(sample.label)}</span>
+      <span class="question-sample-text">${escapeHtml(sample.question)}</span>
+    </button>
+  `).join("");
+
+  questionSamples.querySelectorAll(".question-sample-card").forEach((button) => {
+    button.addEventListener("click", () => {
+      applySampleQuestion(button.dataset.question || "");
+    });
+  });
+}
+
+function bindQuickActions() {
+  quickActionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const category = button.dataset.sampleCategory || "product";
+      const options = SAMPLE_QUESTIONS[category] || SAMPLE_QUESTIONS.product;
+      const question = options[Math.floor(Math.random() * options.length)] || "";
+      applySampleQuestion(question);
+    });
+  });
 }
 
 function renderChatHistory() {
@@ -225,6 +354,8 @@ renderChatHistory();
 renderHistoryNav();
 renderIntentTags();
 updateAgentOverview({});
+renderQuestionSamples();
+bindQuickActions();
 
 function renderWorkflow(items) {
   workflow.innerHTML = "";
@@ -533,4 +664,8 @@ newChatButton.addEventListener("click", () => {
   renderSessionHint();
   resetInspectorPanels();
   document.getElementById("user_query").focus();
+});
+
+refreshSamplesButton.addEventListener("click", () => {
+  renderQuestionSamples();
 });

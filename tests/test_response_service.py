@@ -5,14 +5,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import src.response.composer as composer_module
+import src.responser.composer as composer_module
 
 from src.agent.state import AgentState, GroupOutcome
 from src.common.execution_models import ExecutedToolCall, ExecutionResult
 from src.common.models import DemandProfile, IntentGroup
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
-from src.response import ResponseInput, build_response_bundle, compose_response
+from src.responser import ResponseInput, build_response_bundle, compose_response
 
 
 def _empty_execution_result(

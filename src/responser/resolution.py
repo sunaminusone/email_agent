@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.response.models import ContentBlock, ResponsePlan, ResponseResolution
+from src.responser.models import ContentBlock, ResponsePlan, ResponseResolution
 
 
 def build_response_resolution(

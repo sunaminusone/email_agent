@@ -17,9 +17,24 @@ from src.ingestion.models import (
     ParserRetrievalHints,
     ParserRequestFlags,
     ParserSignals,
+    SelectionResolution,
     SourceAttribution,
 )
 from src.ingestion.parser_prompt import get_parser_prompt
+from src.memory.models import StatefulAnchors
+
+
+def _format_pending_clarification(stateful_anchors: StatefulAnchors | None) -> str:
+    """Format pending clarification context for the parser prompt."""
+    if stateful_anchors is None or not stateful_anchors.pending_clarification_field:
+        return "None"
+    options = stateful_anchors.pending_candidate_options
+    if not options:
+        return "None"
+    lines = [f"Type: {stateful_anchors.pending_clarification_field}", "Options:"]
+    for idx, option in enumerate(options):
+        lines.append(f"  {idx}: {option}")
+    return "\n".join(lines)
 
 
 def preprocess_for_parser(
@@ -27,6 +42,7 @@ def preprocess_for_parser(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    stateful_anchors: StatefulAnchors | None = None,
 ) -> dict[str, Any]:
     normalized_query = str(user_query or "").strip()
     normalized_history = conversation_history or []
@@ -43,6 +59,7 @@ def preprocess_for_parser(
             ensure_ascii=False,
             indent=2,
         ),
+        "pending_clarification": _format_pending_clarification(stateful_anchors),
         "_meta": {
             "raw_user_query": normalized_query,
             "conversation_history_raw": normalized_history,
@@ -62,6 +79,7 @@ def get_parser_pipeline():
             user_query=payload.get("user_query", ""),
             conversation_history=payload.get("conversation_history", []),
             attachments=payload.get("attachments", []),
+            stateful_anchors=payload.get("stateful_anchors"),
         )
     )
     parse_step = RunnablePassthrough.assign(parsed=parser_chain)
@@ -74,6 +92,7 @@ def invoke_parser_pipeline(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    stateful_anchors: StatefulAnchors | None = None,
 ) -> dict[str, Any]:
     pipeline = get_parser_pipeline()
     parsed = pipeline.invoke(
@@ -81,6 +100,7 @@ def invoke_parser_pipeline(
             "user_query": user_query,
             "conversation_history": conversation_history or [],
             "attachments": attachments or [],
+            "stateful_anchors": stateful_anchors,
         }
     )
     return parser_result_to_payload(parsed)
@@ -91,11 +111,13 @@ def invoke_parser_service(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    stateful_anchors: StatefulAnchors | None = None,
 ) -> dict[str, Any]:
     return invoke_parser_pipeline(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
+        stateful_anchors=stateful_anchors,
     )
 
 
@@ -104,11 +126,13 @@ def invoke_parser(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    stateful_anchors: StatefulAnchors | None = None,
 ) -> dict[str, Any]:
     return invoke_parser_pipeline(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
+        stateful_anchors=stateful_anchors,
     )
 
 
@@ -315,6 +339,30 @@ def _map_parser_retrieval_hints(payload: Mapping[str, Any]) -> ParserRetrievalHi
     )
 
 
+def _map_selection_resolution(payload: Mapping[str, Any]) -> SelectionResolution | None:
+    raw = payload.get("selection_resolution")
+    if raw is None:
+        return None
+    if isinstance(raw, SelectionResolution):
+        return raw
+    if isinstance(raw, Mapping):
+        selected_value = str(raw.get("selected_value", "") or "").strip()
+        selected_index = raw.get("selected_index")
+        confidence = float(raw.get("selection_confidence", 0.0) or 0.0)
+        if not selected_value and selected_index is None:
+            return None
+        if confidence < 0.1:
+            return None
+        return SelectionResolution(
+            selected_index=selected_index,
+            selected_value=selected_value,
+            selection_confidence=confidence,
+            carries_new_intent=bool(raw.get("carries_new_intent", False)),
+            reason=str(raw.get("reason", "") or ""),
+        )
+    return None
+
+
 def adapt_parsed_result_to_parser_signals(
     payload: Mapping[str, Any],
     *,
@@ -342,6 +390,7 @@ def adapt_parsed_result_to_parser_signals(
         retrieval_hints=_map_parser_retrieval_hints(payload),
         missing_information=list(payload.get("missing_information", []) or []),
         extra_instructions=payload.get("extra_instructions"),
+        selection_resolution=_map_selection_resolution(payload),
     )
 
 
@@ -350,10 +399,24 @@ def build_parser_signals(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
-) -> ParserSignals:
+    stateful_anchors: StatefulAnchors | None = None,
+) -> tuple[ParserSignals, str]:
+    """Return (parser_signals, llm_normalized_query).
+
+    The LLM produces a semantically cleaned normalized_query that is
+    richer than simple whitespace normalization.  The caller should use
+    it to upgrade TurnCore.normalized_query.
+
+    When *stateful_anchors* carries pending clarification options, the
+    parser is given those options as context so it can resolve the
+    user's selection via selection_resolution.
+    """
     parser_payload = invoke_parser(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
+        stateful_anchors=stateful_anchors,
     )
-    return adapt_parsed_result_to_parser_signals(parser_payload, source_query=user_query)
+    signals = adapt_parsed_result_to_parser_signals(parser_payload, source_query=user_query)
+    llm_normalized = str(parser_payload.get("normalized_query", "") or "").strip()
+    return signals, llm_normalized

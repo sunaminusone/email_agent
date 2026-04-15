@@ -9,7 +9,9 @@ from src.common.messages import get_message
 from src.common.models import DemandProfile, IntentGroup, ObjectRef
 from src.executor import empty_execution_result, run_executor
 from src.common.execution_models import ExecutionResult
-from src.ingestion import assemble_intent_groups, build_demand_profile
+from src.ingestion import build_demand_profile
+from src.routing.intent_assembly import assemble_intent_groups
+from src.ingestion.demand_profile import narrow_demand_profile
 from src.ingestion.pipeline import build_ingestion_bundle
 from src.memory import (
     SessionStore,
@@ -20,8 +22,9 @@ from src.memory import (
     MemoryContribution,
 )
 from src.memory.models import ClarificationMemory, MemoryContext
+from src.objects.models import ObjectCandidate
 from src.objects.resolution import resolve_objects
-from src.response import ResponseInput, build_response_bundle
+from src.responser import ResponseInput, build_response_bundle
 from src.routing import route
 
 
@@ -138,14 +141,20 @@ def _build_reply_preview(query: str, overall_action: str, execution_run_payload:
     return get_message("reply_preview_done", locale, query=query, action_count=action_count)
 
 
-def _to_object_ref(candidate) -> ObjectRef | None:
+def _to_object_ref(candidate: ObjectCandidate | None) -> ObjectRef | None:
+    """Convert ObjectCandidate → ObjectRef, stripping resolution metadata.
+
+    ObjectCandidate IS-A ObjectRef, but memory/response layers should
+    store the lightweight ObjectRef to avoid carrying evidence_spans,
+    attribute_constraints, etc.
+    """
     if candidate is None:
         return None
     return ObjectRef(
         object_type=candidate.object_type,
         identifier=candidate.identifier,
-        identifier_type=getattr(candidate, "identifier_type", ""),
-        display_name=candidate.display_name or getattr(candidate, "canonical_value", ""),
+        identifier_type=candidate.identifier_type,
+        display_name=candidate.display_name or candidate.canonical_value,
         business_line=candidate.business_line,
     )
 
@@ -488,22 +497,43 @@ def _run_agent_loop(
       group B reuses the cached result instead of calling again.
     - Cross-group observation: facts discovered by group A (e.g., product name,
       business_line) are passed to group B's tool requests as enriched context.
+
+    Path evaluation (post-tool-selection) determines whether the system should
+    execute or clarify.  Clarification only triggers when ALL candidate paths
+    are insufficient and resolution chain cannot help.
     """
     from src.agent.tool_call_cache import ToolCallCache
+    from src.executor.engine import build_execution_context, extract_available_params
+    from src.executor.path_evaluation import (
+        evaluate_execution_paths,
+        find_resolution_provider,
+    )
+    from src.executor.tool_selector import select_tools
+    from src.routing.models import ClarificationPayload
 
     agent_state = AgentState()
     cache = ToolCallCache()
 
     for group in intent_groups:
+        # Compute scoped demand ONCE per group — shared by routing and executor
+        scoped_demand = narrow_demand_profile(
+            demand_profile,
+            group,
+            prior_demand_type=memory_context.prior_demand_type,
+            prior_demand_flags=memory_context.prior_demand_flags,
+            continuity_confidence=memory_context.intent_continuity_confidence,
+        )
+
         route_decision = route(
             ingestion_bundle,
             resolved_object_state,
             focus_group=group,
-            demand_profile=demand_profile,
+            scoped_demand=scoped_demand,
         )
 
         if route_decision.action == "execute":
-            execution_result = run_executor(
+            # Build context (shared by path evaluation and executor)
+            context = build_execution_context(
                 ingestion_bundle=ingestion_bundle,
                 resolved_object_state=resolved_object_state,
                 route_decision=route_decision,
@@ -511,12 +541,79 @@ def _run_agent_loop(
                 focus_group=group,
                 demand_profile=demand_profile,
                 tool_call_cache=cache,
+                active_demand=scoped_demand,
             )
-            status = (
-                "resolved"
-                if execution_result.final_status in ("ok", "partial")
-                else "needs_clarification"
-            )
+
+            # Path evaluation: select tools → assess readiness → decide
+            selections = select_tools(context)
+            available_params = extract_available_params(context, tool_call_cache=cache)
+            obj_type = context.primary_object.object_type if context.primary_object else ""
+
+            path_eval = evaluate_execution_paths(selections, obj_type, available_params)
+
+            if path_eval.recommended_action == "execute":
+                # Normal execution — run_executor handles dispatch + retry loop
+                execution_result = run_executor(
+                    ingestion_bundle=ingestion_bundle,
+                    resolved_object_state=resolved_object_state,
+                    route_decision=route_decision,
+                    memory_snapshot=memory_context.snapshot,
+                    focus_group=group,
+                    demand_profile=demand_profile,
+                    tool_call_cache=cache,
+                    active_demand=scoped_demand,
+                )
+                status = (
+                    "resolved"
+                    if execution_result.final_status in ("ok", "partial")
+                    else "needs_clarification"
+                )
+            else:
+                # All paths insufficient — try resolution chain
+                provider = find_resolution_provider(path_eval, available_params)
+                if provider is not None:
+                    # Run executor with resolution provider as force_include
+                    execution_result = run_executor(
+                        ingestion_bundle=ingestion_bundle,
+                        resolved_object_state=resolved_object_state,
+                        route_decision=route_decision,
+                        memory_snapshot=memory_context.snapshot,
+                        focus_group=group,
+                        demand_profile=demand_profile,
+                        tool_call_cache=cache,
+                        active_demand=scoped_demand,
+                    )
+                    status = (
+                        "resolved"
+                        if execution_result.final_status in ("ok", "partial")
+                        else "needs_clarification"
+                    )
+                else:
+                    # Truly blocked — override to clarify
+                    execution_result = empty_execution_result(
+                        reason="all execution paths insufficient",
+                    )
+                    if path_eval.clarification_context is not None:
+                        missing_info = []
+                        for ids_list in path_eval.clarification_context.missing_by_path.values():
+                            for identifier in ids_list:
+                                if identifier not in missing_info:
+                                    missing_info.append(identifier)
+                        route_decision = route_decision.model_copy(update={
+                            "action": "clarify",
+                            "clarification": ClarificationPayload(
+                                kind="path_evaluation",
+                                reason="All candidate execution paths are insufficient.",
+                                missing_information=missing_info,
+                                path_context=path_eval.clarification_context,
+                            ),
+                        })
+                    else:
+                        route_decision = route_decision.model_copy(update={
+                            "action": "clarify",
+                        })
+                    status = "needs_clarification"
+
         elif route_decision.action == "handoff":
             execution_result = empty_execution_result(reason="needs handoff")
             status = "needs_handoff"
@@ -529,7 +626,10 @@ def _run_agent_loop(
             )
             status = "resolved"
 
-        agent_state.record(group, route_decision, execution_result, status=status)
+        agent_state.record(
+            group, route_decision, execution_result,
+            status=status, scoped_demand=scoped_demand,
+        )
 
     return agent_state
 

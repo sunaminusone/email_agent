@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +11,32 @@ from src.routing.models import DialogueActResult
 
 class _ToolModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+
+# ---------------------------------------------------------------------------
+# Tool Contract models
+# ---------------------------------------------------------------------------
+
+class MissingParam(_ToolModel):
+    """Description of a single missing parameter.
+
+    DEPRECATED: Kept for backward compatibility with imports.
+    New code should use ToolReadiness.missing_identifiers (list[str]) instead.
+    """
+    name: str
+    description: str = ""
+    group_label: str = ""
+    alternatives: list[str] = Field(default_factory=list)
+
+
+class ToolReadiness(_ToolModel):
+    """Runtime readiness evaluation for a tool given current context."""
+    tool_name: str
+    can_execute: bool
+    quality: Literal["full", "degraded", "insufficient"] = "full"
+    matched_identifier: str = ""
+    missing_identifiers: list[str] = Field(default_factory=list)
+    reason: str = ""
 
 
 class ToolConstraints(_ToolModel):
@@ -62,7 +88,10 @@ class ToolCapability(_ToolModel):
     supported_dialogue_acts: list[str] = Field(default_factory=list)
     supported_modalities: list[str] = Field(default_factory=list)
     supported_request_flags: list[str] = Field(default_factory=list)
-    required_params: list[str] = Field(default_factory=list)
+    required_params: list[str] = Field(default_factory=list)  # DEPRECATED
+    full_identifiers: list[str] = Field(default_factory=list)
+    degraded_identifiers: list[str] = Field(default_factory=list)
+    provides_params: list[str] = Field(default_factory=list)
     can_run_in_parallel: bool = False
     returns_structured_facts: bool = False
     returns_unstructured_snippets: bool = False

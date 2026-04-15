@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.ingestion.demand_profile import FLAG_DEMAND, is_truly_mixed
 from src.memory.models import MemoryUpdate, ResponseMemory
 from src.memory.response_memory import build_response_memory
-from src.response.models import ContentBlock, ResponseInput, ResponsePlan
+from src.responser.models import ContentBlock, ResponseInput, ResponsePlan
 
 
 def build_response_plan(

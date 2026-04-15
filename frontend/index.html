@@ -51,22 +51,32 @@
           <span>Suggested Actions</span>
         </div>
         <div class="quick-actions">
-          <button type="button" class="quick-card">
+          <button type="button" class="quick-card" data-sample-category="product">
             <strong>Product Lookup</strong>
             <span>Search catalog and specs</span>
           </button>
-          <button type="button" class="quick-card">
+          <button type="button" class="quick-card" data-sample-category="pricing">
             <strong>Pricing Request</strong>
             <span>Prepare quote-ready reply</span>
           </button>
-          <button type="button" class="quick-card">
+          <button type="button" class="quick-card" data-sample-category="technical">
             <strong>Tech Docs</strong>
             <span>Retrieve protocols and data</span>
           </button>
-          <button type="button" class="quick-card">
+          <button type="button" class="quick-card" data-sample-category="reply">
             <strong>Email Drafting</strong>
             <span>Generate a polished response</span>
           </button>
+        </div>
+      </section>
+
+      <section class="sidebar-section">
+        <div class="section-heading">
+          <span>Question Monitor</span>
+          <button type="button" id="refresh-samples-btn" class="ghost-btn">Shuffle</button>
+        </div>
+        <div id="question_samples" class="question-sample-list">
+          <p class="history-empty">Loading sample questions...</p>
         </div>
       </section>
     </aside>

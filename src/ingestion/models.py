@@ -143,6 +143,15 @@ class ParserOutputEntities(_IngestionModel):
     customer_names: list[ParserEntityOutputSpan] = Field(default_factory=list)
 
 
+class SelectionResolution(_IngestionModel):
+    """LLM-resolved selection when the user responds to a prior clarification."""
+    selected_index: int | None = None
+    selected_value: str = ""
+    selection_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    carries_new_intent: bool = False
+    reason: str = ""
+
+
 class ParserSignals(_IngestionModel):
     context: ParserContext = Field(default_factory=ParserContext)
     entities: ParserEntitySignals = Field(default_factory=ParserEntitySignals)
@@ -152,6 +161,7 @@ class ParserSignals(_IngestionModel):
     retrieval_hints: ParserRetrievalHints = Field(default_factory=ParserRetrievalHints)
     missing_information: list[str] = Field(default_factory=list)
     extra_instructions: str | None = None
+    selection_resolution: SelectionResolution | None = None
 
 
 class ParserOutput(_IngestionModel):
@@ -164,6 +174,7 @@ class ParserOutput(_IngestionModel):
     retrieval_hints: ParserRetrievalHints = Field(default_factory=ParserRetrievalHints)
     missing_information: list[str] = Field(default_factory=list)
     extra_instructions: str | None = None
+    selection_resolution: SelectionResolution | None = None
 
 
 class DeterministicSignals(_IngestionModel):

@@ -13,9 +13,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.common.models import DemandProfile, GroupDemand, IntentGroup
+from src.ingestion.demand_profile import narrow_demand_profile
 from src.common.execution_models import ExecutedToolCall, ExecutionResult
 from src.executor.engine import run_executor
-from src.ingestion import assemble_intent_groups, build_demand_profile
+from src.ingestion import build_demand_profile
+from src.routing.intent_assembly import assemble_intent_groups
 from src.ingestion.models import (
     IngestionBundle,
     ParserContext,
@@ -27,7 +29,7 @@ from src.ingestion.models import (
     ReferenceSignals,
 )
 from src.objects.models import ObjectCandidate, ResolvedObjectState
-from src.response import ResponseInput, build_response_bundle
+from src.responser import ResponseInput, build_response_bundle
 from src.routing.models import DialogueActResult, RouteDecision
 from src.routing.orchestrator import route
 from src.tools.models import ToolCapability, ToolRequest, ToolResult
@@ -159,9 +161,11 @@ class TestTechnicalInquiryNoObject:
         ingestion_bundle, resolved, intent_groups, demand_profile = self._build_scenario()
         focus_group = intent_groups[0]
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         decision = route(
             ingestion_bundle, resolved,
-            focus_group=focus_group, demand_profile=demand_profile,
+            focus_group=focus_group, scoped_demand=scoped_demand,
         )
 
         assert decision.action == "execute"
@@ -177,10 +181,13 @@ class TestTechnicalInquiryNoObject:
             dialogue_act=DialogueActResult(act="inquiry"),
         )
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         tool_names = [call.tool_name for call in result.executed_calls]
@@ -197,10 +204,13 @@ class TestTechnicalInquiryNoObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         execution_result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         bundle = build_response_bundle(ResponseInput(
@@ -224,10 +234,13 @@ class TestTechnicalInquiryNoObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         execution_result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         bundle = build_response_bundle(ResponseInput(
@@ -250,10 +263,13 @@ class TestTechnicalInquiryNoObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         execution_result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         bundle = build_response_bundle(ResponseInput(
@@ -335,9 +351,11 @@ class TestTechnicalInquiryWithObject:
         ingestion_bundle, resolved, intent_groups, demand_profile = self._build_scenario()
         focus_group = intent_groups[0]
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         decision = route(
             ingestion_bundle, resolved,
-            focus_group=focus_group, demand_profile=demand_profile,
+            focus_group=focus_group, scoped_demand=scoped_demand,
         )
 
         assert decision.action == "execute"
@@ -355,10 +373,13 @@ class TestTechnicalInquiryWithObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         tool_names = [call.tool_name for call in result.executed_calls]
@@ -376,10 +397,13 @@ class TestTechnicalInquiryWithObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         rag_call = next(c for c in result.executed_calls if c.tool_name == "technical_rag_tool")
@@ -396,10 +420,13 @@ class TestTechnicalInquiryWithObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         execution_result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         bundle = build_response_bundle(ResponseInput(

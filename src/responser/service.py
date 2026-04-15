@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-from src.response.blocks import build_content_blocks
-from src.response.composer import compose_final_response
-from src.response.models import (
+from src.responser.blocks import build_content_blocks
+from src.responser.composer import compose_final_response
+from src.responser.models import (
     ComposedResponse,
     ContentBlock,
     ResponseBundle,
     ResponseInput,
     ResponsePlan,
 )
-from src.response.resolution import (
+from src.responser.resolution import (
     build_response_resolution,
     derive_response_topic,
     summarize_content_blocks,
 )
-from src.response.planner import build_response_plan
-from src.response.renderers import (
+from src.responser.planner import build_response_plan
+from src.responser.renderers import (
     render_acknowledgement_response,
     render_answer_response,
     render_clarification_response,

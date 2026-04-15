@@ -5,8 +5,8 @@ import json
 from pydantic import BaseModel, ConfigDict
 
 from src.config import get_llm
-from src.response.models import ComposedResponse, ResponsePlan
-from src.response.prompts import get_rewrite_prompt
+from src.responser.models import ComposedResponse, ResponsePlan
+from src.responser.prompts import get_rewrite_prompt
 
 
 class RewriteOutput(BaseModel):

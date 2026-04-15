@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from src.common.models import DemandProfile, IntentGroup
+from src.common.models import DemandProfile, GroupDemand, IntentGroup
 from src.executor.completeness import evaluate_completeness
 from src.executor.merger import merge_execution_results
 from src.executor.models import (
@@ -22,7 +22,6 @@ from src.executor.models import (
 )
 from src.executor.request_builder import build_tool_request
 from src.executor.tool_selector import select_tools
-from src.ingestion.demand_profile import narrow_demand_profile
 from src.ingestion.models import IngestionBundle, ParserRequestFlags
 from src.memory.models import MemorySnapshot
 from src.objects.models import ObjectCandidate, ResolvedObjectState
@@ -49,6 +48,7 @@ def run_executor(
     focus_group: IntentGroup | None = None,
     demand_profile: DemandProfile | None = None,
     tool_call_cache: ToolCallCache | None = None,
+    active_demand: GroupDemand | None = None,
 ) -> ExecutionResult:
     """Run the executor with evaluate → retry loop.
 
@@ -68,6 +68,7 @@ def run_executor(
         focus_group=focus_group,
         demand_profile=demand_profile,
         tool_call_cache=tool_call_cache,
+        active_demand=active_demand,
     )
 
     all_calls: list[ExecutedToolCall] = []
@@ -131,13 +132,19 @@ def build_execution_context(
     focus_group: IntentGroup | None = None,
     demand_profile: DemandProfile | None = None,
     tool_call_cache: ToolCallCache | None = None,
+    active_demand: GroupDemand | None = None,
 ) -> ExecutionContext:
     """Map upstream inputs into the executor's internal state.
+
+    *active_demand* must be pre-computed by the caller and passed in
+    directly.  This ensures the executor sees the exact same GroupDemand
+    that routing used — no silent re-derivation.
 
     When *tool_call_cache* carries observations from prior groups,
     enrich the resolved_object_constraints with discovered names
     so downstream tool requests (e.g., RAG scope) benefit.
     """
+
     primary = resolved_object_state.primary_object
     request_flags = ingestion_bundle.turn_signals.parser_signals.request_flags
 
@@ -170,7 +177,7 @@ def build_execution_context(
         request_flags=request_flags,
         retrieval_hints=ingestion_bundle.turn_signals.parser_signals.retrieval_hints,
         demand_profile=demand_profile,
-        active_demand=narrow_demand_profile(demand_profile, focus_group),
+        active_demand=active_demand,
     )
 
 
@@ -293,3 +300,109 @@ def _extract_object_constraints(primary: ObjectCandidate | None) -> dict[str, st
         "business_line": primary.business_line,
     }
     return {k: v for k, v in constraints.items() if v}
+
+
+# ---------------------------------------------------------------------------
+# Available params extraction (four-layer sources)
+# ---------------------------------------------------------------------------
+
+# Semantic mapping from object_type to param name for identifiers
+_IDENTIFIER_MAPPING: dict[str, str] = {
+    "order": "order_number",
+    "invoice": "invoice_number",
+    "shipment": "tracking_number",
+    "customer": "customer_identifier",
+    "product": "catalog_number",
+}
+
+
+def extract_available_params(
+    context: ExecutionContext,
+    *,
+    tool_call_cache: ToolCallCache | None = None,
+) -> dict[str, str]:
+    """Extract all available params from four layers of sources.
+
+    Layer 1: primary_object + secondary_objects fields
+    Layer 2: resolved_object_constraints
+    Layer 3: memory_snapshot
+    Layer 4: cross-group tool_call_cache observations
+
+    Lower layers use setdefault to not override higher-priority sources.
+    """
+    params: dict[str, str] = {}
+
+    # --- Layer 1: primary_object ---
+    obj = context.primary_object
+    if obj is not None:
+        if obj.identifier:
+            params["identifier"] = obj.identifier
+            semantic = _IDENTIFIER_MAPPING.get(obj.object_type, "")
+            if semantic:
+                params[semantic] = obj.identifier
+        if obj.canonical_value:
+            params["canonical_value"] = obj.canonical_value
+        if obj.display_name:
+            params["display_name"] = obj.display_name
+        if obj.business_line:
+            params["business_line"] = obj.business_line
+
+    # --- Layer 1b: secondary_objects ---
+    for sec_obj in context.secondary_objects:
+        if sec_obj.object_type == "customer":
+            if sec_obj.identifier:
+                params.setdefault("customer_identifier", sec_obj.identifier)
+            if sec_obj.display_name:
+                params.setdefault("customer_name", sec_obj.display_name)
+
+    # --- Layer 2: resolved_object_constraints ---
+    for key, value in context.resolved_object_constraints.items():
+        if value and value.strip():
+            params.setdefault(key, value)
+
+    # --- Layer 3: memory_snapshot ---
+    snapshot = context.memory_snapshot
+    if snapshot is not None:
+        _extract_from_memory(params, snapshot)
+
+    # --- Layer 4: cross-group observations ---
+    if tool_call_cache is not None:
+        obs = tool_call_cache.observations
+        for key in ("product_name", "service_name", "business_line",
+                     "customer_name", "order_number"):
+            if obs.get(key):
+                params.setdefault(key, obs[key])
+
+    return params
+
+
+def _extract_from_memory(params: dict[str, str], snapshot: MemorySnapshot) -> None:
+    """Extract params from MemorySnapshot (Layer 3, lower priority)."""
+    active = snapshot.object_memory.active_object
+    if active is not None:
+        if active.identifier:
+            params.setdefault("identifier", active.identifier)
+            semantic = _IDENTIFIER_MAPPING.get(active.object_type, "")
+            if semantic:
+                params.setdefault(semantic, active.identifier)
+        if active.display_name:
+            params.setdefault("display_name", active.display_name)
+        if active.business_line:
+            params.setdefault("business_line", active.business_line)
+
+    for recent in snapshot.object_memory.recent_objects:
+        if recent.object_type == "customer":
+            if recent.identifier:
+                params.setdefault("customer_identifier", recent.identifier)
+            if recent.display_name:
+                params.setdefault("customer_name", recent.display_name)
+
+    for tool_result in snapshot.response_memory.last_tool_results:
+        for key in ("customer_name", "order_number", "email",
+                     "invoice_number", "tracking_number"):
+            val = tool_result.get(key)
+            if val and isinstance(val, str) and val.strip():
+                params.setdefault(key, val)
+
+    if snapshot.thread_memory.active_business_line:
+        params.setdefault("business_line", snapshot.thread_memory.active_business_line)

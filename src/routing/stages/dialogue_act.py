@@ -1,160 +1,86 @@
 from __future__ import annotations
 
-import re
-
-from src.routing.models import DialogueActResult, RoutedObjectState
-from src.routing.utils import normalize_routing_text
+from src.ingestion.models import ParserRequestFlags, ParserSignals
+from src.routing.models import DialogueActResult
 
 
-TERMINATE_PATTERNS = {
-    "stop",
-    "cancel",
-    "never mind",
-    "nevermind",
-    "no thanks",
-    "no thank you",
-    "bye",
-    "goodbye",
-}
-ACKNOWLEDGE_PATTERNS = {
-    "thanks",
-    "thank you",
-    "got it",
-    "ok",
-    "okay",
-    "understood",
-    "received",
-}
-ELABORATE_PATTERNS = {
-    "tell me more",
-    "more detail",
-    "more details",
-    "explain more",
-    "expand on",
-    "go deeper",
-    "elaborate",
-}
-SELECTION_PREFIXES = {
-    "select ",
-    "choose ",
-    "pick ",
-    "the first",
-    "the second",
-    "option ",
-    "number ",
-}
+# Intents that indicate the user has no active request — pure
+# conversational closing or acknowledgement.
+_CLOSING_INTENTS: frozenset[str] = frozenset({"unknown"})
+
+# Intents where the user is continuing / following up on prior context.
+_CONTINUATION_INTENTS: frozenset[str] = frozenset({"follow_up"})
 
 
 # ---------------------------------------------------------------------------
-# v3: simplified 3-act classification with stateful_anchors awareness
+# v3: signal-driven 3-act classification
 # ---------------------------------------------------------------------------
 
 def resolve_dialogue_act(
-    query: str,
-    object_routing: RoutedObjectState,
+    parser_signals: ParserSignals,
     *,
     stateful_anchors=None,
 ) -> DialogueActResult:
-    text = normalize_routing_text(query or "").strip()
-    if not text:
-        return DialogueActResult(
-            act="closing",
-            confidence=0.70,
-            reason="The turn did not contain enough text to classify a dialogue act.",
-        )
+    """Classify the turn into one of three dialogue acts based on parser signals.
 
-    # Stateful anchors: pending clarification biases toward selection
-    if stateful_anchors and getattr(stateful_anchors, "pending_clarification_field", ""):
-        if _looks_like_selection(text, object_routing) or text in {"sure", "yes", "yeah", "yep"}:
-            return DialogueActResult(
-                act="selection",
-                confidence=0.90,
-                reason="Selection in response to pending clarification.",
-                matched_signals=["pending_clarification", "selection_pattern"],
-                requires_active_object=True,
-                selection_value=query.strip(),
-            )
+    The parser LLM has already extracted intent, entities, flags, and
+    selection resolution.  This function makes a routing *decision* from
+    those signals — it never re-interprets raw query text.
+    """
+    selection = parser_signals.selection_resolution
+    context = parser_signals.context
+    intent = context.primary_intent
 
-    if any(pattern in text for pattern in TERMINATE_PATTERNS):
-        return DialogueActResult(
-            act="closing",
-            confidence=0.92,
-            reason="The turn contains an explicit stop or closure signal.",
-            matched_signals=["terminate_pattern"],
-        )
-
-    if _looks_like_selection(text, object_routing):
+    # ---- selection --------------------------------------------------------
+    if selection is not None and selection.selection_confidence >= 0.5:
         return DialogueActResult(
             act="selection",
-            confidence=0.88,
-            reason="The turn appears to select one candidate from prior context.",
-            matched_signals=["selection_pattern"],
+            confidence=selection.selection_confidence,
+            reason="Parser resolved a user selection from pending clarification.",
+            matched_signals=["parser_selection_resolution"],
             requires_active_object=True,
-            selection_value=query.strip(),
+            selection_value=selection.selected_value,
         )
 
-    if any(pattern in text for pattern in ELABORATE_PATTERNS):
-        return DialogueActResult(
-            act="inquiry",
-            is_continuation=True,
-            confidence=0.82,
-            reason="The turn asks for expansion or deeper explanation.",
-            matched_signals=["elaboration_pattern"],
-            requires_active_object=object_routing.active_object is not None,
-        )
-
-    if _looks_like_acknowledgement(text):
+    # ---- closing ----------------------------------------------------------
+    if _is_closing(intent, context.intent_confidence, parser_signals.request_flags):
         return DialogueActResult(
             act="closing",
-            confidence=0.81,
-            reason="The turn mainly acknowledges the prior response.",
-            matched_signals=["acknowledgement_pattern"],
+            confidence=max(0.80, 1.0 - context.intent_confidence),
+            reason="No active customer intent detected; treating as conversational closing.",
+            matched_signals=["parser_no_active_intent"],
         )
 
-    if _looks_like_inquiry(text):
-        return DialogueActResult(
-            act="inquiry",
-            confidence=0.84,
-            reason="The turn asks for information or action-oriented detail.",
-            matched_signals=["inquiry_pattern"],
-        )
-
-    # No pattern matched -> fallback to inquiry with low confidence
-    # (Level 2 LLM classifier will be wired here in Phase B)
+    # ---- inquiry (default) ------------------------------------------------
+    is_continuation = intent in _CONTINUATION_INTENTS
     return DialogueActResult(
         act="inquiry",
-        confidence=0.40,
-        reason="No strong pattern matched; defaulting to inquiry for Level 2 resolution.",
+        is_continuation=is_continuation,
+        confidence=max(context.intent_confidence, 0.70),
+        reason=(
+            "Continuation of prior context."
+            if is_continuation
+            else "Active customer intent detected."
+        ),
+        matched_signals=["parser_follow_up"] if is_continuation else ["parser_intent"],
     )
 
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
+def _is_closing(intent: str, intent_confidence: float, flags: ParserRequestFlags) -> bool:
+    """Determine if the turn is a closing signal based on parser output.
 
-def _looks_like_selection(text: str, object_routing: RoutedObjectState) -> bool:
-    if re.fullmatch(r"\d+", text):
-        return True
-    if any(text.startswith(prefix) for prefix in SELECTION_PREFIXES):
-        return True
-    if text in {"first", "second", "third", "1", "2", "3"}:
-        return True
-
-    candidate_names = [
-        candidate.display_name.lower()
-        for ambiguous_set in object_routing.ambiguous_objects
-        for candidate in ambiguous_set.candidate_refs
-        if candidate.display_name
-    ]
-    return any(name and name in text for name in candidate_names)
-
-
-def _looks_like_acknowledgement(text: str) -> bool:
-    if "?" in text:
+    Closing = the parser found no meaningful customer intent.  This is
+    signalled by an 'unknown' primary_intent with low confidence AND no
+    request flags set.
+    """
+    if intent not in _CLOSING_INTENTS:
         return False
-    return any(pattern in text for pattern in ACKNOWLEDGE_PATTERNS)
+    if intent_confidence > 0.5:
+        return False
+    if _has_any_request_flags(flags):
+        return False
+    return True
 
 
-def _looks_like_inquiry(text: str) -> bool:
-    inquiry_markers = {"?", "what", "how", "why", "which", "when", "where", "can you", "could you"}
-    return any(marker in text for marker in inquiry_markers)
+def _has_any_request_flags(flags: ParserRequestFlags) -> bool:
+    return any(getattr(flags, field) for field in ParserRequestFlags.model_fields)

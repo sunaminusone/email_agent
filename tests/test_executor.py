@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.common.execution_models import ExecutedToolCall, ExecutionResult, MergedResults
 from src.common.models import DemandProfile, GroupDemand, IntentGroup
+from src.ingestion.demand_profile import narrow_demand_profile
 from src.executor.completeness import evaluate_completeness, CompletenessResult
 from src.executor.merger import final_status_for_calls, merge_execution_results
 from src.executor.models import ExecutionContext, ToolSelection
@@ -486,12 +487,15 @@ class TestBuildExecutionContext:
             [focus_group],
         )
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         ctx = build_execution_context(
             ingestion_bundle=bundle,
             resolved_object_state=resolved,
             route_decision=route,
             demand_profile=demand_profile,
             focus_group=focus_group,
+            active_demand=scoped_demand,
         )
 
         assert ctx.query == "CD3 antibody"
@@ -678,10 +682,13 @@ class TestRunExecutor:
             )],
         )
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         result = run_executor(
             bundle, resolved, route,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         tool_names = [call.tool_name for call in result.executed_calls]

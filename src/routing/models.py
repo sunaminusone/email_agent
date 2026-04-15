@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.common.models import ObjectType
-from src.objects.models import ResolvedObjectState
 from src.routing.vocabulary import ActionType, DialogueActType
 
 
@@ -54,6 +55,7 @@ class ClarificationPayload(_RoutingModel):
     prompt: str = ""
     missing_information: list[str] = Field(default_factory=list)
     options: list[ClarificationOption] = Field(default_factory=list)
+    path_context: Any | None = None  # ClarificationFromPaths when from path evaluation
 
 
 class RoutedObjectState(_RoutingModel):
@@ -65,12 +67,6 @@ class RoutedObjectState(_RoutingModel):
     should_block_execution: bool = False
     reason: str = ""
 
-
-class RoutingInput(_RoutingModel):
-    query: str = ""
-    resolved_object_state: ResolvedObjectState
-    risk_level: str = "low"
-    needs_human_review: bool = False
 
 
 class RouteDecision(_RoutingModel):

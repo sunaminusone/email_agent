@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.common.messages import get_message
 from src.config import get_llm
-from src.response.models import ComposedResponse, ContentBlock, ResponseInput, ResponsePlan
+from src.responser.models import ComposedResponse, ContentBlock, ResponseInput, ResponsePlan
 
 
 class KnowledgeAnswerOutput(BaseModel):

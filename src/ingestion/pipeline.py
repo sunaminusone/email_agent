@@ -29,29 +29,34 @@ def build_ingestion_bundle(
         attachments=attachments,
     )
 
-    parser_signals = build_parser_signals(
+    # Extract stateful_anchors BEFORE parser so pending clarification
+    # options can be included in the parser prompt.
+    if stateful_anchors is None:
+        stateful_anchors = extract_stateful_anchors(prior_state)
+
+    parser_signals, llm_normalized = build_parser_signals(
         user_query=turn_core.normalized_query,
         conversation_history=normalized_history,
         attachments=attachments,
+        stateful_anchors=stateful_anchors,
+    )
+    deterministic_signals = extract_deterministic_signals(
+        turn_core.normalized_query,
+        parser_signals=parser_signals,
     )
     parser_signals = refine_parser_signals(
         parser_signals,
         normalized_query=turn_core.normalized_query,
         attachment_signals=attachment_signals,
+        deterministic_signals=deterministic_signals,
     )
 
     turn_core = turn_core.model_copy(
         update={
+            "normalized_query": llm_normalized or turn_core.normalized_query,
             "language": str(parser_signals.context.language or turn_core.language),
             "channel": str(parser_signals.context.channel or turn_core.channel),
         }
-    )
-
-    if stateful_anchors is None:
-        stateful_anchors = extract_stateful_anchors(prior_state)
-    deterministic_signals = extract_deterministic_signals(
-        turn_core.normalized_query,
-        parser_signals=parser_signals,
     )
     reference_signals = extract_reference_signals(
         turn_core.normalized_query,

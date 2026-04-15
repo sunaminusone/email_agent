@@ -5,21 +5,22 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.ingestion.models import AttributeConstraint, EntitySpan, RecencyType, SourceType
-from src.common.models import ObjectType
+from src.common.models import ObjectRef, ObjectType
 
 
 class _ObjectsModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ObjectCandidate(_ObjectsModel):
-    object_type: ObjectType = "unknown"
+class ObjectCandidate(ObjectRef):
+    """Full object candidate — extends ObjectRef with resolution metadata.
+
+    Shared fields (object_type, identifier, identifier_type, display_name,
+    business_line) are inherited from ObjectRef.  ObjectCandidate IS-A
+    ObjectRef, so it can be used wherever an ObjectRef is expected.
+    """
     raw_value: str = ""
     canonical_value: str = ""
-    display_name: str = ""
-    identifier: str = ""
-    identifier_type: str = ""
-    business_line: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     recency: RecencyType = "CURRENT_TURN"
     source_type: SourceType = "parser"

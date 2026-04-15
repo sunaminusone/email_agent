@@ -2,215 +2,178 @@
 
 This document summarizes the current target architecture (v3).
 
-The canonical design lives at [docs/AGENT_ARCHITECTURE_V3.md](docs/AGENT_ARCHITECTURE_V3.md). This root document is a compact overview.
+For detailed module designs, see the [reading order](docs/ARCHITECTURE_READING_ORDER.md).
+
+---
 
 ## Design Philosophy
 
-This system is an **agent**, not a pipeline.
-
-An agent:
-- understands the user's message
-- autonomously decides which tools to use
-- executes tools and observes results
-- iterates if results are insufficient
-- synthesizes a coherent response
-
-Each module is independent. Cross-module communication happens through typed Pydantic contracts. LangChain is used as an implementation framework where it adds value, but never replaces the architectural contracts.
+The system is an **agent**, not a pipeline. Each turn follows a six-phase loop where the executor autonomously selects tools, observes results, and iterates until the customer's question is answered. Adding a new tool requires editing **one file** (the tool's capability declaration); no routing tables or planner mappings need to change.
 
 ## Runtime Flow
 
-```text
-user message + memory
-  -> ingestion        (understand)
-  -> objects           (resolve entities)
-  -> routing           (decide: execute / clarify / handoff)
-  -> executor          (reason + dispatch tools + observe, may loop)
-  -> responser         (synthesize reply)
-  -> memory update     (persist state)
 ```
-
-In concrete terms:
-
-1. `ingestion` emits `IngestionBundle`
-2. `objects` emits `ResolvedObjectState`
-3. `routing` emits `RouteDecision`
-4. `executor` emits `ExecutionResult` (contains plan + tool results)
-5. `responser` emits `AgentResponse`
-6. `memory` persists `MemoryUpdate`
-
-## Agent Loop
-
-```python
-def run_email_agent(request):
-    memory = load_memory(request.thread_id)
-
-    # understand
-    parsed = ingestion.parse(request.query, memory)
-    objects = objects.resolve(parsed)
-
-    # decide
-    route = routing.decide(parsed, objects)
-
-    # execute (with reasoning loop)
-    results = None
-    if route.action == "execute":
-        results = executor.run(parsed, objects, memory)
-
-    # respond (all routes)
-    response = responser.respond(parsed, route, results)
-
-    # remember
-    update_memory(memory, parsed, objects, route, results, response)
-
-    return response
+User Message
+  1. recall()                       memory: load snapshot, build MemoryContext
+  2. build_ingestion_bundle()       ingestion: parse query, extract signals
+  3. resolve_objects()              objects: resolve entities from signals
+  4. assemble_intent_groups()       ingestion: bind request_flags to objects
+  5. build_demand_profile()         ingestion: semantic demand classification
+  ── per IntentGroup ──
+  6. route()                        routing: execute / clarify / respond / handoff
+  7. select_tools()                 executor: registry-based tool selection
+  8. evaluate_execution_paths()     executor: readiness check (full/degraded/insufficient)
+  9. run_executor()                 executor: dispatch → observe → retry loop
+  ──────────────────
+ 10. build_response_bundle()        responser: synthesize reply from all group outcomes
+ 11. reflect()                      memory: merge contributions, persist snapshot
 ```
 
 ## Module Responsibilities
 
-### `src/ingestion/`
+### ingestion (`src/ingestion/`)
 
-Purpose: parse user message, extract signals, resolve references
+Parses the raw user message into structured signals. Outputs `IngestionBundle` containing:
 
-Input: raw query, conversation history, attachments, prior state
+- **TurnCore**: normalized query, thread_id, attachments
+- **ParserSignals**: primary_intent, request_flags, entities, retrieval_hints
+- **DeterministicSignals**: rule-based context flags (pricing, technical, etc.)
+- **ReferenceSignals**: attachment-derived evidence
 
-Output: `IngestionBundle`
+Key subsystems:
+- **parser_adapter** + **parser_prompt**: LLM-based structured extraction
+- **signal_refinement**: non-destructive correction of intent/flag inconsistencies
+- **demand_profile**: semantic classification of request_flags into demand types (technical / commercial / operational)
+- **intent_assembly** (`src/routing/intent_assembly.py`): deterministic binding of flags to resolved objects via `_FLAG_OBJECT_AFFINITY`, producing `list[IntentGroup]`
 
-Should not: resolve entities, select tools, generate replies
+### memory (`src/memory/`)
 
-### `src/objects/`
+Two-phase lifecycle:
 
-Purpose: resolve products, services, orders, invoices, and ambiguity
+- **recall()**: at turn start. Loads `MemorySnapshot`, builds `MemoryContext` with stateful_anchors, prior intent groups, continuity confidence, conversation trajectory, object salience scores.
+- **reflect()**: at turn end. Merges `MemoryContribution` from each layer (ingestion, objects, routing, response) into updated `MemorySnapshot`, persists to session store.
 
-Input: `IngestionBundle`
+Key concepts: object salience scoring, intent drift detection, intent group continuity for multi-turn follow-ups.
 
-Output: `ResolvedObjectState`
+### objects (`src/objects/`)
 
-Should not: select tools, execute retrieval, read session state directly
+Resolves entity spans from parser output into typed `ObjectCandidate` instances. Outputs `ResolvedObjectState` with primary_object, secondary_objects, ambiguous_sets. Independent of routing and execution.
 
-### `src/routing/`
+### routing (`src/routing/`)
 
-Purpose: decide the action route (execute / clarify / handoff)
+Determines **what action to take**, not which tools to call. Outputs `RouteDecision`:
 
-Input: `IngestionBundle`, `ResolvedObjectState`
+```
+action: "execute" | "respond" | "clarify" | "handoff"
+dialogue_act: DialogueActResult  (inquiry | selection | closing)
+clarification: ClarificationPayload | None
+reason: str
+```
 
-Output: `RouteDecision`
+Three dialogue acts (signal-driven, two-level classification):
+- **inquiry**: new question or follow-up (default)
+- **selection**: user selecting from prior clarification options
+- **closing**: conversation wrap-up, no action needed
 
-Should not: select tools (that is the executor's job), execute retrieval, generate replies
+Action priority: handoff > clarify > closing(respond) > execute.
 
-### `src/executor/`
+Routing does **not** select tools. Tool selection moved to executor in v3.
 
-Purpose: autonomously select tools, dispatch calls, observe results, iterate if needed
+### executor (`src/executor/`)
 
-Input: `IngestionBundle`, `ResolvedObjectState`, `MemorySnapshot`
+Autonomous reasoning loop:
 
-Output: `ExecutionResult`
+1. **select_tools()** — match ExecutionContext against registry capabilities (demand-aware scoring)
+2. **evaluate_execution_paths()** — readiness check per tool (full / degraded / insufficient)
+3. **dispatch** — build requests, call tools (with cross-group cache deduplication)
+4. **evaluate_completeness()** — sufficient? → done. Insufficient? → retry with fallback (max 3 iterations)
 
-Contains an internal reasoning loop:
-1. read tool capabilities from registry
-2. decide which tools to call and with what parameters
-3. dispatch tool calls (parallel when possible)
-4. observe results, evaluate completeness
-5. if insufficient, plan additional tool calls
-6. return aggregated results
+Key contracts:
+- `ExecutionContext`: carries query, primary_object, dialogue_act, request_flags, active_demand
+- `PathEvaluation`: recommended_action (execute/clarify), executable_paths, blocked_paths
+- `ExecutionResult`: executed_calls, merged_results, final_status
 
-Should not: perform ingestion, resolve entities, generate final replies
+Resolution chain: when all paths are insufficient, `find_resolution_provider()` looks for a tool that can provide the missing identifier (one-step only).
 
-### `src/tools/`
+### tools (`src/tools/`)
 
-Purpose: define self-describing tool capabilities, register tools, dispatch requests
+Self-describing capabilities via `ToolCapability`:
 
-Input: `ToolRequest`
+- `supported_request_flags`: which flags this tool satisfies
+- `supported_object_types`: which object types it handles
+- `full_identifiers`: params for precise lookup (API returns unique result)
+- `degraded_identifiers`: params for fuzzy lookup (may return multiple)
+- `provides_params`: what this tool's results can contribute to other tools
 
-Output: `ToolResult`
+`ToolReadiness` (from `check_readiness()`): three quality levels — full, degraded, insufficient.
 
-Each tool declares its own `ToolCapability` (supported object types, intents, parameters). The executor reads these capabilities from the registry to make autonomous tool selection decisions.
+Tool families: catalog, documents, rag (technical), quickbooks (customer/order/invoice/shipping).
 
-Adding a new tool = one file in `tools/` with implementation + capability declaration. No changes to executor, routing, or any other module.
+### responser (`src/responser/`)
 
-Should not: resolve entities, select other tools, generate final replies
+Synthesizes the final reply from execution outcomes:
 
-### `src/responser/`
+- **planner**: determines response strategy (response_path, response_topic)
+- **blocks**: builds structured `ContentBlock` list from `ExecutionResult` (tagged by source group and demand)
+- **composer**: LLM rewrite of blocks into natural language
+- **renderers**: specialized handlers for each response type (answer, clarification, handoff, knowledge, partial_answer, acknowledgement, termination)
 
-Purpose: synthesize coherent user-facing reply from any route's output
+### agent loop (`src/app/service.py`)
 
-Input: `IngestionBundle`, `RouteDecision`, `ExecutionResult` (if any)
+Orchestrates the full turn via `_run_agent_loop()`:
 
-Output: `AgentResponse`
+- Iterates over `IntentGroup` list (multi-intent support)
+- Per group: compute `GroupDemand` → `route()` → path evaluation → `run_executor()` or clarify
+- `ToolCallCache`: cross-group deduplication + observation sharing
+- `AgentState`: tracks `GroupOutcome` per group, derives overall action and merged results
 
-Should not: select tools, execute retrieval, invent facts not grounded in execution results
+## Data Contracts
 
-### `src/memory/`
-
-Purpose: preserve typed state across turns
-
-Primary contracts: `MemorySnapshot`, `MemoryUpdate`, `ThreadMemory`, `ObjectMemory`, `ClarificationMemory`, `ResponseMemory`, `StatefulAnchors`
-
-Should not: act as a routing layer, generate replies
+```
+IngestionBundle ─────────────────────> MemoryContext
+       │                                    │
+       v                                    v
+ResolvedObjectState ──> IntentGroup[] ──> DemandProfile
+       │                     │                │
+       v                     v                v
+  RouteDecision ────> ExecutionContext ──> ExecutionResult
+       │                                       │
+       v                                       v
+  ClarificationPayload              GroupOutcome[] ──> ResponseBundle
+```
 
 ## Capability Layers
 
-These modules answer domain questions. They are called by tools, not by orchestration layers.
-
-### `src/catalog/`
-- structured product lookup over PostgreSQL
-- candidate retrieval, ranking, and selection
-
-### `src/documents/`
-- structured document inventory lookup
-
-### `src/rag/`
-- semantic technical retrieval
-- service-page vector search and reranking
-
-### `src/integrations/`
-- low-level external system connectors (QuickBooks)
-
-## LangChain Integration
-
-LangChain is the implementation framework, not the architecture.
-
-| Module | LangChain Usage |
-| --- | --- |
-| ingestion | parser chain (structured extraction) |
-| objects | mostly deterministic; optional LLM fallback for rare ambiguity |
-| routing | mostly deterministic; optional LLM classifier fallback |
-| executor | LangGraph for reasoning loop; LCEL for tool composition |
-| tools | wrap as LangChain Tools for standardized invocation |
-| responser | LLM-based response synthesis and rewrite |
-| memory | own typed contracts; LangChain memory not used |
-
-Core rule: all cross-module communication uses our own Pydantic contracts, never raw LangChain objects.
+| Layer | Modules | Purpose |
+|-------|---------|---------|
+| catalog | `src/catalog/` | Product/service master data |
+| documents | `src/documents/` | Document retrieval (COA, SDS, datasheets) |
+| rag | `src/rag/` | Technical knowledge retrieval |
+| integrations | `src/integrations/` | External system adapters (QuickBooks) |
 
 ## Key Differences From v2
 
-| Aspect | v2 (previous) | v3 (current) |
-| --- | --- | --- |
-| Tool selection | routing rules + planner rules (two places) | executor reads tool capabilities from registry |
-| Execution | single pass, no iteration | reasoning loop with observation |
-| Adding a new tool | change routing + planner + requests + tool | add one file in tools/ |
-| Planner | separate module between routing and executor | absorbed into executor's reasoning step |
-| Response | `response/` | `responser/` |
-| Routing scope | decides route + selects tools | decides route only |
+| Aspect | v2 | v3 |
+|--------|----|----|
+| Tool selection | Routing decides tools via `tool_routing.py` | Executor reads registry at runtime |
+| Adding a tool | Edit 3-4 modules | Edit 1 file (capability declaration) |
+| Multi-intent | Single intent, flags ignored | `IntentGroup[]` with per-group routing and execution |
+| Dialogue acts | 6 acts including UNKNOWN | 3 acts (inquiry, selection, closing) |
+| Clarification | Routing policy only | Readiness-driven (path evaluation) + routing policy |
+| Memory | Passive snapshot load | Active recall/reflect with salience and drift detection |
+| Response module | `src/response/` | `src/responser/` |
+| Modality | Explicit modality classification | Derived from request_flags at tool level |
 
 ## Canonical Vocabulary
 
-Preferred terms across docs and code:
-
-- `IngestionBundle`
-- `ResolvedObjectState`
-- `RouteDecision`
-- `ToolCapability`
-- `ToolRequest` / `ToolResult`
-- `ExecutionResult`
-- `AgentResponse`
-- `MemorySnapshot` / `MemoryUpdate`
-
-## Reading Order
-
-1. [docs/AGENT_ARCHITECTURE_V3.md](docs/AGENT_ARCHITECTURE_V3.md) — this design
-2. [docs/INGESTION_LAYER_DESIGN.md](docs/INGESTION_LAYER_DESIGN.md) — signal contracts
-3. [docs/OBJECTS_LAYER_DESIGN.md](docs/OBJECTS_LAYER_DESIGN.md) — entity resolution
-4. [docs/TOOLS_LAYER_DESIGN.md](docs/TOOLS_LAYER_DESIGN.md) — capability contracts
-5. [docs/MEMORY_LAYER_DESIGN.md](docs/MEMORY_LAYER_DESIGN.md) — typed state
-6. [docs/RAG_RETRIEVAL_ENHANCEMENT_DESIGN.md](docs/RAG_RETRIEVAL_ENHANCEMENT_DESIGN.md) — technical retrieval
-7. [docs/SERVICE_PAGE_RAG_STANDARD.md](docs/SERVICE_PAGE_RAG_STANDARD.md) — corpus standard
+| Term | Definition |
+|------|-----------|
+| IntentGroup | One user need = intent + object + request_flags subset |
+| GroupDemand | Semantic demand classification for one IntentGroup |
+| DemandProfile | Aggregated demand across all IntentGroups |
+| ToolCapability | Self-description of what a tool can do and needs |
+| ToolReadiness | Runtime assessment: full / degraded / insufficient |
+| PathEvaluation | Readiness check result with execute-or-clarify recommendation |
+| RouteDecision | Action + dialogue_act + optional clarification |
+| ExecutionContext | All inputs the executor needs for one group |
+| GroupOutcome | Result of processing one IntentGroup through route + execute |

@@ -1,32 +1,13 @@
 from __future__ import annotations
 
-from src.common.models import DemandProfile, IntentGroup
-from src.ingestion.demand_profile import build_demand_profile
-from src.ingestion.intent_assembly import assemble_intent_groups
+from src.common.models import DemandProfile, GroupDemand, IntentGroup
+from src.ingestion.demand_profile import build_demand_profile, narrow_demand_profile
+from src.routing.intent_assembly import assemble_intent_groups
 from src.ingestion.models import IngestionBundle
 from src.objects.models import ResolvedObjectState
-from src.routing.models import RouteDecision, RoutingInput
+from src.routing.models import RouteDecision
 from src.routing.orchestrator import route
 
-
-def build_routing_input_from_ingestion(
-    *,
-    ingestion_bundle: IngestionBundle,
-    resolved_object_state: ResolvedObjectState,
-) -> RoutingInput:
-    """Build a RoutingInput from ingestion + object resolution outputs."""
-    parser_context = ingestion_bundle.turn_signals.parser_signals.context
-    query = (
-        ingestion_bundle.turn_core.normalized_query
-        or ingestion_bundle.turn_core.raw_query
-        or ""
-    )
-    return RoutingInput(
-        query=query,
-        resolved_object_state=resolved_object_state,
-        risk_level=parser_context.risk_level,
-        needs_human_review=parser_context.needs_human_review,
-    )
 
 
 def route_single_group(
@@ -35,8 +16,14 @@ def route_single_group(
     resolved_object_state: ResolvedObjectState,
     focus_group: IntentGroup | None = None,
     demand_profile: DemandProfile | None = None,
+    scoped_demand: GroupDemand | None = None,
 ) -> RouteDecision:
     """Route a single intent group with demand-aware logic.
+
+    When *scoped_demand* is provided it is used directly.  Otherwise
+    it is computed here from the demand_profile — this is the only
+    place outside service.py where narrow_demand_profile() is called,
+    kept for test / standalone convenience.
 
     When *demand_profile* is not provided, auto-builds one from the
     ingestion bundle.  When *focus_group* is also absent, defaults to
@@ -61,12 +48,12 @@ def route_single_group(
         if focus_group is None and intent_groups:
             focus_group = intent_groups[0]
 
+    if scoped_demand is None:
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
     return route(
         ingestion_bundle, resolved_object_state,
         focus_group=focus_group,
-        demand_profile=demand_profile,
+        scoped_demand=scoped_demand,
     )
 
-
-# Backward-compatible alias
-route_v3_from_ingestion_bundle = route_single_group
