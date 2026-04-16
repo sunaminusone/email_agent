@@ -74,6 +74,7 @@ def execute_quickbooks_tool(
         "match_count": len(output.get("matches", [])),
     }
     matches = output.get("matches", [])
+    api_errors = output.get("errors", [])
 
     if output.get("status") == "needs_input":
         return empty_result(
@@ -82,10 +83,24 @@ def execute_quickbooks_tool(
             debug_info={"quickbooks_request": request_payload},
         )
     if matches:
+        if api_errors:
+            return partial_result(
+                tool_name=request.tool_name,
+                primary_records=matches,
+                errors=api_errors,
+                structured_facts=facts,
+                debug_info={"quickbooks_request": request_payload},
+            )
         return ok_result(
             tool_name=request.tool_name,
             primary_records=matches,
             structured_facts=facts,
+            debug_info={"quickbooks_request": request_payload},
+        )
+    if output.get("status") == "error":
+        return error_result(
+            tool_name=request.tool_name,
+            error=f"QuickBooks {lookup_label} lookup failed: {'; '.join(api_errors)}",
             debug_info={"quickbooks_request": request_payload},
         )
     if output.get("status") in {"completed", "not_found"}:

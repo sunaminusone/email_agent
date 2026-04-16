@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -5,6 +6,8 @@ import requests
 from .auth import QuickBooksAuthManager, QuickBooksConfigError
 from .matching import dedupe_matches, extract_customer_matches, extract_transaction_matches, rank_customer_candidates
 from .repository import QuickBooksRepository
+
+logger = logging.getLogger(__name__)
 
 
 class QuickBooksClient:
@@ -50,6 +53,7 @@ class QuickBooksClient:
         matches: List[Dict[str, Any]] = []
         searched_entities: List[str] = []
         searched_queries: List[Dict[str, str]] = []
+        errors: List[str] = []
 
         for entity in ["Invoice", "SalesReceipt"]:
             if entity == "Invoice" and not include_invoices:
@@ -59,37 +63,58 @@ class QuickBooksClient:
 
             searched_entities.append(entity)
             for doc_number in order_numbers:
-                response = self.repository.query_transaction_by_doc_number(
-                    token_data=token_data,
-                    entity=entity,
-                    doc_number=doc_number,
-                    max_results=max_results,
-                )
-                matches.extend(extract_transaction_matches(entity, response))
-                searched_queries.append({"entity": entity, "mode": "doc_number", "value": doc_number})
+                try:
+                    response = self.repository.query_transaction_by_doc_number(
+                        token_data=token_data,
+                        entity=entity,
+                        doc_number=doc_number,
+                        max_results=max_results,
+                    )
+                    matches.extend(extract_transaction_matches(entity, response))
+                    searched_queries.append({"entity": entity, "mode": "doc_number", "value": doc_number})
+                except requests.RequestException as exc:
+                    logger.warning("QuickBooks %s query failed for doc_number=%s: %s", entity, doc_number, exc)
+                    searched_queries.append({"entity": entity, "mode": "doc_number_error", "value": doc_number})
+                    errors.append(f"{entity} lookup by doc_number '{doc_number}' failed: {exc}")
 
             if matches and order_numbers:
                 continue
 
             for customer_name in customer_names:
-                response = self.repository.query_transaction_by_customer_name(
-                    token_data=token_data,
-                    entity=entity,
-                    customer_name=customer_name,
-                    max_results=max_results,
-                )
-                matches.extend(extract_transaction_matches(entity, response))
-                searched_queries.append({"entity": entity, "mode": "customer_name", "value": customer_name})
+                try:
+                    response = self.repository.query_transaction_by_customer_name(
+                        token_data=token_data,
+                        entity=entity,
+                        customer_name=customer_name,
+                        max_results=max_results,
+                    )
+                    matches.extend(extract_transaction_matches(entity, response))
+                    searched_queries.append({"entity": entity, "mode": "customer_name", "value": customer_name})
+                except requests.RequestException as exc:
+                    logger.warning("QuickBooks %s query failed for customer=%s: %s", entity, customer_name, exc)
+                    searched_queries.append({"entity": entity, "mode": "customer_name_error", "value": customer_name})
+                    errors.append(f"{entity} lookup by customer '{customer_name}' failed: {exc}")
 
-        return {
+        if matches and errors:
+            status = "partial"
+        elif matches:
+            status = "completed"
+        elif errors:
+            status = "error"
+        else:
+            status = "not_found"
+        result: Dict[str, Any] = {
             "lookup_mode": "quickbooks",
-            "status": "completed" if matches else "not_found",
+            "status": status,
             "searched_entities": searched_entities,
             "searched_numbers": order_numbers,
             "searched_customer_names": customer_names,
             "searched_queries": searched_queries,
             "matches": dedupe_matches(matches),
         }
+        if errors:
+            result["errors"] = errors
+        return result
 
     def query_customers(
         self,
@@ -109,6 +134,7 @@ class QuickBooksClient:
 
         matches: List[Dict[str, Any]] = []
         searched_queries: List[Dict[str, str]] = []
+        errors: List[str] = []
         for customer_name in customer_names:
             direct_matches = self._query_customers_by_name(
                 token_data=token_data,
@@ -125,16 +151,21 @@ class QuickBooksClient:
                 customer_name=customer_name,
                 max_results=max_results,
                 searched_queries=searched_queries,
+                errors=errors,
             )
             matches.extend(fallback_matches)
 
-        return {
+        status = "completed" if matches else ("error" if errors and not matches else "not_found")
+        result: Dict[str, Any] = {
             "lookup_mode": "quickbooks_customer",
-            "status": "completed" if matches else "not_found",
+            "status": status,
             "searched_customer_names": customer_names,
             "searched_queries": searched_queries,
             "matches": dedupe_matches(matches),
         }
+        if errors:
+            result["errors"] = errors
+        return result
 
     def disconnect(self) -> None:
         self.auth.disconnect()
@@ -156,7 +187,8 @@ class QuickBooksClient:
                     customer_name=customer_name,
                     max_results=max_results,
                 )
-            except requests.HTTPError:
+            except requests.RequestException as exc:
+                logger.warning("QuickBooks Customer query failed for %s=%s: %s", field, customer_name, exc)
                 searched_queries.append({"entity": "Customer", "mode": f"{field}_error", "value": customer_name})
                 continue
 
@@ -175,8 +207,16 @@ class QuickBooksClient:
         customer_name: str,
         max_results: int,
         searched_queries: List[Dict[str, str]],
+        errors: List[str] | None = None,
     ) -> List[Dict[str, Any]]:
-        response = self.repository.query_customer_scan(token_data=token_data, max_results=max_results)
+        try:
+            response = self.repository.query_customer_scan(token_data=token_data, max_results=max_results)
+        except requests.RequestException as exc:
+            logger.warning("QuickBooks customer scan failed: %s", exc)
+            searched_queries.append({"entity": "Customer", "mode": "local_fuzzy_scan_error", "value": customer_name})
+            if errors is not None:
+                errors.append(f"Customer scan for '{customer_name}' failed: {exc}")
+            return []
         searched_queries.append({"entity": "Customer", "mode": "local_fuzzy_scan", "value": customer_name})
         candidates = extract_customer_matches(response)
         return rank_customer_candidates(candidates, customer_name, max_results)

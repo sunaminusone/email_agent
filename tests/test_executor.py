@@ -18,7 +18,7 @@ from src.executor.models import ExecutionContext, ToolSelection
 from src.executor.request_builder import build_tool_request
 from src.executor.tool_selector import select_tools, _score_tool, _classify_demand, _get_active_flags
 from src.executor.engine import build_execution_context, run_executor
-from src.ingestion.models import ParserRequestFlags, ParserRetrievalHints
+from src.ingestion.models import ParserConstraints, ParserOpenSlots, ParserRequestFlags, ParserRetrievalHints
 from src.objects.models import ObjectCandidate
 from src.routing.models import DialogueActResult, RouteDecision
 from src.tools.models import ToolCapability, ToolRequest, ToolResult
@@ -55,6 +55,8 @@ def _make_context(
     dialogue_act: str = "inquiry",
     request_flags: ParserRequestFlags | None = None,
     primary_intent: str = "product_inquiry",
+    parser_constraints: ParserConstraints | None = None,
+    parser_open_slots: ParserOpenSlots | None = None,
 ) -> ExecutionContext:
     primary = ObjectCandidate(
         object_type=object_type,
@@ -70,6 +72,8 @@ def _make_context(
         primary_object=primary,
         dialogue_act=DialogueActResult(act=dialogue_act),
         request_flags=request_flags,
+        parser_constraints=parser_constraints,
+        parser_open_slots=parser_open_slots,
     )
 
 
@@ -436,6 +440,39 @@ class TestBuildToolRequest:
         scope = request.constraints.scope
         assert scope["primary_object"] == {}
 
+    def test_parser_constraints_populate_tool_dict(self) -> None:
+        constraints = ParserConstraints(
+            budget="5000 USD",
+            format_or_size="50 kDa",
+            destination="South Korea",
+        )
+        context = _make_context(parser_constraints=constraints)
+        request = build_tool_request(context, "catalog_lookup_tool")
+        tool = request.constraints.tool
+        assert tool["budget"] == "5000 USD"
+        assert tool["format_or_size"] == "50 kDa"
+        assert tool["destination"] == "South Korea"
+        # None fields should not appear
+        assert "timeline_requirement" not in tool
+
+    def test_parser_open_slots_populate_tool_dict(self) -> None:
+        open_slots = ParserOpenSlots(
+            experiment_type="Western Blot",
+            pain_point="low yield",
+        )
+        context = _make_context(parser_open_slots=open_slots)
+        request = build_tool_request(context, "rag_tool")
+        tool = request.constraints.tool
+        assert tool["experiment_type"] == "Western Blot"
+        assert tool["pain_point"] == "low yield"
+        # None fields should not appear
+        assert "customer_goal" not in tool
+
+    def test_tool_dict_empty_when_no_constraints(self) -> None:
+        context = _make_context()
+        request = build_tool_request(context, "some_tool")
+        assert request.constraints.tool == {}
+
 
 # ===================================================================
 # engine tests
@@ -507,6 +544,44 @@ class TestBuildExecutionContext:
         assert ctx.demand_profile is not None
         assert ctx.active_demand is not None
         assert ctx.active_demand.primary_demand == "commercial"
+
+    def test_passes_parser_constraints_to_context(self) -> None:
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        constraints = ParserConstraints(format_or_size="50 kDa", budget="3000 USD")
+        open_slots = ParserOpenSlots(experiment_type="ELISA")
+
+        bundle = IngestionBundle(
+            turn_core=TurnCore(raw_query="test", normalized_query="test"),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(
+                    context=ParserContext(),
+                    constraints=constraints,
+                    open_slots=open_slots,
+                ),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        resolved = ResolvedObjectState()
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        ctx = build_execution_context(
+            ingestion_bundle=bundle,
+            resolved_object_state=resolved,
+            route_decision=route,
+        )
+
+        assert ctx.parser_constraints is not None
+        assert ctx.parser_constraints.format_or_size == "50 kDa"
+        assert ctx.parser_constraints.budget == "3000 USD"
+        assert ctx.parser_open_slots is not None
+        assert ctx.parser_open_slots.experiment_type == "ELISA"
 
 
 class TestRunExecutor:

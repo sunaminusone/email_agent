@@ -6,7 +6,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.ingestion.models import (
-    DeterministicSignals,
     EntitySpan,
     ParserContext,
     ParserRequestFlags,
@@ -14,9 +13,7 @@ from src.ingestion.models import (
     ParserEntitySignals,
 )
 from src.ingestion.signal_refinement import (
-    _supplement_flags_from_context,
     reconcile_intent_and_flags,
-    refine_parser_signals,
 )
 
 
@@ -39,187 +36,8 @@ def _make_signals(
     )
 
 
-def _make_det(**kwargs) -> DeterministicSignals:
-    return DeterministicSignals(**kwargs)
-
-
 def _span(text: str) -> EntitySpan:
     return EntitySpan(text=text, raw=text)
-
-
-# -----------------------------------------------------------------------
-# Documentation supplement
-# -----------------------------------------------------------------------
-
-def test_documentation_context_supplements_needs_documentation():
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(documentation_context=True),
-        "I need the COA for batch 12345",
-    )
-    assert result.request_flags.needs_documentation is True
-
-
-def test_documentation_context_blocked_by_pricing_context():
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(documentation_context=True, pricing_context=True),
-        "how much for the datasheet",
-    )
-    assert result.request_flags.needs_documentation is False
-
-
-def test_documentation_context_blocked_by_existing_flag():
-    result = _supplement_flags_from_context(
-        _make_signals(flags=ParserRequestFlags(needs_documentation=True)),
-        _make_det(documentation_context=True),
-        "send me the COA",
-    )
-    # No change — flag was already set
-    assert result.request_flags.needs_documentation is True
-
-
-# -----------------------------------------------------------------------
-# Pricing supplement
-# -----------------------------------------------------------------------
-
-def test_pricing_context_supplements_needs_price():
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(pricing_context=True),
-        "what is the price for this product",
-    )
-    assert result.request_flags.needs_price is True
-
-
-def test_pricing_context_blocked_by_existing_commercial_flag():
-    result = _supplement_flags_from_context(
-        _make_signals(flags=ParserRequestFlags(needs_quote=True)),
-        _make_det(pricing_context=True),
-        "I need a quote and price",
-    )
-    assert result.request_flags.needs_price is False
-
-
-# -----------------------------------------------------------------------
-# Timeline supplement
-# -----------------------------------------------------------------------
-
-def test_timeline_context_supplements_needs_timeline():
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(timeline_context=True),
-        "what is the lead time for this product",
-    )
-    assert result.request_flags.needs_timeline is True
-
-
-# -----------------------------------------------------------------------
-# Technical supplement — biotech assay terms
-# -----------------------------------------------------------------------
-
-def test_technical_context_with_biotech_term_supplements_needs_protocol():
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(technical_context=True),
-        "what is the recommended dilution for western blot",
-    )
-    assert result.request_flags.needs_protocol is True
-
-
-def test_technical_context_with_elisa_supplements_needs_protocol():
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(technical_context=True),
-        "ELISA validation protocol for this antibody",
-    )
-    assert result.request_flags.needs_protocol is True
-
-
-def test_technical_context_with_troubleshooting_supplements_needs_troubleshooting():
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(technical_context=True),
-        "the assay is not working properly",
-    )
-    assert result.request_flags.needs_troubleshooting is True
-
-
-# -----------------------------------------------------------------------
-# Technical supplement — guards
-# -----------------------------------------------------------------------
-
-def test_technical_context_blocked_by_pricing_context():
-    """'What's the price for ELISA kits?' — pricing dominates, no technical supplement."""
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(technical_context=True, pricing_context=True),
-        "what is the price for ELISA kits",
-    )
-    assert result.request_flags.needs_protocol is False
-    # But pricing supplement should fire
-    assert result.request_flags.needs_price is True
-
-
-def test_technical_context_blocked_by_order_numbers():
-    """'Can you validate my order 12345?' — operational entity blocks technical."""
-    result = _supplement_flags_from_context(
-        _make_signals(order_numbers=[_span("12345")]),
-        _make_det(technical_context=True),
-        "can you validate my order 12345",
-    )
-    assert result.request_flags.needs_protocol is False
-    assert result.request_flags.needs_troubleshooting is False
-
-
-def test_technical_context_without_specific_term_does_nothing():
-    """Generic 'technical' keyword — no specific biotech/troubleshooting term → no supplement."""
-    result = _supplement_flags_from_context(
-        _make_signals(),
-        _make_det(technical_context=True),
-        "I have a technical question about this",
-    )
-    assert result.request_flags.needs_protocol is False
-    assert result.request_flags.needs_troubleshooting is False
-    assert result.request_flags.needs_documentation is False
-
-
-def test_technical_context_blocked_by_existing_technical_flag():
-    """Parser already set a technical flag — supplement skips."""
-    result = _supplement_flags_from_context(
-        _make_signals(flags=ParserRequestFlags(needs_recommendation=True)),
-        _make_det(technical_context=True),
-        "western blot protocol recommendations",
-    )
-    # needs_protocol should NOT be added because needs_recommendation already set
-    assert result.request_flags.needs_protocol is False
-    assert result.request_flags.needs_recommendation is True
-
-
-# -----------------------------------------------------------------------
-# Integration: through refine_parser_signals()
-# -----------------------------------------------------------------------
-
-def test_refine_supplements_from_deterministic_signals():
-    """Full refinement pipeline with deterministic_signals passed in."""
-    det = _make_det(technical_context=True)
-    result = refine_parser_signals(
-        _make_signals(),
-        normalized_query="what is the ELISA protocol for this target",
-        deterministic_signals=det,
-    )
-    assert result.request_flags.needs_protocol is True
-
-
-def test_refine_backward_compatible_without_deterministic_signals():
-    """Calling without deterministic_signals — no error, no supplement."""
-    result = refine_parser_signals(
-        _make_signals(),
-        normalized_query="what is the ELISA protocol for this target",
-    )
-    # Without deterministic_signals, only _ensure_technical_flags can fire,
-    # but it requires intent=technical_question which is not set here.
-    assert result.request_flags.needs_protocol is False
 
 
 # -----------------------------------------------------------------------
@@ -298,15 +116,14 @@ def test_gap_fill_complaint_has_invoice_flag():
 
 
 # -----------------------------------------------------------------------
-# Gap fill: technical family skipped (handled by _ensure_technical_flags)
+# Gap fill: technical family skipped
 # -----------------------------------------------------------------------
 
 def test_gap_fill_skips_technical_question():
-    """Technical gap fill is NOT done here — _ensure_technical_flags owns it."""
+    """Technical gap fill is NOT done here."""
     result = reconcile_intent_and_flags(
         _make_signals(intent="technical_question"),
     )
-    # No flag added by reconcile; _ensure_technical_flags runs earlier.
     assert result.request_flags.needs_protocol is False
     assert result.request_flags.needs_troubleshooting is False
 

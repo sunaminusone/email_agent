@@ -63,6 +63,21 @@ _FLAG_INTENT: dict[str, str] = {
     "needs_refund_or_cancellation": "order_support",
 }
 
+# ---------------------------------------------------------------------------
+# Startup validation: mappings must cover every flag in ParserRequestFlags
+# ---------------------------------------------------------------------------
+_ALL_FLAGS = set(ParserRequestFlags.model_fields)
+assert set(_FLAG_OBJECT_AFFINITY) == _ALL_FLAGS, (
+    f"_FLAG_OBJECT_AFFINITY keys mismatch ParserRequestFlags: "
+    f"missing={_ALL_FLAGS - set(_FLAG_OBJECT_AFFINITY)}, "
+    f"extra={set(_FLAG_OBJECT_AFFINITY) - _ALL_FLAGS}"
+)
+assert set(_FLAG_INTENT) == _ALL_FLAGS, (
+    f"_FLAG_INTENT keys mismatch ParserRequestFlags: "
+    f"missing={_ALL_FLAGS - set(_FLAG_INTENT)}, "
+    f"extra={set(_FLAG_INTENT) - _ALL_FLAGS}"
+)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -133,31 +148,6 @@ def assemble_intent_groups(
         ))
 
     return groups or _single_group_from_intent(primary_intent, objects)
-
-
-def build_flag_object_affinity() -> dict[str, set[str]]:
-    """Derive flag-to-object-type mapping from tool capabilities in the registry.
-
-    Call at startup to auto-update affinity when new tools are registered.
-    Falls back to the hardcoded _FLAG_OBJECT_AFFINITY if the registry is empty.
-    """
-    try:
-        from src.tools.registry import list_registry_entries
-    except ImportError:
-        return dict(_FLAG_OBJECT_AFFINITY)
-
-    entries = list_registry_entries()
-    if not entries:
-        return dict(_FLAG_OBJECT_AFFINITY)
-
-    affinity: dict[str, set[str]] = {}
-    for entry in entries:
-        cap = entry.capability
-        if cap is None:
-            continue
-        for flag in getattr(cap, "supported_request_flags", []):
-            affinity.setdefault(flag, set()).update(cap.supported_object_types)
-    return affinity or dict(_FLAG_OBJECT_AFFINITY)
 
 
 # ---------------------------------------------------------------------------

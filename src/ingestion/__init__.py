@@ -23,7 +23,6 @@ from .models import (
     ValueSignal,
 )
 from .deterministic_signals import (
-    classify_identifier_candidates,
     detect_document_types,
     strip_identifier_missing_information,
 )
@@ -67,7 +66,6 @@ __all__ = [
     "TurnSignals",
     "ValueSignal",
     "build_ingestion_bundle",
-    "classify_identifier_candidates",
     "detect_document_types",
     "strip_identifier_missing_information",
 ]

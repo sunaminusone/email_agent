@@ -100,17 +100,28 @@ def _build_object_summary_block(response_input: ResponseInput, locale: str) -> C
     if not body_parts:
         return None
 
+    data = {
+        "object_type": resolved_object.object_type,
+        "display_name": resolved_object.display_name,
+        "canonical_value": resolved_object.canonical_value,
+        "identifier": resolved_object.identifier,
+        "business_line": resolved_object.business_line,
+    }
+
+    # Attach non-empty customer constraints so renderers can shape the response
+    if response_input.parser_constraints is not None:
+        active_constraints = {
+            k: v for k, v in response_input.parser_constraints.model_dump().items()
+            if v is not None
+        }
+        if active_constraints:
+            data["customer_constraints"] = active_constraints
+
     return ContentBlock(
         block_type="object_summary",
         title=get_message("block_title_resolved_object", locale),
         body=" | ".join(body_parts),
-        data={
-            "object_type": resolved_object.object_type,
-            "display_name": resolved_object.display_name,
-            "canonical_value": resolved_object.canonical_value,
-            "identifier": resolved_object.identifier,
-            "business_line": resolved_object.business_line,
-        },
+        data=data,
     )
 
 

@@ -9,11 +9,6 @@ from src.responser.models import (
     ResponseInput,
     ResponsePlan,
 )
-from src.responser.resolution import (
-    build_response_resolution,
-    derive_response_topic,
-    summarize_content_blocks,
-)
 from src.responser.planner import build_response_plan
 from src.responser.renderers import (
     render_acknowledgement_response,
@@ -42,16 +37,24 @@ def build_response_bundle(response_input: ResponseInput) -> ResponseBundle:
     response_plan, content_blocks = plan_response(response_input)
     draft = _render_response(response_input, response_plan)
     composed_response = compose_final_response(draft, response_plan, locale=response_input.locale)
-    response_resolution = build_response_resolution(response_plan, content_blocks)
-    response_topic = derive_response_topic(response_plan, response_resolution)
     response_path = str(composed_response.debug_info.get("response_path", "deterministic"))
+
+    # Topic derivation — inlined from former resolution.py
+    if response_plan.response_mode in {"clarification", "handoff"}:
+        response_topic = response_plan.response_mode
+    else:
+        response_topic = response_plan.answer_focus or response_plan.response_mode
+
+    # Content summary — inlined from former resolution.py
+    response_content_summary = " ".join(
+        block.body.strip() for block in content_blocks if block.body
+    ).strip()
 
     return ResponseBundle(
         composed_response=composed_response,
         response_plan=response_plan,
-        response_resolution=response_resolution,
         response_topic=response_topic,
-        response_content_summary=summarize_content_blocks(content_blocks),
+        response_content_summary=response_content_summary,
         response_path=response_path,
     )
 

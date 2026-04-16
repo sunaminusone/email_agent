@@ -163,19 +163,23 @@ def build_execution_context(
         if obs.get("business_line") and "business_line" not in constraints:
             constraints.setdefault("business_line", obs["business_line"])
 
+    parser_signals = ingestion_bundle.turn_signals.parser_signals
+
     return ExecutionContext(
         query=(
             ingestion_bundle.turn_core.normalized_query
             or ingestion_bundle.turn_core.raw_query
         ),
-        primary_intent=ingestion_bundle.turn_signals.parser_signals.context.primary_intent,
+        primary_intent=parser_signals.context.primary_intent,
         primary_object=primary,
         secondary_objects=list(resolved_object_state.secondary_objects),
         dialogue_act=route_decision.dialogue_act,
         resolved_object_constraints=constraints,
         memory_snapshot=memory_snapshot,
         request_flags=request_flags,
-        retrieval_hints=ingestion_bundle.turn_signals.parser_signals.retrieval_hints,
+        retrieval_hints=parser_signals.retrieval_hints,
+        parser_constraints=parser_signals.constraints,
+        parser_open_slots=parser_signals.open_slots,
         demand_profile=demand_profile,
         active_demand=active_demand,
     )

@@ -48,7 +48,6 @@ def build_ingestion_bundle(
         parser_signals,
         normalized_query=turn_core.normalized_query,
         attachment_signals=attachment_signals,
-        deterministic_signals=deterministic_signals,
     )
 
     turn_core = turn_core.model_copy(

@@ -10,6 +10,8 @@ import src.responser.composer as composer_module
 from src.agent.state import AgentState, GroupOutcome
 from src.common.execution_models import ExecutedToolCall, ExecutionResult
 from src.common.models import DemandProfile, IntentGroup
+from src.ingestion.models import ParserConstraints
+from src.objects.models import ObjectCandidate, ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
 from src.responser import ResponseInput, build_response_bundle, compose_response
@@ -106,7 +108,7 @@ def test_build_response_bundle_derives_resolution_and_path() -> None:
         )
     )
 
-    assert bundle.response_resolution.answer_focus == "knowledge_lookup"
+    assert bundle.response_plan.answer_focus == "knowledge_lookup"
     assert bundle.response_topic == "knowledge_lookup"
     assert bundle.response_path in {"deterministic", "llm_rewrite"}
 
@@ -321,7 +323,7 @@ def test_all_resolved_outcomes_no_partial() -> None:
         group_outcomes=[resolved1, resolved2],
     ))
 
-    assert bundle.response_plan.response_mode in ("direct_answer", "hybrid_answer")
+    assert bundle.response_plan.response_mode == "direct_answer"
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +365,8 @@ def test_technical_snippets_cleaned_in_answer() -> None:
 # Demand-aware planner tests
 # ---------------------------------------------------------------------------
 
-def test_planner_selects_hybrid_when_demand_mixed() -> None:
-    """Mixed demand (technical + commercial) → hybrid_answer even with 1 block."""
+def test_mixed_demand_still_returns_direct_answer() -> None:
+    """Mixed demand (technical + commercial) → direct_answer, no separate hybrid mode."""
     executed_call = ExecutedToolCall(
         call_id="1",
         tool_name="catalog_lookup_tool",
@@ -388,7 +390,7 @@ def test_planner_selects_hybrid_when_demand_mixed() -> None:
         ),
     ))
 
-    assert bundle.response_plan.response_mode == "hybrid_answer"
+    assert bundle.response_plan.response_mode == "direct_answer"
 
 
 def test_planner_selects_direct_when_demand_single_focus() -> None:
@@ -459,3 +461,208 @@ def test_memory_update_stores_primary_demand_only() -> None:
     # Only technical flags stored — needs_price (commercial) excluded
     assert "needs_protocol" in mem.last_demand_flags
     assert "needs_price" not in mem.last_demand_flags
+
+
+# ---------------------------------------------------------------------------
+# Topic continuity tests
+# ---------------------------------------------------------------------------
+
+def _make_response_memory_with_topics(topics: list[str]):
+    from src.memory.models import ResponseMemory
+    return ResponseMemory(last_response_topics=topics)
+
+
+def test_topic_continuing_suppresses_object_acknowledgement() -> None:
+    """When last topic matches current focus, should_acknowledge_object is False."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool",
+            status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+            structured_facts={"species": ["human"]},
+        ),
+    )
+
+    # First turn: no prior topics → should_acknowledge_object may be True
+    bundle_first = build_response_bundle(ResponseInput(
+        query="CD3",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+    ))
+
+    # Second turn: prior topic matches → should_acknowledge_object is False
+    bundle_second = build_response_bundle(ResponseInput(
+        query="CD3 applications",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        response_memory=_make_response_memory_with_topics([
+            bundle_first.response_plan.answer_focus,
+        ]),
+    ))
+
+    assert bundle_second.response_plan.should_acknowledge_object is False
+
+
+def test_topic_continuing_demotes_object_summary_block() -> None:
+    """On consecutive same-topic, object_summary should not be in primary blocks."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool",
+            status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+            structured_facts={"species": ["human"]},
+        ),
+    )
+
+    bundle = build_response_bundle(ResponseInput(
+        query="CD3 details",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        response_memory=_make_response_memory_with_topics(["commercial_or_operational_lookup"]),
+    ))
+
+    primary_types = [b.block_type for b in bundle.response_plan.primary_content_blocks]
+    assert "object_summary" not in primary_types
+
+
+def test_topic_continuing_enables_llm_rewrite() -> None:
+    """Consecutive same-topic turns should prefer LLM rewrite."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool",
+            status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+        ),
+    )
+
+    # Without prior topics — only primary_records, no informational blocks → no rewrite
+    bundle_cold = build_response_bundle(ResponseInput(
+        query="CD3",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+    ))
+
+    # With matching prior topic → rewrite enabled even with same blocks
+    bundle_warm = build_response_bundle(ResponseInput(
+        query="CD3",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        response_memory=_make_response_memory_with_topics([
+            bundle_cold.response_plan.answer_focus,
+        ]),
+    ))
+
+    assert bundle_warm.response_plan.should_use_llm_rewrite is True
+
+
+def test_no_topic_continuity_for_control_topics() -> None:
+    """Control topics (closing, clarification) should not trigger continuity."""
+    response, plan = compose_response(
+        ResponseInput(
+            query="ok thanks",
+            locale="en",
+            dialogue_act=DialogueActResult(act="closing"),
+            execution_result=_empty_execution_result(),
+            response_memory=_make_response_memory_with_topics(["conversation_control"]),
+        )
+    )
+
+    # acknowledgement is a control topic — should not activate continuity rules
+    assert plan.response_mode == "acknowledgement"
+
+
+# ---------------------------------------------------------------------------
+# Parser constraints in content blocks
+# ---------------------------------------------------------------------------
+
+def test_object_summary_block_includes_customer_constraints() -> None:
+    """When parser_constraints has non-None values, they appear in block data."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool",
+            status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+            structured_facts={"species": ["human"]},
+        ),
+    )
+    primary = ObjectCandidate(
+        object_type="product",
+        canonical_value="CD3",
+        display_name="CD3 Antibody",
+        identifier="A100",
+    )
+    constraints = ParserConstraints(budget="5000 USD", format_or_size="50 kDa")
+
+    bundle = build_response_bundle(ResponseInput(
+        query="CD3",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        resolved_object_state=ResolvedObjectState(primary_object=primary),
+        dialogue_act=DialogueActResult(act="inquiry"),
+        parser_constraints=constraints,
+    ))
+
+    # Find the object_summary block
+    obj_blocks = [
+        b for b in bundle.composed_response.content_blocks
+        if b.block_type == "object_summary"
+    ]
+    assert len(obj_blocks) == 1
+    data = obj_blocks[0].data
+    assert "customer_constraints" in data
+    assert data["customer_constraints"]["budget"] == "5000 USD"
+    assert data["customer_constraints"]["format_or_size"] == "50 kDa"
+    # None fields should not appear
+    assert "timeline_requirement" not in data["customer_constraints"]
+
+
+def test_no_customer_constraints_when_none() -> None:
+    """Without parser_constraints, no customer_constraints key in block data."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool",
+            status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+        ),
+    )
+    primary = ObjectCandidate(
+        object_type="product",
+        canonical_value="CD3",
+        display_name="CD3 Antibody",
+        identifier="A100",
+    )
+
+    bundle = build_response_bundle(ResponseInput(
+        query="CD3",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        resolved_object_state=ResolvedObjectState(primary_object=primary),
+        dialogue_act=DialogueActResult(act="inquiry"),
+    ))
+
+    obj_blocks = [
+        b for b in bundle.composed_response.content_blocks
+        if b.block_type == "object_summary"
+    ]
+    if obj_blocks:
+        assert "customer_constraints" not in obj_blocks[0].data

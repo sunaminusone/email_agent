@@ -1,5 +1,5 @@
 from .models import ComposedResponse, ContentBlock, ResponseInput, ResponsePlan
-from .models import ResponseBundle, ResponseResolution
+from .models import ResponseBundle
 from .service import build_response_bundle, compose_response, plan_response
 
 __all__ = [
@@ -8,7 +8,6 @@ __all__ = [
     "ResponseInput",
     "ResponsePlan",
     "ResponseBundle",
-    "ResponseResolution",
     "build_response_bundle",
     "compose_response",
     "plan_response",

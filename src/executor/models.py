@@ -12,7 +12,7 @@ from src.common.execution_models import (
     MergedResults as MergedResults,
     ToolCallRole,
 )
-from src.ingestion.models import ParserRequestFlags, ParserRetrievalHints
+from src.ingestion.models import ParserConstraints, ParserOpenSlots, ParserRequestFlags, ParserRetrievalHints
 from src.memory.models import MemorySnapshot
 from src.objects.models import ObjectCandidate
 from src.routing.models import DialogueActResult
@@ -75,5 +75,7 @@ class ExecutionContext(_ExecutionModel):
     # Ingestion signals
     request_flags: ParserRequestFlags | None = None
     retrieval_hints: ParserRetrievalHints | None = None
+    parser_constraints: ParserConstraints | None = None
+    parser_open_slots: ParserOpenSlots | None = None
     demand_profile: DemandProfile | None = None
     active_demand: GroupDemand | None = None

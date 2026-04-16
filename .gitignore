@@ -16,3 +16,11 @@ build/
 *.egg-info/
 .env
 .env.*
+
+# Vim swap files
+*.swp
+*.swo
+*.swn
+
+# Claude Code project instructions (local only)
+CLAUDE.md

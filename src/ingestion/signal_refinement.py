@@ -7,68 +7,12 @@ from typing import Iterable
 from src.ingestion.demand_profile import FLAG_DEMAND, INTENT_DEMAND
 from src.ingestion.models import (
     AttachmentSignals,
-    DeterministicSignals,
     EntitySpan,
     ParserRequestFlags,
     ParserSignals,
 )
 
 
-_DOCUMENT_TERMS = (
-    "datasheet",
-    "brochure",
-    "protocol",
-    "manual",
-    "coa",
-    "sds",
-    "technical file",
-)
-_PRODUCT_INFO_INTRO_PATTERNS = (
-    "tell me about",
-    "what is",
-    "what are",
-    "can you tell me about",
-)
-_TRACKING_TERMS = (
-    "tracking",
-    "track",
-    "where is my order",
-    "track my order",
-)
-_TECHNICAL_WORKFLOW_TERMS = (
-    "workflow",
-    "process",
-    "how does",
-    "how do",
-    "development",
-    "phases",
-    "steps",
-    "mechanism",
-    "validation",
-    "assay",
-    "protocol",
-)
-_TROUBLESHOOTING_TERMS = (
-    "troubleshoot",
-    "not working",
-    "issue",
-    "problem",
-    "low expression",
-    "poor yield",
-    "failed",
-    "optimize",
-    "optimization",
-)
-_BIOTECH_ASSAY_TERMS = (
-    "elisa",
-    "western blot",
-    "wb",
-    "ihc",
-    "immunohistochemistry",
-    "flow cytometry",
-    "facs",
-    "pcr",
-)
 _TECHNICAL_FLAG_NAMES = (
     "needs_protocol",
     "needs_troubleshooting",
@@ -93,7 +37,7 @@ _OPERATIONAL_FLAG_NAMES = (
 )
 # Gap fill: when intent is specific but parser set zero flags in the
 # matching family, supplement with a safe default.  Technical family is
-# handled by _ensure_technical_flags() which has query-term fine-graining.
+# not gap-filled by reconciliation.
 _INTENT_DEFAULT_FLAG: dict[str, str] = {
     "pricing_question": "needs_price",
     "timeline_question": "needs_timeline",
@@ -113,11 +57,6 @@ logger = logging.getLogger(__name__)
 
 def _has_any_flag(flags: ParserRequestFlags, flag_names: tuple[str, ...]) -> bool:
     return any(getattr(flags, name, False) for name in flag_names)
-
-
-def _query_contains_any(query: str, terms: tuple[str, ...]) -> bool:
-    normalized = query.strip().lower()
-    return any(term in normalized for term in terms)
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +119,7 @@ def _dominant_intent_from_flags(flags: ParserRequestFlags, query: str) -> str | 
 
 
 # ---------------------------------------------------------------------------
-# Entity deduplication and canonicalization (unchanged)
+# Entity deduplication and canonicalization
 # ---------------------------------------------------------------------------
 
 def _dedupe_entity_spans(values: Iterable[EntitySpan]) -> list[EntitySpan]:
@@ -276,144 +215,6 @@ def canonicalize_parser_entities(parser_signals: ParserSignals) -> ParserSignals
 
 
 # ---------------------------------------------------------------------------
-# Request flag correction (unchanged)
-# ---------------------------------------------------------------------------
-
-def correct_request_flags(parser_signals: ParserSignals, normalized_query: str) -> ParserSignals:
-    updated = parser_signals
-
-    if (
-        updated.context.primary_intent == "documentation_request"
-        and updated.entities.product_names
-        and not updated.entities.catalog_numbers
-        and not updated.entities.service_names
-        and not any(term in normalized_query for term in _DOCUMENT_TERMS)
-        and any(normalized_query.startswith(pattern) for pattern in _PRODUCT_INFO_INTRO_PATTERNS)
-    ):
-        updated = updated.model_copy(
-            update={
-                "context": updated.context.model_copy(update={"primary_intent": "product_inquiry"}),
-                "request_flags": updated.request_flags.model_copy(
-                    update={"needs_documentation": False, "needs_availability": True}
-                ),
-            }
-        )
-
-    if updated.entities.order_numbers and any(term in normalized_query for term in _TRACKING_TERMS):
-        updated = updated.model_copy(
-            update={
-                "request_flags": updated.request_flags.model_copy(
-                    update={"needs_shipping_info": True}
-                )
-            }
-        )
-
-    # Technical question fallback: if the LLM classified as technical_question
-    # or troubleshooting but didn't set any technical flag, infer from query terms.
-    updated = _ensure_technical_flags(updated, normalized_query)
-
-    return updated
-
-
-def _ensure_technical_flags(parser_signals: ParserSignals, normalized_query: str) -> ParserSignals:
-    """Ensure technical-intent queries have at least one matching request flag."""
-    intent = parser_signals.context.primary_intent
-    flags = parser_signals.request_flags
-
-    if intent not in ("technical_question", "troubleshooting"):
-        return parser_signals
-
-    technical_flags = (
-        flags.needs_protocol
-        or flags.needs_troubleshooting
-        or flags.needs_documentation
-        or flags.needs_recommendation
-        or flags.needs_regulatory_info
-    )
-    if technical_flags:
-        return parser_signals
-
-    flag_updates: dict[str, bool] = {}
-
-    if intent == "troubleshooting" or any(term in normalized_query for term in _TROUBLESHOOTING_TERMS):
-        flag_updates["needs_troubleshooting"] = True
-
-    if any(term in normalized_query for term in _TECHNICAL_WORKFLOW_TERMS):
-        flag_updates["needs_protocol"] = True
-
-    # Fallback: if intent is technical_question but no specific term matched,
-    # default to needs_protocol to route to the RAG tool.
-    if not flag_updates and intent == "technical_question":
-        flag_updates["needs_protocol"] = True
-
-    if flag_updates:
-        return parser_signals.model_copy(
-            update={
-                "request_flags": flags.model_copy(update=flag_updates),
-            }
-        )
-
-    return parser_signals
-
-
-# ---------------------------------------------------------------------------
-# Deterministic context → flag supplement (conservative, guarded)
-# ---------------------------------------------------------------------------
-
-def _supplement_flags_from_context(
-    parser_signals: ParserSignals,
-    det: DeterministicSignals,
-    normalized_query: str,
-) -> ParserSignals:
-    """Supplement missed parser request flags using deterministic context signals.
-
-    Non-destructive: only adds flags in categories where the parser set NONE.
-    Conservative: requires specific deterministic context match + absence of
-    competing context that would make the flag ambiguous.
-    """
-    flags = parser_signals.request_flags
-    flag_updates: dict[str, bool] = {}
-
-    # --- Documentation: 1:1 precise mapping ---
-    if (
-        det.documentation_context
-        and not flags.needs_documentation
-        and not (det.pricing_context or det.timeline_context)
-    ):
-        flag_updates["needs_documentation"] = True
-
-    # --- Pricing: 1:1 precise mapping ---
-    if det.pricing_context and not _has_any_flag(flags, _COMMERCIAL_FLAG_NAMES):
-        flag_updates["needs_price"] = True
-
-    # --- Timeline: 1:1 precise mapping ---
-    if det.timeline_context and not _has_any_flag(flags, _COMMERCIAL_FLAG_NAMES):
-        flag_updates["needs_timeline"] = True
-
-    # --- Technical: fine-grained with three-layer guards ---
-    if det.technical_context and not _has_any_flag(flags, _TECHNICAL_FLAG_NAMES):
-        # Guard 1: competing commercial/operational context dominates
-        if not (det.pricing_context or det.timeline_context or det.order_context or det.invoice_context):
-            # Guard 2: operational entity presence (e.g. "validate my order 12345")
-            if not parser_signals.entities.order_numbers and not parser_signals.entities.invoice_numbers:
-                # Determine WHICH technical flag — no fallback default
-                if _query_contains_any(normalized_query, _BIOTECH_ASSAY_TERMS):
-                    flag_updates["needs_protocol"] = True
-                elif _query_contains_any(normalized_query, _TROUBLESHOOTING_TERMS):
-                    flag_updates["needs_troubleshooting"] = True
-                elif _query_contains_any(normalized_query, _DOCUMENT_TERMS):
-                    flag_updates["needs_documentation"] = True
-                # else: can't determine specific flag → don't supplement
-
-    if not flag_updates:
-        return parser_signals
-
-    return parser_signals.model_copy(
-        update={"request_flags": flags.model_copy(update=flag_updates)}
-    )
-
-
-# ---------------------------------------------------------------------------
 # Intent ↔ flag reconciliation (gap fill + cross-family fix)
 # ---------------------------------------------------------------------------
 
@@ -423,7 +224,7 @@ def _gap_fill_flags(
     """Add a default flag when intent is specific but its family has zero flags.
 
     Only handles commercial and operational families.  Technical family is
-    covered by _ensure_technical_flags() which has query-term fine-graining.
+    not gap-filled by reconciliation.
     """
     intent = parser_signals.context.primary_intent
     default_flag = _INTENT_DEFAULT_FLAG.get(intent)
@@ -519,7 +320,7 @@ def _log_refinement_corrections(
 
     Tracks three categories:
     - intent_changed: parser intent was overridden (validate or cross-family fix)
-    - flags_added: flags supplemented by deterministic context or gap fill
+    - flags_added: flags supplemented by gap fill
     - flags_removed: flags dropped by correction rules
     """
     orig_intent = original.context.primary_intent
@@ -549,14 +350,10 @@ def refine_parser_signals(
     *,
     normalized_query: str,
     attachment_signals: AttachmentSignals | None = None,
-    deterministic_signals: DeterministicSignals | None = None,
 ) -> ParserSignals:
     refined = dedupe_parser_entities(parser_signals)
     refined = canonicalize_parser_entities(refined)
     refined = validate_intent_and_flags(refined, normalized_query)
-    refined = correct_request_flags(refined, normalized_query)
-    if deterministic_signals is not None:
-        refined = _supplement_flags_from_context(refined, deterministic_signals, normalized_query)
     refined = reconcile_intent_and_flags(refined)
 
     _log_refinement_corrections(parser_signals, refined)

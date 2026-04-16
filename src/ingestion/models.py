@@ -183,14 +183,6 @@ class DeterministicSignals(_IngestionModel):
     invoice_numbers: list[EntitySpan] = Field(default_factory=list)
     ambiguous_identifiers: list[ValueSignal] = Field(default_factory=list)
     document_types: list[ValueSignal] = Field(default_factory=list)
-    product_context: bool = False
-    service_context: bool = False
-    invoice_context: bool = False
-    order_context: bool = False
-    documentation_context: bool = False
-    pricing_context: bool = False
-    timeline_context: bool = False
-    technical_context: bool = False
 
 
 ReferenceMode = Literal["active", "other", "first", "second", "previous", "all", "none"]

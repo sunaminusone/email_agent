@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.common.models import DemandProfile, SourceAttribution
 from src.common.execution_models import ExecutionResult
+from src.ingestion.models import ParserConstraints, ParserOpenSlots
 from src.memory.models import MemoryUpdate, ResponseMemory
 from src.objects.models import ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult
@@ -17,7 +18,6 @@ if TYPE_CHECKING:
 ResponseMode = Literal[
     "clarification",
     "direct_answer",
-    "hybrid_answer",
     "knowledge_answer",
     "acknowledgement",
     "termination",
@@ -51,10 +51,13 @@ class ResponseInput(_ResponseModel):
     clarification: ClarificationPayload | None = None
     group_outcomes: list[Any] = Field(default_factory=list)  # list[GroupOutcome]
     demand_profile: DemandProfile | None = None
+    parser_constraints: ParserConstraints | None = None
+    parser_open_slots: ParserOpenSlots | None = None
 
 
 class ResponsePlan(_ResponseModel):
     response_mode: ResponseMode = "direct_answer"
+    answer_focus: str = ""
     primary_content_blocks: list[ContentBlock] = Field(default_factory=list)
     supporting_content_blocks: list[ContentBlock] = Field(default_factory=list)
     should_use_llm_rewrite: bool = False
@@ -71,19 +74,9 @@ class ComposedResponse(_ResponseModel):
     debug_info: dict[str, Any] = Field(default_factory=dict)
 
 
-class ResponseResolution(_ResponseModel):
-    topic_type: str = ""
-    answer_focus: str = ""
-    primary_action_type: str = ""
-    supporting_action_types: list[str] = Field(default_factory=list)
-    reply_style: str = "direct"
-    should_ask_clarification: bool = False
-
-
 class ResponseBundle(_ResponseModel):
     composed_response: ComposedResponse
     response_plan: ResponsePlan
-    response_resolution: ResponseResolution
     response_topic: str = ""
     response_content_summary: str = ""
     response_path: str = "deterministic"

@@ -473,7 +473,7 @@ def _assemble_agent_response(
         reply_preview=reply_preview,
         execution_plan=execution_plan_payload,
         execution_run=execution_run_payload,
-        response_resolution=response_bundle.response_resolution.model_dump(mode="json"),
+        answer_focus=response_bundle.response_plan.answer_focus,
         response_topic=response_bundle.response_topic,
         response_content_blocks=response_content_blocks,
         response_content_summary=response_bundle.response_content_summary,
@@ -686,6 +686,7 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
     # --- Phase 3: Respond — merge all group outcomes into one response ---
     execution_result = agent_state.merged_execution_result
 
+    parser_signals = ingestion_bundle.turn_signals.parser_signals
     response_bundle = build_response_bundle(ResponseInput(
         query=query,
         locale=request.locale,
@@ -697,6 +698,8 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
         clarification=agent_state.primary_clarification,
         group_outcomes=list(agent_state.outcomes),
         demand_profile=demand_profile,
+        parser_constraints=parser_signals.constraints,
+        parser_open_slots=parser_signals.open_slots,
     ))
 
     # --- Phase 4: Serialize ---

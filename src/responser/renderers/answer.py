@@ -19,13 +19,9 @@ def render_answer_response(
         locale=response_input.locale,
     )
 
-    response_type = "answer"
-    if response_plan.response_mode == "hybrid_answer":
-        response_type = "hybrid_answer"
-
     return ComposedResponse(
         message=message,
-        response_type=response_type,
+        response_type="answer",
         content_blocks=blocks,
         debug_info={
             "response_mode": response_plan.response_mode,

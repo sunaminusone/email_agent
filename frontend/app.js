@@ -8,7 +8,7 @@ const replyPreview = document.getElementById("reply_preview");
 const workflow = document.getElementById("workflow");
 const executionPlan = document.getElementById("execution_plan");
 const executionRun = document.getElementById("execution_run");
-const responseResolution = document.getElementById("response_resolution");
+const answerFocusEl = document.getElementById("answer_focus");
 const responseTopicSummary = document.getElementById("response_topic_summary");
 const responseContentBlocks = document.getElementById("response_content_blocks");
 const documentResults = document.getElementById("document_results");
@@ -508,18 +508,16 @@ function renderTechnicalResults(executionRunPayload) {
 }
 
 function renderResponseTopic(output) {
-  const topic = output.response_topic || output.response_resolution?.topic_type || "";
-  const resolution = output.response_resolution || {};
-  if (!topic) {
+  const topic = output.response_topic || "";
+  const focus = output.answer_focus || "";
+  if (!topic && !focus) {
     responseTopicSummary.innerHTML = '<p class="signal-state">当前没有可展示的 response topic。</p>';
     return;
   }
 
   responseTopicSummary.innerHTML = `
     <p class="signal-line"><strong>Topic:</strong> ${escapeHtml(topic)}</p>
-    <p class="signal-line"><strong>Style:</strong> ${escapeHtml(resolution.reply_style || "n/a")}</p>
-    <p class="signal-line"><strong>Focus:</strong> ${escapeHtml(resolution.answer_focus || "n/a")}</p>
-    <p class="signal-line"><strong>Primary Action:</strong> ${escapeHtml(resolution.primary_action_type || "n/a")}</p>
+    <p class="signal-line"><strong>Focus:</strong> ${escapeHtml(focus || "n/a")}</p>
     <p class="signal-line"><strong>Response Path:</strong> ${escapeHtml(output.response_path || "n/a")}</p>
   `;
 }
@@ -606,7 +604,7 @@ form.addEventListener("submit", async (event) => {
     replyPreview.textContent = output.reply_preview || "";
     executionPlan.textContent = JSON.stringify(output.execution_plan || {}, null, 2);
     executionRun.textContent = JSON.stringify(output.execution_run || {}, null, 2);
-    responseResolution.textContent = JSON.stringify(output.response_resolution || {}, null, 2);
+    answerFocusEl.textContent = output.answer_focus || "";
     routeResult.textContent = JSON.stringify(output.route || {}, null, 2);
     parsedResult.textContent = JSON.stringify(output.parsed || {}, null, 2);
     agentInput.textContent = JSON.stringify(output.agent_input || {}, null, 2);

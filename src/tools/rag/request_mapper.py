@@ -46,12 +46,18 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
     if target:
         targets.append(target)
 
+    tool_constraints = request.constraints.tool
+
     business_line_hint = (
         (primary_object.business_line if primary_object is not None else "")
         or retrieval_constraints.get("business_line")
         or resolved_constraints.get("business_line")
         or ""
     )
+
+    # Parser open_slots for query enrichment
+    experiment_type = (tool_constraints.get("experiment_type") or "").strip()
+    usage_context = (tool_constraints.get("usage_context") or "").strip()
 
     return {
         "query": request.query,
@@ -63,6 +69,8 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
         "product_names": dedupe_strings(product_names),
         "service_names": dedupe_strings(service_names),
         "targets": dedupe_strings(targets),
+        "experiment_type": experiment_type,
+        "usage_context": usage_context,
         "top_k": 5,
         "scope_context": scope_constraints,
     }

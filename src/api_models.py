@@ -48,7 +48,7 @@ class AgentPrototypeResponse(_ApiModel):
     reply_preview: str = ""
     execution_plan: dict[str, Any] = Field(default_factory=dict)
     execution_run: dict[str, Any] = Field(default_factory=dict)
-    response_resolution: dict[str, Any] = Field(default_factory=dict)
+    answer_focus: str = ""
     response_topic: str = ""
     response_content_blocks: list[dict[str, Any]] = Field(default_factory=list)
     response_content_summary: str = ""

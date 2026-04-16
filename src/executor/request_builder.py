@@ -61,10 +61,28 @@ def _base_constraints(
             "business_line": retrieval_hints.get("business_line", ""),
             "demand": _build_retrieval_demand(context),
         },
-        "tool": {},
+        "tool": _build_parser_tool_constraints(context),
         "debug": debug_context,
     }
 
+
+
+def _build_parser_tool_constraints(context: ExecutionContext) -> dict[str, Any]:
+    """Extract non-None parser constraints and open slots into a flat dict.
+
+    Tools consume these via ``request.constraints.tool.get("field_name")``.
+    Only non-empty values are included to avoid noise.
+    """
+    result: dict[str, Any] = {}
+    if context.parser_constraints is not None:
+        for key, value in context.parser_constraints.model_dump().items():
+            if value is not None:
+                result[key] = value
+    if context.parser_open_slots is not None:
+        for key, value in context.parser_open_slots.model_dump().items():
+            if value is not None and value != []:
+                result[key] = value
+    return result
 
 
 def _build_scope_context(
