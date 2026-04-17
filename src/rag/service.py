@@ -425,14 +425,16 @@ def retrieve_technical_knowledge(
     )
 
     matches = []
-    boosted_sections: List[Dict[str, Any]] = []
     for item in result["matches"]:
         metadata = item["metadata"]
-        section_boost = round(float(item.get("section_boost", 0.0) or 0.0), 4)
+        breakdown = item.get("score_breakdown") or {}
         matches.append(
             {
                 "score": round(item["score"], 4),
                 "raw_score": round(item["raw_score"], 4),
+                "priority_tier": item.get("priority_tier", 5),
+                "final_score": round(float(item.get("final_score") or item["score"]), 4),
+                "score_breakdown": {k: round(float(v), 4) for k, v in breakdown.items()},
                 "query_variant": item["query_variant"],
                 "chunk_strategy": metadata.get("chunk_strategy", "unknown"),
                 "section_type": metadata.get("section_type", ""),
@@ -445,14 +447,6 @@ def retrieve_technical_knowledge(
                 "content_preview": item["content"][:700],
             }
         )
-        if section_boost > 0:
-            boosted_sections.append(
-                {
-                    "section_type": metadata.get("section_type", ""),
-                    "chunk_label": metadata.get("chunk_label", ""),
-                    "section_boost": section_boost,
-                }
-            )
 
     effective_scope = query_plan["effective_scope"]
 
@@ -472,11 +466,6 @@ def retrieve_technical_knowledge(
             "rewrite_reason": query_plan["rewrite_reason"],
             "intent_bucket": query_plan["intent_bucket"],
             "expanded_queries": query_plan["expanded_queries"],
-            "section_boost_applied": {
-                "intent_bucket": query_plan["intent_bucket"],
-                "boosted_match_count": len(boosted_sections),
-                "boosted_sections": boosted_sections[:3],
-            },
             "used_llm_contextualizer": query_plan["used_llm_contextualizer"],
         },
     }
