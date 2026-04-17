@@ -25,6 +25,17 @@ _SECTION_TYPE_BOOSTS: Dict[str, Dict[str, float]] = {
     },
 }
 
+_TIER_EXACT_PHASE = 0
+_TIER_LOGICAL_JUMP_TARGET = 1
+_TIER_LOGICAL_JUMP_ANCHOR = 2
+_TIER_SUPPLEMENTARY_PHASE = 3
+_TIER_PLAN_COMPARISON = 4
+_TIER_DEFAULT = 5
+
+_ACTIVE_SERVICE_BOOST: float = 0.15
+_EXPLICIT_TERM_EXACT_BOOST: float = 0.20
+_EXPLICIT_TERM_ONLY_BOOST: float = 0.10
+
 
 def _normalize_text(text: str) -> str:
     return " ".join(text.lower().replace("_", " ").replace("-", " ").split())
@@ -150,32 +161,116 @@ def _service_label(metadata: Dict[str, Any]) -> str:
     ).strip()
 
 
-def _apply_section_type_boosts(matches: List[Dict[str, Any]], intent_bucket: str) -> List[Dict[str, Any]]:
-    boosts = _SECTION_TYPE_BOOSTS.get(str(intent_bucket or "").strip(), {})
-    if not boosts:
+def _mark_logical_jump_targets(
+    matches: List[Dict[str, Any]],
+    current_step: str,
+    next_step: str,
+) -> List[Dict[str, Any]]:
+    if not (current_step and next_step and next_step.lower() != "none"):
         return matches
 
-    boosted: List[Dict[str, Any]] = []
-    for match in matches:
-        metadata = match.get("metadata", {})
-        section_type = str(metadata.get("section_type") or "").strip()
-        section_boost = float(boosts.get(section_type, 0.0))
-        base_rerank_score = float(match.get("rerank_score", -1e9))
-        boosted.append(
-            {
-                **match,
-                "section_boost": section_boost,
-                "boosted_rerank_score": base_rerank_score + section_boost,
-            }
-        )
+    result = []
+    target_found = False
+    anchor_found = False
 
-    boosted.sort(
-        key=lambda item: (
-            -float(item.get("boosted_rerank_score", item.get("rerank_score", -1e9))),
-            item["score"],
-        )
-    )
-    return boosted
+    for i, match in enumerate(matches):
+        copied = dict(match)
+        metadata = match.get("metadata", {})
+        section_type = str(metadata.get("section_type", "") or "").strip()
+
+        if not target_found and section_type == "workflow_step":
+            step_name = str(metadata.get("step_name", "") or metadata.get("workflow_step_name", "") or "").strip()
+            if step_name == next_step:
+                copied["logical_jump_target"] = True
+                target_found = True
+
+        if not anchor_found and section_type == "workflow_step":
+            step_name = str(metadata.get("step_name", "") or metadata.get("workflow_step_name", "") or "").strip()
+            if step_name == current_step:
+                copied["logical_jump_anchor"] = True
+                anchor_found = True
+
+        result.append(copied)
+
+    return result
+
+
+def _compute_priority_tier(
+    match: Dict[str, Any],
+    *,
+    phase_refs: Set[str],
+    is_plan_comparison: bool,
+) -> int:
+    metadata = match.get("metadata", {})
+
+    if match.get("query_variant") == "exact_phase_priority":
+        return _TIER_EXACT_PHASE
+
+    if match.get("logical_jump_target"):
+        return _TIER_LOGICAL_JUMP_TARGET
+
+    if match.get("logical_jump_anchor"):
+        return _TIER_LOGICAL_JUMP_ANCHOR
+
+    section_type = str(metadata.get("section_type", "") or "").strip()
+
+    if phase_refs and section_type == "service_phase":
+        phase_name = _normalize_phase_label(str(metadata.get("phase_name", "") or ""))
+        if phase_name in phase_refs:
+            return _TIER_SUPPLEMENTARY_PHASE
+
+    if is_plan_comparison and section_type == "plan_comparison":
+        return _TIER_PLAN_COMPARISON
+
+    return _TIER_DEFAULT
+
+
+def _compute_soft_score(
+    match: Dict[str, Any],
+    *,
+    intent_bucket: str,
+    active_service_name: str,
+    query: str,
+) -> tuple[float, dict]:
+    metadata = match.get("metadata", {})
+
+    base = float(match.get("rerank_score", 0.0))
+
+    boosts = _SECTION_TYPE_BOOSTS.get(str(intent_bucket or "").strip(), {})
+    section_type = str(metadata.get("section_type", "") or "").strip()
+    section_type_boost = float(boosts.get(section_type, 0.0))
+
+    normalized_active = _normalize_text(active_service_name)
+    active_service_boost = 0.0
+    if normalized_active and _normalize_text(_service_label(metadata)) == normalized_active:
+        active_service_boost = _ACTIVE_SERVICE_BOOST
+
+    normalized_query = _normalize_text(query)
+    explicit_terms = [t for t in ("purification", "production") if t in normalized_query]
+    explicit_term_boost = 0.0
+
+    if len(explicit_terms) == 1:
+        target_term = explicit_terms[0]
+        competing_term = "production" if target_term == "purification" else "purification"
+        volume_ref = _extract_volume_ref(query)
+        text = _explicit_match_text(match)
+        has_target = target_term in text
+        has_competing = competing_term in text
+        has_volume = bool(volume_ref and volume_ref in text)
+
+        if has_target and has_volume:
+            explicit_term_boost = _EXPLICIT_TERM_EXACT_BOOST
+        elif has_target and not has_competing:
+            explicit_term_boost = _EXPLICIT_TERM_ONLY_BOOST
+
+    final_score = base + section_type_boost + active_service_boost + explicit_term_boost
+    score_breakdown = {
+        "base": base,
+        "section_type_boost": section_type_boost,
+        "active_service_boost": active_service_boost,
+        "explicit_term_boost": explicit_term_boost,
+    }
+    return final_score, score_breakdown
 
 
 def _best_service_match(query: str) -> tuple[str, int]:
@@ -202,25 +297,6 @@ def _best_service_match(query: str) -> tuple[str, int]:
     return best_label, best_score
 
 
-def _prioritize_active_service_matches(matches: List[Dict[str, Any]], active_service_name: str) -> List[Dict[str, Any]]:
-    normalized_active = _normalize_text(active_service_name)
-    if not normalized_active:
-        return matches
-
-    same_service = [
-        match for match in matches
-        if _normalize_text(_service_label(match.get("metadata", {}))) == normalized_active
-    ]
-    if not same_service:
-        return matches
-
-    other_service = [
-        match for match in matches
-        if _normalize_text(_service_label(match.get("metadata", {}))) != normalized_active
-    ]
-    return same_service + other_service
-
-
 def _match_text(match: Dict[str, Any]) -> str:
     metadata = match.get("metadata", {})
     fields = [
@@ -240,38 +316,6 @@ def _explicit_match_text(match: Dict[str, Any]) -> str:
         str(metadata.get("tags", "") or ""),
     ]
     return _normalize_text(" ".join(fields))
-
-
-def _prioritize_explicit_query_term_matches(query: str, matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    normalized_query = _normalize_text(query)
-    explicit_terms = [term for term in ("purification", "production") if term in normalized_query]
-    if len(explicit_terms) != 1:
-        return matches
-
-    target_term = explicit_terms[0]
-    competing_term = "production" if target_term == "purification" else "purification"
-    volume_ref = _extract_volume_ref(query)
-
-    exact_target: List[Dict[str, Any]] = []
-    target_only: List[Dict[str, Any]] = []
-    rest: List[Dict[str, Any]] = []
-
-    for match in matches:
-        text = _explicit_match_text(match)
-        has_target = target_term in text
-        has_competing = competing_term in text
-        has_volume = bool(volume_ref and volume_ref in text)
-
-        if has_target and has_volume:
-            exact_target.append(match)
-        elif has_target and not has_competing:
-            target_only.append(match)
-        else:
-            rest.append(match)
-
-    if not exact_target and not target_only:
-        return matches
-    return exact_target + target_only + rest
 
 
 def _explicit_term_priority_matches(
@@ -427,7 +471,7 @@ def _resolve_jump_target(matches: List[Dict[str, Any]], after_step: str) -> tupl
         overlap = len(after_tokens.intersection(set(_tokenize(step_name))))
         if not overlap:
             continue
-        if best_match is None or overlap > best_overlap or float(match.get("score", 0.0)) < float(best_match.get("score", 0.0)):
+        if best_match is None or overlap > best_overlap or (overlap == best_overlap and float(match.get("score", 0.0)) < float(best_match.get("score", 0.0))):
             best_match = match
             best_overlap = overlap
 
@@ -438,202 +482,6 @@ def _resolve_jump_target(matches: List[Dict[str, Any]], after_step: str) -> tupl
     current_step = str(metadata.get("step_name", "") or metadata.get("workflow_step_name", "") or "").strip()
     next_step = str(metadata.get("next_step", "") or "").strip()
     return current_step, next_step
-
-
-def _prepend_priority_matches(
-    *,
-    query: str,
-    matches: List[Dict[str, Any]],
-    all_candidates: List[Dict[str, Any]],
-    phase_refs: Set[str],
-    current_step: str,
-    next_step: str,
-    business_line_hint: str,
-    active_service_name: str,
-) -> List[Dict[str, Any]]:
-    priority_front: List[Dict[str, Any]] = []
-    seen = set()
-    is_plan_comparison = _is_plan_comparison_query(query)
-    best_service_label = ""
-    best_service_score = 0
-
-    if is_plan_comparison:
-        best_service_label, best_service_score = _best_service_match(query)
-        comparison_matches: List[Dict[str, Any]] = []
-        for pool in (matches, all_candidates):
-            for match in pool:
-                metadata = match.get("metadata", {})
-                if str(metadata.get("section_type", "") or "") != "plan_comparison":
-                    continue
-                comparison_matches.append(match)
-
-        if best_service_label and best_service_score > 0:
-            service_scoped = [
-                match
-                for match in comparison_matches
-                if _service_label(match.get("metadata", {})) == best_service_label
-            ]
-            if service_scoped:
-                comparison_matches = service_scoped
-
-        for match in comparison_matches:
-            metadata = match.get("metadata", {})
-            key = _match_key(metadata)
-            if key in seen:
-                continue
-            seen.add(key)
-            priority_front.append(match)
-
-    explicit_term_matches = _explicit_term_priority_matches(
-        query=query,
-        matches=matches,
-        all_candidates=all_candidates,
-        business_line_hint=business_line_hint,
-        active_service_name=active_service_name,
-    )
-    for match in explicit_term_matches:
-        metadata = match.get("metadata", {})
-        key = _match_key(metadata)
-        if key in seen:
-            continue
-        seen.add(key)
-        priority_front.append(match)
-
-    if phase_refs:
-        best_service_label, best_service_score = _best_service_match(query)
-        exact_phase_matches: List[Dict[str, Any]] = []
-
-        def _collect_exact_phase_matches(pool: List[Dict[str, Any]]) -> None:
-            for match in pool:
-                metadata = match.get("metadata", {})
-                if str(metadata.get("section_type", "") or "") != "service_phase":
-                    continue
-                if business_line_hint and business_line_hint not in {"unknown", "cross_line"}:
-                    if metadata.get("business_line") != business_line_hint:
-                        continue
-                phase_name = _normalize_phase_label(str(metadata.get("phase_name", "") or ""))
-                if phase_name not in phase_refs:
-                    continue
-                exact_phase_matches.append(match)
-
-        _collect_exact_phase_matches(matches)
-        _collect_exact_phase_matches(all_candidates)
-
-        # If the current candidate set somehow missed the exact phase chunk, fall back to the
-        # full prechunked service-page corpus and synthesize a candidate.
-        if not exact_phase_matches:
-            for document in load_service_page_documents():
-                metadata = dict(document.metadata)
-                if metadata.get("section_type") != "service_phase":
-                    continue
-                if business_line_hint and business_line_hint not in {"unknown", "cross_line"}:
-                    if metadata.get("business_line") != business_line_hint:
-                        continue
-                phase_name = _normalize_phase_label(str(metadata.get("phase_name", "") or ""))
-                if phase_name not in phase_refs:
-                    continue
-                exact_phase_matches.append(
-                    {
-                        "query_variant": "exact_phase_fallback",
-                        "score": -1.0,
-                        "raw_score": 999.0,
-                        "content": document.page_content,
-                        "metadata": metadata,
-                    }
-                )
-
-        if best_service_label and best_service_score > 0:
-            service_scoped = [
-                match
-                for match in exact_phase_matches
-                if _service_label(match.get("metadata", {})) == best_service_label
-            ]
-            if service_scoped:
-                exact_phase_matches = service_scoped
-
-        exact_phase_matches.sort(
-            key=lambda match: (
-                _phase_priority(match.get("metadata", {}), phase_refs),
-                str(match.get("metadata", {}).get("plan_name", "") or ""),
-            )
-        )
-
-        for match in exact_phase_matches:
-            metadata = match.get("metadata", {})
-            key = _match_key(metadata)
-            if key in seen:
-                continue
-            seen.add(key)
-            priority_front.append(match)
-
-        for pool in (matches, all_candidates):
-            for match in pool:
-                metadata = match.get("metadata", {})
-                key = _match_key(metadata)
-                if key in seen:
-                    continue
-                if str(metadata.get("section_type", "") or "") != "service_phase":
-                    continue
-                phase_name = _normalize_phase_label(str(metadata.get("phase_name", "") or ""))
-                if phase_name not in phase_refs:
-                    continue
-                seen.add(key)
-                priority_front.append(match)
-
-    if current_step and next_step and next_step.lower() != "none":
-        for pool in (matches, all_candidates):
-            for match in pool:
-                metadata = match.get("metadata", {})
-                key = _match_key(metadata)
-                if key in seen:
-                    continue
-                if str(metadata.get("section_type", "") or "") != "workflow_step":
-                    continue
-                step_name = str(metadata.get("step_name", "") or metadata.get("workflow_step_name", "") or "").strip()
-                if step_name == next_step:
-                    copied = dict(match)
-                    copied["logical_jump_target"] = True
-                    seen.add(key)
-                    priority_front.append(copied)
-                    break
-            if priority_front and priority_front[-1].get("logical_jump_target"):
-                break
-
-        for pool in (matches, all_candidates):
-            for match in pool:
-                metadata = match.get("metadata", {})
-                key = _match_key(metadata)
-                if key in seen:
-                    continue
-                if str(metadata.get("section_type", "") or "") != "workflow_step":
-                    continue
-                step_name = str(metadata.get("step_name", "") or metadata.get("workflow_step_name", "") or "").strip()
-                if step_name == current_step:
-                    copied = dict(match)
-                    copied["logical_jump_anchor"] = True
-                    seen.add(key)
-                    priority_front.append(copied)
-                    break
-            if priority_front and priority_front[-1].get("logical_jump_anchor"):
-                break
-
-    final_matches = list(priority_front)
-    ordered_matches = matches
-    if is_plan_comparison and best_service_label and best_service_score > 0:
-        same_service = [
-            match for match in matches if _service_label(match.get("metadata", {})) == best_service_label
-        ]
-        other_service = [
-            match for match in matches if _service_label(match.get("metadata", {})) != best_service_label
-        ]
-        ordered_matches = same_service + other_service
-
-    for match in ordered_matches:
-        key = _match_key(match.get("metadata", {}))
-        if key in seen:
-            continue
-        final_matches.append(match)
-    return final_matches
 
 
 def retrieve_chunks(
@@ -709,32 +557,56 @@ def retrieve_chunks(
             break
 
     reranked = rerank_matches(query, deduped, top_k=max(top_k * 2, 10))
-    reranked = _apply_section_type_boosts(reranked, intent_bucket)
-    reranked = _prioritize_active_service_matches(reranked, active_service_name)
-    reranked = _prioritize_explicit_query_term_matches(query, reranked)
+
     exact_phase_matches = _exact_phase_priority_matches(
         query=query,
         phase_refs=phase_refs,
         business_line_hint=business_line_hint,
     )
-    reranked = _prepend_priority_matches(
+    explicit_fallback = _explicit_term_priority_matches(
         query=query,
         matches=reranked,
         all_candidates=deduped,
-        phase_refs=set(),
-        current_step=current_step,
-        next_step=next_step,
         business_line_hint=business_line_hint,
         active_service_name=active_service_name,
     )
 
-    if exact_phase_matches:
-        seen_exact = {_match_key(match.get("metadata", {})) for match in exact_phase_matches}
-        reranked = exact_phase_matches + [
-            match for match in reranked if _match_key(match.get("metadata", {})) not in seen_exact
-        ]
+    unified_pool: List[Dict[str, Any]] = []
+    _unified_seen: set = set()
 
-    reranked = reranked[:top_k]
+    def _add_to_pool(candidates: List[Dict[str, Any]]) -> None:
+        for m in candidates:
+            k = _match_key(m.get("metadata", {}))
+            if k not in _unified_seen:
+                _unified_seen.add(k)
+                unified_pool.append(m)
+
+    _add_to_pool(exact_phase_matches)
+    _add_to_pool(explicit_fallback)
+    _add_to_pool(reranked)
+
+    is_plan_comparison = _is_plan_comparison_query(query)
+    unified_pool = _mark_logical_jump_targets(unified_pool, current_step, next_step)
+
+    for match in unified_pool:
+        tier = _compute_priority_tier(
+            match, phase_refs=phase_refs, is_plan_comparison=is_plan_comparison
+        )
+        final_score, breakdown = _compute_soft_score(
+            match,
+            intent_bucket=intent_bucket,
+            active_service_name=active_service_name,
+            query=query,
+        )
+        match["priority_tier"] = tier
+        match["final_score"] = final_score
+        match["score_breakdown"] = breakdown
+
+    unified_pool.sort(
+        key=lambda m: (m["priority_tier"], -m["final_score"], m["score"])
+    )
+
+    reranked = unified_pool[:top_k]
 
     return {
         "retrieval_mode": "chroma_similarity_bge_rerank",
