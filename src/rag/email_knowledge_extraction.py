@@ -25,6 +25,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.objects.registries.service_registry import KNOWN_BUSINESS_LINES
+
 # ---------------------------------------------------------------------------
 # 提取提示词
 # ---------------------------------------------------------------------------
@@ -87,7 +89,8 @@ EXTRACTION_SYSTEM_PROMPT = """\
   "category": "<上述五个分类键之一>",
   "fact": "<单条独立的知识陈述，使用第三人称，最多 3 句话>",
   "tags": ["<用于检索的关键词标签，例如服务名称、产品、物种、检测类型>"],
-  "business_line": "<以下之一：antibody | car_t_car_nk | protein_expression | cell-based assay | mrna_lnp | general>",
+  "business_line": "<必须是以下之一：antibody | car_t_car_nk | protein_expression | cell_based_assays | mrna_lnp>",
+  "service_name": "<若该 fact 明确针对某个具名服务（如 'Recombinant Antibody Production'、'CAR-T cell therapy'），填写该服务的规范名；否则填空串 \"\">",
   "confidence": <0.0–1.0，你对该知识点准确性和可复用性的置信度>,
   "source_snippet": "<邮件中支持该知识点的原文引用，1–2 句>"
 }
@@ -96,6 +99,10 @@ EXTRACTION_SYSTEM_PROMPT = """\
 - `fact` 字段须为独立陈述，客户无需看到原始邮件即可理解。
   错误示例："我们可以在下周五之前完成。"
   正确示例："ProMab 可在项目启动后 4 周内交付标准 ELISA 方法开发。"
+- `business_line` 必须精确匹配上述五个枚举值之一（下划线、单复数敏感）。
+  若一条 fact 跨多个业务线或无法明确归属，不要提取此条。
+- `service_name` 填写要与 ProMab 官网的服务名称一致。
+  如果 fact 只是通用政策、无法归到具体服务，填空串 `""`。
 - 不要提取纯内部运营内容（快递单号、抄送关系、无政策内容的付款收据、日程安排）。
 - 不要发明或推断邮件中未明确说明的内容，若不确定请降低置信度。
 - 一封邮件可提取 0–6 条跨多个分类的知识点，这是正常情况。
@@ -133,10 +140,18 @@ def facts_to_ingestion_sections(
         if not fact_text:
             continue
 
+        business_line = str(f.get("business_line", "") or "").strip()
+        if business_line not in KNOWN_BUSINESS_LINES:
+            # LLM 偶尔会输出 general 或别名。与 service_page metadata 不对齐的
+            # fact 会在 retriever scope filter 下被过滤，索引意义不大，直接丢弃。
+            continue
+
+        service_name = str(f.get("service_name", "") or "").strip()
+
         title = _category_title(category, f)
         tags = list(f.get("tags") or [])
         # 补充分类和业务线标签
-        for extra in [category, f.get("business_line", "")]:
+        for extra in [category, business_line]:
             if extra and extra not in tags:
                 tags.append(extra)
 
@@ -147,7 +162,9 @@ def facts_to_ingestion_sections(
             section_type="email_knowledge",
             tags=tags,
             source_path=f"email_index:{source_email_index}",
-            business_line=f.get("business_line", "general"),
+            business_line=business_line,
+            entity_type="service" if service_name else "",
+            entity_name=service_name,
             structural_tag="fact",
         )
         sections.append(section)
