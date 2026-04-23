@@ -3,6 +3,19 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from src.objects.registries.service_registry import (
+    canonicalize_service_name as _canonicalize_via_registry,
+)
+
+
+def canonicalize_service_name(value: str) -> str:
+    # Route caller-supplied service names through service_registry's alias
+    # table so aliases resolve to the canonical name that chunk metadata
+    # carries — retriever's active_service_boost relies on string equality
+    # with _service_label(metadata). Idempotent on canonical input; passes
+    # through unchanged when no alias matches or the alias is ambiguous.
+    return _canonicalize_via_registry(value)
+
 
 SERVICE_SCOPE_QUERY_PATTERNS = (
     re.compile(r"\bmodel(?:s)?\b"),
@@ -151,7 +164,6 @@ def _session_payload(agent_input: Mapping[str, Any]) -> Mapping[str, Any]:
             },
             "active_service_name": active_display_name if active_object_type == "service" else "",
             "active_product_name": active_display_name if active_object_type == "product" else "",
-            "active_target": active_display_name if active_object_type == "scientific_target" else "",
             "pending_clarification": {
                 "field": clarification_memory.get("pending_clarification_type", ""),
                 "candidate_options": clarification_memory.get("pending_candidate_options", []),
@@ -183,7 +195,6 @@ def _session_payload(agent_input: Mapping[str, Any]) -> Mapping[str, Any]:
         },
         "active_service_name": "",
         "active_product_name": active_object.get("display_name", ""),
-        "active_target": "",
     }
 
 
@@ -265,10 +276,6 @@ def resolve_current_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
     if product_name or catalog_number:
         return _resolved_scope("product", "current", product_name or catalog_number, "current_product_scope")
 
-    target_name = _first_value(entities.get("targets") or product_lookup_keys.get("targets"))
-    if target_name:
-        return _resolved_scope("scientific_target", "current", target_name, "current_scientific_target_scope")
-
     return _no_scope("no_current_scope")
 
 
@@ -303,22 +310,15 @@ def resolve_active_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
         or session_payload.get("active_product_name")
         or ""
     ).strip()
-    active_target = str(
-        agent_input.get("active_target")
-        or session_payload.get("active_target")
-        or ""
-    ).strip()
 
-    if current_active_entity_kind in {"service", "product", "scientific_target"}:
+    if current_active_entity_kind in {"service", "product"}:
         active_entity_kind = current_active_entity_kind
-    elif prior_active_entity_kind in {"service", "product", "scientific_target"}:
+    elif prior_active_entity_kind in {"service", "product"}:
         active_entity_kind = prior_active_entity_kind
     elif active_service_name:
         active_entity_kind = "service"
     elif active_product_name:
         active_entity_kind = "product"
-    elif active_target:
-        active_entity_kind = "scientific_target"
     else:
         active_entity_kind = current_active_entity_kind or prior_active_entity_kind
 
@@ -336,14 +336,6 @@ def resolve_active_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
             "active",
             active_product_name,
             "active_product_follow_up_matched_product_scope_markers",
-        )
-
-    if active_target and query_has_product_scope_marker(query):
-        return _resolved_scope(
-            "scientific_target",
-            "active",
-            active_target,
-            "active_target_follow_up_matched_product_scope_markers",
         )
 
     return _no_scope("no_active_scope")
@@ -380,20 +372,18 @@ def should_fallback_to_active_service_context(
                 "service_names": [],
                 "product_names": [],
                 "catalog_numbers": [],
-                "targets": [],
             },
             "product_lookup_keys": {
                 "service_names": [],
                 "product_names": [],
                 "catalog_numbers": [],
-                "targets": [],
             },
         }
         if not has_current_scope
         else {
             "query": query,
             "entities": {
-                "targets": ["current_scope_present"],
+                "product_names": ["current_scope_present"],
             },
             "session_payload": {
                 "active_entity": {
@@ -413,6 +403,7 @@ __all__ = [
     "NON_TECHNICAL_FALLBACK_PATTERNS",
     "PRODUCT_SCOPE_QUERY_PATTERNS",
     "SERVICE_SCOPE_QUERY_PATTERNS",
+    "canonicalize_service_name",
     "has_current_scope",
     "is_service_scoped_follow_up",
     "normalize_scope_query",
