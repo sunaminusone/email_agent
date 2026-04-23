@@ -144,13 +144,14 @@ def _build_contextual_queries(
     query_value = query.strip()
     contextual_queries: list[dict[str, str]] = []
     normalized_query = normalize_scope_query(query)
+    # Only subject-like fields go into query concat. Intent-describing fields
+    # (pain_point / customer_goal / requested_action / regulatory_or_compliance_note)
+    # stay in retrieval_context for chunk-side metadata boost in
+    # compute_retrieval_context_matches + _compute_soft_score, and do NOT
+    # pollute embedding-space queries.
     field_order = (
         ("experiment_type", "context_experiment"),
         ("usage_context", "context_usage"),
-        ("pain_point", "context_pain_point"),
-        ("customer_goal", "context_goal"),
-        ("requested_action", "context_action"),
-        ("regulatory_or_compliance_note", "context_regulatory"),
     )
 
     seen_terms = set()

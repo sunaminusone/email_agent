@@ -168,7 +168,7 @@ def test_query_variant_plan_preserves_context_diversity() -> None:
         contextual_query_specs=[
             {"query": "How should I validate it? ELISA", "kind": "context_experiment"},
             {"query": "How should I validate it? validation assay", "kind": "context_usage"},
-            {"query": "How should I validate it? low yield", "kind": "context_pain_point"},
+            {"query": "How should I validate it? audit trail", "kind": "context_note"},
             {"query": "How should I validate it? specificity", "kind": "context_keyword"},
         ],
         active_service_name="Antibody production",
@@ -186,7 +186,7 @@ def test_query_variant_plan_preserves_context_diversity() -> None:
     assert "rewrite_scope" in kinds
     assert "context_experiment" in kinds
     assert "context_usage" in kinds
-    assert "context_keyword" in kinds or "context_pain_point" in kinds
+    assert "context_keyword" in kinds or "context_note" in kinds
     assert queries.count("Antibody production") <= 1
 
 
