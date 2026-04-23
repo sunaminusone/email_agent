@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.catalog.normalization import DEFAULT_LIMIT, normalize_business_line_hint, token_regex
+from src.objects.normalizers import normalize_object_alias
 from .shared import (
     BUSINESS_LINE_MATCH_SQL,
     PRODUCT_SELECT_SQL,
@@ -28,11 +29,19 @@ def alias_lookup(
         service_names=service_names,
         targets=targets,
     )
-    if not aliases:
+    normalized_aliases: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases:
+        normalized = normalize_object_alias(alias)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        normalized_aliases.append(normalized)
+    if not normalized_aliases:
         return []
 
     conditions = ["a.alias_normalized = ANY(%s)", "p.is_active = TRUE"]
-    params: list[Any] = [aliases]
+    params: list[Any] = [normalized_aliases]
     normalized_business_line = normalize_business_line_hint(business_line_hint)
     if normalized_business_line:
         conditions.append(BUSINESS_LINE_MATCH_SQL.format(field="p.business_line"))

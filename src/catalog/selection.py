@@ -4,7 +4,7 @@ from typing import Any
 
 from .normalization import DEFAULT_LIMIT, clean_text, extract_catalog_numbers
 from .ranking import rank_catalog_matches
-from .product_registry import lookup_product_by_catalog_no, lookup_products_by_alias
+from src.objects.registries.product_registry import lookup_product_by_catalog_no, lookup_products_by_alias
 from .retrieval import alias_lookup, catalog_number_lookup, direct_alias_lookup, fuzzy_lookup
 from .retrieval.shared import build_connection_string, psycopg
 
