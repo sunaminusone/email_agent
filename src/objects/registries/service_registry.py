@@ -25,29 +25,97 @@ SERVICE_REGISTRY_TABLE = os.getenv("OBJECTS_SERVICE_REGISTRY_TABLE", "service_re
 SERVICE_PAGE_FILE_PATTERN = re.compile(r"promab_.*_rag_ready(?:_.*)?\.txt$", re.I)
 _KEY_VALUE_PATTERN = re.compile(r"^([A-Za-z0-9_ /()+&.-]+):\s*(.*)$")
 
+# Canonical Layer-1 taxonomy. Single source of truth for every consumer that
+# needs to validate a business_line string (corpus hints, LLM-produced facts,
+# RAG soft-boost guards). Must stay aligned with the business_line values
+# emitted by service_page_ingestion into each service's metadata.
+KNOWN_BUSINESS_LINES: frozenset[str] = frozenset({
+    "antibody",
+    "car_t_car_nk",
+    "cell_based_assays",
+    "mrna_lnp",
+    "protein_expression",
+})
+
 MANUAL_SERVICE_ALIASES: dict[str, tuple[str, ...]] = {
     "mRNA-LNP Gene Delivery": (
         "mRNA LNP Gene Delivery",
         "mRNA-LNP delivery",
         "mRNA LNP delivery",
         "LNP gene delivery",
+        "LNP delivery",
         "mRNA Lipid Nanoparticle Gene Delivery",
+        "mRNA-LNP",
+        "mRNA LNP",
+        "mRNA LNP development",
     ),
     "Mouse Monoclonal Antibodies": (
         "Mouse Monoclonal Antibody Service",
         "Mouse Monoclonal Antibody Development",
+        "mouse monoclonal",
+        "mouse mAb",
     ),
     "Rabbit Monoclonal Antibodies": (
         "Rabbit Monoclonal Antibody Service",
         "Rabbit Monoclonal Antibody Development",
+        "rabbit monoclonal",
+        "rabbit mAb",
+    ),
+    "Human Monoclonal Antibodies": (
+        "human monoclonal",
+        "human mAb",
     ),
     "Rabbit Polyclonal Antibody Production": (
         "Rabbit Polyclonal Antibodies",
         "Rabbit Polyclonal Antibody Service",
+        "rabbit polyclonal",
+    ),
+    "Bispecific Antibody Development": (
+        "bispecific",
+        "bispecific mAb",
+    ),
+    "Affinity Tune-Up & Humanization": (
+        "humanization",
+        "affinity tune-up",
+        "affinity maturation",
     ),
     "CAR-T Cell Design and Development": (
         "Custom CAR-T Cell Development",
         "CAR-T Development",
+        "CAR-T cell therapy",
+        "CAR-T therapy",
+        "CAR-T cell therapy development",
+    ),
+    "Custom CAR-NK Manufacturing": (
+        "CAR-NK",
+        "CAR-NK development",
+        "CAR-NK service",
+    ),
+    "Custom CAR-Macrophage Cell Development": (
+        "CAR-macrophage",
+        "CAR-M",
+        "CAR macrophage development",
+    ),
+    "Stable Cell Line Development": (
+        "stable cell line service",
+    ),
+    "T Cell Activation and Proliferation Assay": (
+        "T cell activation",
+        "T cell proliferation",
+    ),
+    "Lentivirus Production": (
+        "lentivirus",
+    ),
+    "E. coli Protein Expression": (
+        "E. coli expression",
+        "E coli expression",
+    ),
+    "Mammalian Protein Expression": (
+        "mammalian expression",
+    ),
+    "Baculovirus Protein Expression": (
+        "baculovirus expression",
+        "insect cell expression",
     ),
 }
 

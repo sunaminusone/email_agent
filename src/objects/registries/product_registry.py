@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -28,6 +29,7 @@ class ProductRegistryEntry:
     canonical_name: str
     business_line: str
     aliases: tuple[str, ...] = ()
+    synonyms: tuple[str, ...] = ()
     target_antigen: str = ""
     application_text: str = ""
     species_reactivity_text: str = ""
@@ -93,13 +95,20 @@ class ExcelProductRegistrySource:
                 application_text = _safe_text(raw.get("Applications")) or _safe_text(raw.get("Application"))
                 species_reactivity_text = _safe_text(raw.get("Species Reactivity"))
                 target_aliases = _extract_antibody_target_aliases(canonical_name)
+                synonyms = _split_aliases(raw.get("Also known as "))
+                clonality = _infer_antibody_clonality(sheet_name, canonical_name)
                 alias_records = _build_alias_records(
                     ("canonical_name", canonical_name),
                     ("catalog_no", catalog_no),
                     *[("target_antigen", value) for value in target_aliases],
-                    *[("synonym", value) for value in _split_aliases(raw.get("Also known as "))],
+                    *[("synonym", value) for value in synonyms],
                 )
-                alias_records = _expand_antibody_alias_records(alias_records)
+                alias_records = _expand_antibody_alias_records(
+                    alias_records,
+                    target_aliases=target_aliases,
+                    synonyms=synonyms,
+                    clonality=clonality,
+                )
 
                 entries.append(
                     ProductRegistryEntry(
@@ -107,11 +116,12 @@ class ExcelProductRegistrySource:
                         canonical_name=canonical_name,
                         business_line="antibody",
                         aliases=tuple(record.value for record in alias_records),
+                        synonyms=tuple(synonyms),
                         target_antigen=target_aliases[0] if target_aliases else "",
                         application_text=application_text,
                         species_reactivity_text=species_reactivity_text,
                         clone=_safe_text(raw.get("clone")),
-                        clonality=_infer_antibody_clonality(sheet_name, canonical_name),
+                        clonality=clonality,
                         isotype=_safe_text(raw.get("Isotype")),
                         ig_class=_safe_text(raw.get("Ig class")),
                         gene_id=_safe_text(raw.get("Gene ID")),
@@ -135,13 +145,20 @@ class ExcelProductRegistrySource:
             if not catalog_no or not canonical_name:
                 continue
 
+            target_antigen = _safe_text(raw.get("target_antigen"))
+            construct = _safe_text(raw.get("construct"))
             alias_records = _build_alias_records(
                 ("canonical_name", canonical_name),
                 ("catalog_no", catalog_no),
-                ("target_antigen", _safe_text(raw.get("target_antigen"))),
+                ("target_antigen", target_antigen),
                 ("group_name", _safe_text(raw.get("group_name"))),
-                ("construct", _safe_text(raw.get("construct"))),
+                ("construct", construct),
                 ("marker", _safe_text(raw.get("marker"))),
+            )
+            alias_records = _expand_cart_alias_records(
+                alias_records,
+                target_antigen=target_antigen,
+                construct=construct,
             )
 
             entries.append(
@@ -188,7 +205,10 @@ class ExcelProductRegistrySource:
                 ("format_or_size", format_or_size),
                 ("platform", "mRNA-Lipid Nanoparticle"),
             )
-            alias_records = _expand_mrna_lnp_alias_records(alias_records)
+            alias_records = _expand_mrna_lnp_alias_records(
+                alias_records,
+                canonical_name=canonical_name,
+            )
 
             entries.append(
                 ProductRegistryEntry(
@@ -333,6 +353,23 @@ def lookup_product_by_catalog_no(catalog_no: str) -> dict[str, Any] | None:
     return get_product_registry_payload()["by_catalog_no"].get(normalized)
 
 
+def iter_product_alias_records() -> list[tuple[str, str, str, str]]:
+    rows: list[tuple[str, str, str, str]] = []
+    for entry in load_product_registry():
+        catalog_no = _safe_text(entry.catalog_no)
+        if not catalog_no:
+            continue
+        for record in _alias_records_for_entry(entry):
+            alias_value = _safe_text(record.value)
+            if not alias_value:
+                continue
+            normalized = normalize_object_alias(alias_value)
+            if not normalized:
+                continue
+            rows.append((catalog_no, alias_value, normalized, record.alias_kind or ""))
+    return rows
+
+
 def canonicalize_product_name(value: str) -> str:
     cleaned = _safe_text(value)
     matches = lookup_products_by_alias(cleaned)
@@ -373,11 +410,17 @@ def _entry_from_record(record: dict[str, Any]) -> ProductRegistryEntry:
         aliases = _split_aliases(aliases)
     elif isinstance(aliases, list):
         aliases = [clean_text(alias) for alias in aliases if clean_text(alias)]
+    synonyms = record.get("synonyms", ())
+    if isinstance(synonyms, str):
+        synonyms = _split_aliases(synonyms)
+    elif isinstance(synonyms, list):
+        synonyms = [clean_text(syn) for syn in synonyms if clean_text(syn)]
     return ProductRegistryEntry(
         catalog_no=_safe_text(record.get("catalog_no")),
         canonical_name=_safe_text(record.get("canonical_name")),
         business_line=_safe_text(record.get("business_line")),
         aliases=tuple(dedupe_preserve_order(list(aliases))),
+        synonyms=tuple(dedupe_preserve_order(list(synonyms))),
         target_antigen=_safe_text(record.get("target_antigen")),
         application_text=_safe_text(record.get("application_text")),
         species_reactivity_text=_safe_text(record.get("species_reactivity_text")),
@@ -442,7 +485,53 @@ def _expand_mrna_lnp_aliases(values: list[str]) -> list[str]:
     return dedupe_preserve_order(expanded)
 
 
-def _expand_mrna_lnp_alias_records(records: list[ProductAliasRecord]) -> list[ProductAliasRecord]:
+_MRNA_LNP_SUFFIXES = (
+    " mRNA-Lipid Nanoparticle",
+    " mRNA Lipid Nanoparticle",
+    " mRNA-LNP",
+    " mRNA LNP",
+)
+_TRAILING_PARENS_RE = re.compile(r"\s*\([^()]*\)\s*$")
+_ANY_PARENS_RE = re.compile(r"\s*\([^()]*\)\s*")
+
+
+def _mrna_lnp_bare_names(canonical_name: str) -> list[str]:
+    text = _safe_text(canonical_name)
+    if not text:
+        return []
+    trimmed = text
+    while True:
+        stripped = _TRAILING_PARENS_RE.sub("", trimmed).strip()
+        if stripped == trimmed or not stripped:
+            break
+        trimmed = stripped
+    lowered = trimmed.lower()
+    bare = trimmed
+    for suffix in _MRNA_LNP_SUFFIXES:
+        if lowered.endswith(suffix.lower()):
+            bare = trimmed[: len(trimmed) - len(suffix)].strip()
+            break
+    else:
+        for suffix in _MRNA_LNP_SUFFIXES:
+            idx = lowered.find(suffix.lower())
+            if idx > 0:
+                bare = trimmed[:idx].strip()
+                break
+    variants: list[str] = []
+    if bare:
+        variants.append(bare)
+    bare_no_parens = _ANY_PARENS_RE.sub(" ", bare).strip()
+    bare_no_parens = re.sub(r"\s+", " ", bare_no_parens)
+    if bare_no_parens and bare_no_parens not in variants:
+        variants.append(bare_no_parens)
+    return variants
+
+
+def _expand_mrna_lnp_alias_records(
+    records: list[ProductAliasRecord],
+    *,
+    canonical_name: str = "",
+) -> list[ProductAliasRecord]:
     expanded: list[ProductAliasRecord] = list(records)
     for record in records:
         alias = _safe_text(record.value)
@@ -453,6 +542,19 @@ def _expand_mrna_lnp_alias_records(records: list[ProductAliasRecord]) -> list[Pr
         if "mrna lnp" in lowered:
             expanded.append(ProductAliasRecord(alias.replace("mRNA LNP", "mRNA Lipid Nanoparticle"), record.alias_kind))
             expanded.append(ProductAliasRecord(alias.replace("mrna lnp", "mrna lipid nanoparticle"), record.alias_kind))
+
+    for bare in _mrna_lnp_bare_names(canonical_name):
+        for variant in (
+            bare,
+            f"{bare} mRNA",
+            f"{bare} LNP",
+            f"{bare} mRNA LNP",
+            f"{bare} mRNA-LNP",
+            f"{bare} mRNA Lipid Nanoparticle",
+            f"{bare} mRNA-Lipid Nanoparticle",
+        ):
+            expanded.append(ProductAliasRecord(variant, "target_antigen"))
+
     return _dedupe_alias_records(expanded)
 
 
@@ -484,7 +586,72 @@ def _expand_antibody_alias_variants(values: list[str]) -> list[str]:
     return dedupe_preserve_order(expanded)
 
 
-def _expand_antibody_alias_records(records: list[ProductAliasRecord]) -> list[ProductAliasRecord]:
+_CART_TARGET_SPLIT_RE = re.compile(r"\s*[+/&]\s*")
+
+
+def _cart_target_variants(target_antigen: str) -> list[str]:
+    target = _safe_text(target_antigen)
+    if not target:
+        return []
+    parts = [p.strip() for p in _CART_TARGET_SPLIT_RE.split(target) if p.strip()]
+    variants = [target]
+    if len(parts) > 1:
+        for part in parts:
+            if part and part not in variants:
+                variants.append(part)
+    return variants
+
+
+def _expand_cart_alias_records(
+    records: list[ProductAliasRecord],
+    *,
+    target_antigen: str,
+    construct: str,
+) -> list[ProductAliasRecord]:
+    variants = _cart_target_variants(target_antigen)
+    if not variants:
+        return _dedupe_alias_records(records)
+
+    construct_compact = _safe_text(construct).lower().replace(" ", "")
+    expanded: list[ProductAliasRecord] = list(records)
+
+    for variant in variants:
+        expanded.append(ProductAliasRecord(f"{variant} CAR", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"{variant} CAR-T", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"{variant} CAR T", "target_antigen"))
+        if variant.lower() == "mock":
+            continue
+        expanded.append(ProductAliasRecord(f"Anti-{variant} CAR", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"Anti-{variant} CAR-T", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"anti {variant} CAR", "target_antigen"))
+        variant_compact = variant.lower().replace(" ", "").replace("-", "")
+        if variant_compact and construct_compact.startswith("hu" + variant_compact):
+            expanded.append(ProductAliasRecord(f"hu{variant} CAR", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"hu{variant} CAR-T", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"humanized {variant} CAR", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"humanized {variant} CAR-T", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"Anti-hu{variant} CAR", "target_antigen"))
+
+    return _dedupe_alias_records(expanded)
+
+
+def _antibody_target_variants(target_aliases: list[str], synonyms: list[str]) -> list[str]:
+    variants: list[str] = []
+    for value in [*target_aliases, *synonyms]:
+        cleaned = _safe_text(value)
+        if not cleaned or cleaned in variants:
+            continue
+        variants.append(cleaned)
+    return variants
+
+
+def _expand_antibody_alias_records(
+    records: list[ProductAliasRecord],
+    *,
+    target_aliases: list[str] | None = None,
+    synonyms: list[str] | None = None,
+    clonality: str = "",
+) -> list[ProductAliasRecord]:
     expanded: list[ProductAliasRecord] = list(records)
     for record in records:
         alias = _safe_text(record.value)
@@ -493,6 +660,27 @@ def _expand_antibody_alias_records(records: list[ProductAliasRecord]) -> list[Pr
             expanded.append(ProductAliasRecord(alias.replace("6×His", "6xHis").replace("6 His", "6xHis"), record.alias_kind))
             expanded.append(ProductAliasRecord(alias.replace("6xHis", "6×His"), record.alias_kind))
             expanded.append(ProductAliasRecord(alias.replace("6xHis", "6 His"), record.alias_kind))
+
+    variants = _antibody_target_variants(target_aliases or [], synonyms or [])
+    clonality_lower = (clonality or "").strip().lower()
+    for variant in variants:
+        expanded.append(ProductAliasRecord(f"{variant} antibody", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"Anti-{variant} antibody", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"Anti-{variant}", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"anti-{variant}", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"anti {variant}", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"{variant} mAb", "target_antigen"))
+        expanded.append(ProductAliasRecord(f"Anti-{variant} mAb", "target_antigen"))
+        if clonality_lower == "monoclonal":
+            expanded.append(ProductAliasRecord(f"{variant} monoclonal antibody", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"{variant} monoclonal", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"Anti-{variant} monoclonal antibody", "target_antigen"))
+        if clonality_lower == "polyclonal":
+            expanded.append(ProductAliasRecord(f"{variant} polyclonal antibody", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"{variant} polyclonal", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"{variant} pAb", "target_antigen"))
+            expanded.append(ProductAliasRecord(f"Anti-{variant} polyclonal antibody", "target_antigen"))
+
     return _dedupe_alias_records(expanded)
 
 
@@ -534,25 +722,45 @@ def _dedupe_alias_records(records: list[ProductAliasRecord]) -> list[ProductAlia
 
 def _alias_records_for_entry(entry: ProductRegistryEntry) -> list[ProductAliasRecord]:
     if entry.business_line == "antibody":
-        return _dedupe_alias_records(
-            _build_alias_records(
-                ("canonical_name", entry.canonical_name),
-                ("catalog_no", entry.catalog_no),
-                ("target_antigen", entry.target_antigen),
-                *[("synonym", alias) for alias in entry.aliases if alias not in {entry.canonical_name, entry.catalog_no, entry.target_antigen}],
-            )
+        target_aliases = _extract_antibody_target_aliases(entry.canonical_name)
+        synonyms = list(entry.synonyms)
+        base_records = _build_alias_records(
+            ("canonical_name", entry.canonical_name),
+            ("catalog_no", entry.catalog_no),
+            *[("target_antigen", value) for value in target_aliases],
+            *[("synonym", syn) for syn in synonyms],
+        )
+        return _expand_antibody_alias_records(
+            base_records,
+            target_aliases=target_aliases,
+            synonyms=synonyms,
+            clonality=entry.clonality,
         )
     if entry.business_line == "car_t":
-        return _dedupe_alias_records(
-            _build_alias_records(
-                ("canonical_name", entry.canonical_name),
-                ("catalog_no", entry.catalog_no),
-                ("target_antigen", entry.target_antigen),
-                ("group_name", entry.group_name),
-                ("construct", entry.construct),
-                ("marker", entry.marker),
-                *[("synonym", alias) for alias in entry.aliases if alias not in {entry.canonical_name, entry.catalog_no, entry.target_antigen, entry.group_name, entry.construct, entry.marker}],
-            )
+        base_records = _build_alias_records(
+            ("canonical_name", entry.canonical_name),
+            ("catalog_no", entry.catalog_no),
+            ("target_antigen", entry.target_antigen),
+            ("group_name", entry.group_name),
+            ("construct", entry.construct),
+            ("marker", entry.marker),
+        )
+        return _expand_cart_alias_records(
+            base_records,
+            target_antigen=entry.target_antigen,
+            construct=entry.construct,
+        )
+    if entry.business_line == "mrna_lnp":
+        base_records = _build_alias_records(
+            ("canonical_name", entry.canonical_name),
+            ("catalog_no", entry.catalog_no),
+            ("product_type", entry.product_type),
+            ("format_or_size", entry.format_or_size),
+            ("platform", "mRNA-Lipid Nanoparticle"),
+        )
+        return _expand_mrna_lnp_alias_records(
+            base_records,
+            canonical_name=entry.canonical_name,
         )
     return _dedupe_alias_records(
         _build_alias_records(
