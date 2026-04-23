@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from src.agent.state import AgentState
@@ -27,6 +28,24 @@ from src.objects.resolution import resolve_objects
 from src.responser import ResponseInput, build_response_bundle
 from src.routing import route
 
+
+logger = logging.getLogger(__name__)
+
+# Phase 1 gate: RAG confidence is observed and logged, but does NOT yet trigger
+# a handoff override. Flip to True only after the observed distribution from
+# real traffic has been used to define low/medium/high thresholds.
+_RAG_CONFIDENCE_HANDOFF_ENABLED = False
+
+
+def _extract_rag_confidence(execution_result: ExecutionResult) -> dict[str, Any] | None:
+    """Pull retrieval_confidence off the first technical_rag_tool call, if any."""
+    for call in execution_result.executed_calls:
+        if call.tool_name != "technical_rag_tool" or call.result is None:
+            continue
+        confidence = call.result.structured_facts.get("retrieval_confidence")
+        if confidence:
+            return dict(confidence)
+    return None
 
 
 def _message_signature(message: dict[str, Any]) -> tuple[str, str, str]:
@@ -271,6 +290,16 @@ def _build_agent_input_payload(
 ) -> dict[str, Any]:
     parser_context = ingestion_bundle.turn_signals.parser_signals.context
     primary_object = resolved_object_state.primary_object or resolved_object_state.active_object
+    primary_label = ""
+    primary_type = ""
+    if primary_object is not None:
+        primary_label = (
+            primary_object.canonical_value
+            or primary_object.display_name
+            or primary_object.identifier
+            or ""
+        )
+        primary_type = primary_object.object_type
     route_decision = agent_state.primary_route_decision
     clarification = agent_state.primary_clarification
     return {
@@ -283,6 +312,9 @@ def _build_agent_input_payload(
             if clarification is not None
             else list(ingestion_bundle.turn_signals.parser_signals.missing_information)
         ),
+        "active_service_name": primary_label if primary_type == "service" else "",
+        "active_product_name": primary_label if primary_type == "product" else "",
+        "active_target": primary_label if primary_type == "scientific_target" else "",
         "resolved_object_state": resolved_object_state.model_dump(mode="json"),
         "routing_debug": {
             "action": agent_state.overall_action,
@@ -625,6 +657,30 @@ def _run_agent_loop(
                 reason=f"No execution needed: action={route_decision.action}",
             )
             status = "resolved"
+
+        # Post-execution RAG confidence override (per-group).
+        # Phase 1: log only; override stays dark behind _RAG_CONFIDENCE_HANDOFF_ENABLED.
+        if route_decision.action == "execute":
+            rag_confidence = _extract_rag_confidence(execution_result)
+            if rag_confidence is not None:
+                logger.info(
+                    "rag_confidence thread=%s confidence=%s",
+                    ingestion_bundle.turn_core.thread_id,
+                    rag_confidence,
+                )
+                if (
+                    _RAG_CONFIDENCE_HANDOFF_ENABLED
+                    and rag_confidence.get("level") == "low"
+                ):
+                    route_decision = route_decision.model_copy(update={"action": "handoff"})
+                    execution_result = empty_execution_result(
+                        reason=(
+                            "rag confidence too low: "
+                            f"top_final={rag_confidence.get('top_final_score', 0.0):.3f} "
+                            f"margin={rag_confidence.get('top_margin', 0.0):.3f}"
+                        ),
+                    )
+                    status = "needs_handoff"
 
         agent_state.record(
             group, route_decision, execution_result,
