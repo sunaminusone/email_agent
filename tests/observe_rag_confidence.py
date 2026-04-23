@@ -80,6 +80,46 @@ CORPUS: list[tuple[str, str, dict[str, Any]]] = [
     ("irrelevant", "What's the weather today in Boston?", {}),
     ("irrelevant", "Can you recommend a good restaurant?", {}),
     ("irrelevant", "Tell me about COVID vaccines", {}),
+
+    # --- V. Signal-rich scenarios (for variant contribution analysis) ---
+    # Each row here aims to activate multiple variant kinds so that
+    # observe_rag_variant_contribution can measure per-kind contribution.
+    # See project_rag_architecture_backlog.md item A.
+    ("high", "How should I validate it for specificity?",
+        {"active_service_name": "Antibody production",
+         "business_line_hint": "antibody",
+         "retrieval_context": {
+             "experiment_type": "ELISA",
+             "usage_context": "validation assay",
+             "pain_point": "low yield",
+             "keywords": ["specificity", "low yield"],
+         }}),
+    ("high", "We need FDA-compliant antibody production with full audit trail",
+        {"active_service_name": "Antibody production",
+         "business_line_hint": "antibody",
+         "retrieval_context": {
+             "regulatory_or_compliance_note": "FDA IND requirements",
+             "keywords": ["audit trail", "batch documentation"],
+         }}),
+    ("high", "Which of these antibodies works best for flow cytometry?",
+        {"business_line_hint": "antibody",
+         "product_names": ["clone 12G3 anti-CD3", "polyclonal anti-CD3", "OKT3"],
+         "retrieval_context": {"experiment_type": "flow cytometry"}}),
+    ("high", "Tell me about the workflow",
+        {"active_service_name": "Antibody production",
+         "business_line_hint": "antibody",
+         "retrieval_hints": {
+             "expanded_queries": [
+                 "hybridoma screening process",
+                 "antibody purification steps",
+             ]
+         }}),
+    ("medium", "What about the validation data?",
+        {"active_service_name": "Antibody production",
+         "business_line_hint": "antibody"}),
+    ("medium", "Which cell lines does this platform use?",
+        {"active_service_name": "CAR-T cell therapy",
+         "business_line_hint": "car_t_car_nk"}),
 ]
 
 

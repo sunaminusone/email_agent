@@ -47,7 +47,7 @@ _KEYWORD_BOOST: float = 0.04
 # Recall pool is independent of caller's top_k — biencoder may rank the best chunk mid-pack.
 _VECTOR_SEARCH_K: int = 80
 _RERANK_POOL_SIZE: int = 60
-_QUERY_VARIANT_LIMIT: int = 6
+_QUERY_VARIANT_LIMIT: int = 5
 
 
 def _normalize_text(text: str) -> str:
@@ -154,7 +154,6 @@ def _build_query_variants(
     *,
     query: str,
     rewritten_query: str = "",
-    contextual_query_specs: List[Dict[str, str]] | None = None,
     active_product_name: str = "",
     active_service_name: str = "",
     product_names: List[str] | None = None,
@@ -164,8 +163,6 @@ def _build_query_variants(
     plans: List[Dict[str, str]] = [{"query": query.strip(), "kind": "original"}]
     if rewritten_query:
         plans.append({"query": rewritten_query.strip(), "kind": "rewrite_scope"})
-
-    plans.extend(contextual_query_specs or [])
 
     for entity_query in [active_product_name, active_service_name]:
         cleaned = str(entity_query or "").strip()
@@ -185,10 +182,6 @@ def _build_query_variants(
     per_kind_limits = {
         "original": 1,
         "rewrite_scope": 1,
-        "context_experiment": 1,
-        "context_usage": 1,
-        "context_keyword": 1,
-        "context_note": 1,
         "active_entity": 1,
         "entity_name": 1,
         "intent_expansion": 1,
@@ -421,8 +414,6 @@ def _compute_soft_score(
 def _variant_group(kind: str) -> str:
     if kind in {"original", "rewrite_scope"}:
         return "scope"
-    if kind.startswith("context_"):
-        return "context"
     if kind in {"active_entity", "entity_name"}:
         return "entity"
     if kind == "intent_expansion":
@@ -723,7 +714,6 @@ def retrieve_chunks(
     product_names: List[str] | None = None,
     service_names: List[str] | None = None,
     expanded_queries: List[str] | None = None,
-    contextual_query_specs: List[Dict[str, str]] | None = None,
     intent_bucket: str = "",
     retrieval_context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
@@ -731,7 +721,6 @@ def retrieve_chunks(
     query_variant_plan = _build_query_variants(
         query=query,
         rewritten_query=rewritten_query,
-        contextual_query_specs=contextual_query_specs,
         active_product_name=active_product_name,
         active_service_name=active_service_name,
         product_names=product_names,

@@ -70,7 +70,6 @@ _EXPANSION_DENYLIST = (
 )
 
 _MAX_EXPANDED_QUERIES = 4
-_MAX_CONTEXTUAL_QUERIES = 4
 
 
 def _first_value(values: Any) -> str:
@@ -121,67 +120,7 @@ def _normalize_retrieval_context(
     if keywords:
         normalized["keywords"] = _dedupe_variants(keywords)
 
-    other_notes = [
-        str(item).strip()
-        for item in (raw_context.get("other_notes") or [])
-        if str(item).strip()
-    ]
-    if other_notes:
-        normalized["other_notes"] = _dedupe_variants(other_notes)
-
     return normalized
-
-
-def _build_contextual_queries(
-    *,
-    query: str,
-    retrieval_context: Mapping[str, Any] | None = None,
-) -> list[dict[str, str]]:
-    context = _normalize_retrieval_context(retrieval_context)
-    if not context:
-        return []
-
-    query_value = query.strip()
-    contextual_queries: list[dict[str, str]] = []
-    normalized_query = normalize_scope_query(query)
-    # Only subject-like fields go into query concat. Intent-describing fields
-    # (pain_point / customer_goal / requested_action / regulatory_or_compliance_note)
-    # stay in retrieval_context for chunk-side metadata boost in
-    # compute_retrieval_context_matches + _compute_soft_score, and do NOT
-    # pollute embedding-space queries.
-    field_order = (
-        ("experiment_type", "context_experiment"),
-        ("usage_context", "context_usage"),
-    )
-
-    seen_terms = set()
-
-    def _append_term(term: str, kind: str) -> None:
-        normalized_term = normalize_scope_query(term)
-        if not normalized_term or normalized_term in seen_terms:
-            return
-        seen_terms.add(normalized_term)
-        if normalized_term in normalized_query:
-            return
-        contextual_queries.append(
-            {
-                "query": f"{query_value} {term}".strip(),
-                "kind": kind,
-            }
-        )
-
-    for key, kind in field_order:
-        value = str(context.get(key) or "").strip()
-        if value:
-            _append_term(value, kind)
-
-    for keyword in context.get("keywords", []):
-        _append_term(str(keyword), "context_keyword")
-
-    for note in context.get("other_notes", []):
-        _append_term(str(note), "context_note")
-
-    return contextual_queries[:_MAX_CONTEXTUAL_QUERIES]
 
 
 def _default_scope_context(
@@ -446,16 +385,11 @@ def build_retrieval_queries(
         intent_bucket=intent_bucket,
         retrieval_hints=retrieval_hints,
     )
-    contextual_query_specs = _build_contextual_queries(
-        query=query,
-        retrieval_context=retrieval_context,
-    )
 
     return {
         "primary_query": str(query or "").strip(),
         "rewritten_query": rewritten_query,
         "expanded_queries": expanded_queries,
-        "contextual_query_specs": contextual_query_specs,
         "rewrite_reason": rewrite_reason,
         "intent_bucket": intent_bucket,
         "used_llm_contextualizer": False,
@@ -503,7 +437,6 @@ def retrieve_technical_knowledge(
         product_names=product_names,
         service_names=service_names,
         expanded_queries=query_plan["expanded_queries"],
-        contextual_query_specs=query_plan["contextual_query_specs"],
         intent_bucket=query_plan["intent_bucket"],
         retrieval_context=query_plan["retrieval_context"],
     )
@@ -555,7 +488,6 @@ def retrieve_technical_knowledge(
             "rewrite_reason": query_plan["rewrite_reason"],
             "intent_bucket": query_plan["intent_bucket"],
             "expanded_queries": query_plan["expanded_queries"],
-            "contextual_query_specs": query_plan["contextual_query_specs"],
             "retrieval_context": query_plan["retrieval_context"],
             "used_llm_contextualizer": query_plan["used_llm_contextualizer"],
             "variant_observability": result.get("variant_observability", {}),

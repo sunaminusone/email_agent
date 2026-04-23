@@ -25,14 +25,6 @@ def _build_retrieval_context(request: ToolRequest) -> dict[str, Any]:
         if value:
             context[field_name] = value
 
-    other_notes = [
-        str(note).strip()
-        for note in (tool_constraints.get("other_notes") or [])
-        if str(note).strip()
-    ]
-    if other_notes:
-        context["other_notes"] = other_notes
-
     keywords = [
         str(keyword).strip()
         for keyword in (retrieval_hints.get("keywords") or [])

@@ -42,7 +42,6 @@ def test_build_rag_lookup_params_normalizes_parser_context_into_retrieval_contex
                 "experiment_type": "ELISA",
                 "usage_context": "validation assay",
                 "pain_point": "low yield",
-                "other_notes": ["needs reproducibility"],
             },
             scope={
                 "active_service_name": "Antibody production",
@@ -58,59 +57,8 @@ def test_build_rag_lookup_params_normalizes_parser_context_into_retrieval_contex
         "usage_context": "validation assay",
         "experiment_type": "ELISA",
         "pain_point": "low yield",
-        "other_notes": ["needs reproducibility"],
         "keywords": ["low yield", "ELISA"],
     }
-
-
-def test_build_retrieval_queries_uses_retrieval_context_for_contextual_queries() -> None:
-    plan = build_retrieval_queries(
-        query="How should I validate it?",
-        retrieval_context={
-            "experiment_type": "ELISA",
-            "usage_context": "validation assay",
-            "pain_point": "low yield",
-            "keywords": ["specificity"],
-        },
-        active_service_name="Antibody production",
-        service_names=["Antibody production"],
-        scope_context={
-            "query": "How should I validate it?",
-            "active_service_name": "Antibody production",
-            "context": {"primary_intent": "technical_question"},
-            "entities": {
-                "service_names": [],
-                "product_names": [],
-                "catalog_numbers": [],
-                "targets": [],
-            },
-            "product_lookup_keys": {
-                "service_names": [],
-                "product_names": [],
-                "catalog_numbers": [],
-                "targets": [],
-            },
-            "routing_memory": {
-                "should_stick_to_active_route": True,
-            },
-            "turn_resolution": {
-                "turn_type": "follow_up",
-            },
-            "session_payload": {
-                "active_entity": {
-                    "entity_kind": "service",
-                },
-                "active_service_name": "Antibody production",
-            },
-        },
-    )
-
-    assert plan["rewritten_query"] == "How should I validate Antibody production?"
-    assert plan["retrieval_context"]["experiment_type"] == "ELISA"
-    contextual_query_texts = [item["query"] for item in plan["contextual_query_specs"]]
-    assert any("ELISA" in item for item in contextual_query_texts)
-    assert any("validation assay" in item for item in contextual_query_texts)
-    assert any("specificity" in item for item in contextual_query_texts)
 
 
 def test_execute_technical_rag_lookup_passes_retrieval_context_without_signature_break() -> None:
@@ -161,16 +109,10 @@ def test_execute_technical_rag_lookup_passes_retrieval_context_without_signature
     assert "usage_context" not in captured
 
 
-def test_query_variant_plan_preserves_context_diversity() -> None:
+def test_query_variant_plan_preserves_kind_diversity() -> None:
     variants = _build_query_variants(
         query="How should I validate it?",
         rewritten_query="How should I validate Antibody production?",
-        contextual_query_specs=[
-            {"query": "How should I validate it? ELISA", "kind": "context_experiment"},
-            {"query": "How should I validate it? validation assay", "kind": "context_usage"},
-            {"query": "How should I validate it? audit trail", "kind": "context_note"},
-            {"query": "How should I validate it? specificity", "kind": "context_keyword"},
-        ],
         active_service_name="Antibody production",
         service_names=["Antibody production", "Antibody production service"],
         expanded_queries=[
@@ -184,9 +126,8 @@ def test_query_variant_plan_preserves_context_diversity() -> None:
 
     assert kinds[0] == "original"
     assert "rewrite_scope" in kinds
-    assert "context_experiment" in kinds
-    assert "context_usage" in kinds
-    assert "context_keyword" in kinds or "context_note" in kinds
+    assert "active_entity" in kinds
+    assert "intent_expansion" in kinds
     assert queries.count("Antibody production") <= 1
 
 
@@ -367,7 +308,7 @@ def test_context_matching_prefers_metadata_fields() -> None:
 def test_variant_observability_aggregates_kind_contributions() -> None:
     query_variant_plan = [
         {"query": "q1", "kind": "original"},
-        {"query": "q2", "kind": "context_experiment"},
+        {"query": "q2", "kind": "active_entity"},
     ]
     raw_matches = [
         {
@@ -375,11 +316,11 @@ def test_variant_observability_aggregates_kind_contributions() -> None:
             "metadata": {"chunk_key": "a"},
         },
         {
-            "query_variant_kind": "context_experiment",
+            "query_variant_kind": "active_entity",
             "metadata": {"chunk_key": "b"},
         },
         {
-            "query_variant_kind": "context_experiment",
+            "query_variant_kind": "active_entity",
             "metadata": {"chunk_key": "a"},
         },
     ]
@@ -389,7 +330,7 @@ def test_variant_observability_aggregates_kind_contributions() -> None:
             "metadata": {"chunk_key": "a"},
         },
         {
-            "query_variant_kind": "context_experiment",
+            "query_variant_kind": "active_entity",
             "metadata": {"chunk_key": "b"},
         },
     ]
@@ -405,7 +346,7 @@ def test_variant_observability_aggregates_kind_contributions() -> None:
     )
 
     original = observability["stats_by_kind"]["original"]
-    context = observability["stats_by_kind"]["context_experiment"]
+    context = observability["stats_by_kind"]["active_entity"]
 
     assert original["raw_hits"] == 1
     assert original["unique_hits"] == 1
@@ -433,7 +374,7 @@ def test_execute_technical_rag_lookup_exposes_variant_observability() -> None:
             "retrieval_debug": {
                 "variant_observability": {
                     "stats_by_kind": {
-                        "context_experiment": {"hits_in_final_top_k": 1},
+                        "active_entity": {"hits_in_final_top_k": 1},
                     }
                 }
             },
@@ -442,4 +383,4 @@ def test_execute_technical_rag_lookup_exposes_variant_observability() -> None:
     with patch("src.rag.service.retrieve_technical_knowledge", side_effect=_fake_retrieve):
         result = execute_technical_rag_lookup(request)
 
-    assert result.structured_facts["variant_observability"]["stats_by_kind"]["context_experiment"]["hits_in_final_top_k"] == 1
+    assert result.structured_facts["variant_observability"]["stats_by_kind"]["active_entity"]["hits_in_final_top_k"] == 1
