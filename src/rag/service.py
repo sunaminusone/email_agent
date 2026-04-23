@@ -5,10 +5,11 @@ from typing import Any, Dict, List, Mapping
 
 from src.rag.query_scope import (
     canonicalize_service_name,
+    detect_intent_bucket,
     normalize_scope_query,
     query_has_product_scope_marker,
-    query_matches_non_technical_fallback_path,
     query_has_service_scope_marker,
+    query_mentions_scope,
     resolve_effective_scope,
 )
 from src.rag.retriever import retrieve_chunks
@@ -177,65 +178,6 @@ def _default_scope_context(
     }
 
 
-def _resolve_retrieval_scope(
-    *,
-    query: str,
-    active_service_name: str,
-    active_product_name: str,
-    product_names: List[str],
-    service_names: List[str],
-    scope_context: Mapping[str, Any] | None,
-) -> dict[str, str]:
-    scope_input = dict(scope_context or _default_scope_context(
-        query=query,
-        active_service_name=active_service_name,
-        active_product_name=active_product_name,
-        product_names=product_names,
-        service_names=service_names,
-    ))
-
-    resolved_scope = resolve_effective_scope(scope_input)
-    if resolved_scope.get("scope_type"):
-        return resolved_scope
-
-    if active_service_name and _query_mentions_scope(query, active_service_name):
-        return {
-            "scope_type": "service",
-            "source": "current",
-            "name": active_service_name,
-            "reason": "query_mentions_active_service_name",
-        }
-    if active_product_name and _query_mentions_scope(query, active_product_name):
-        return {
-            "scope_type": "product",
-            "source": "current",
-            "name": active_product_name,
-            "reason": "query_mentions_active_product_name",
-        }
-
-    if active_service_name and not query_matches_non_technical_fallback_path(query):
-        # An active service is a strong anchor: any technical-ish query should
-        # be retrieved within that service's scope. The intent-bucket whitelist
-        # previously here excluded `general_technical`, which silently dropped
-        # pronoun/short queries like "How does it work?" — query_matches_non_
-        # technical_fallback_path is the authoritative gate for non-technical.
-        service_intent_bucket = _detect_intent_bucket(query)
-        return {
-            "scope_type": "service",
-            "source": "active",
-            "name": active_service_name,
-            "reason": f"active_service_retrieval_fallback_{service_intent_bucket}",
-        }
-
-    return resolved_scope
-
-
-def _query_mentions_scope(query: str, scope_name: str) -> bool:
-    normalized_query = normalize_scope_query(query)
-    normalized_scope = normalize_scope_query(scope_name)
-    return bool(normalized_scope and normalized_scope in normalized_query)
-
-
 def _is_context_dependent_query(query: str) -> bool:
     normalized_query = normalize_scope_query(query)
     if not normalized_query:
@@ -243,21 +185,6 @@ def _is_context_dependent_query(query: str) -> bool:
     if any(pattern.search(query) for pattern in _CONTEXT_DEPENDENT_QUERY_PATTERNS):
         return True
     return len(normalized_query.split()) <= 7
-
-
-def _detect_intent_bucket(query: str) -> str:
-    normalized_query = normalize_scope_query(query)
-    if not normalized_query:
-        return "general_technical"
-
-    if any(term in normalized_query for term in ("service plan", "plan", "timeline", "phase", "stages")):
-        return "service_plan"
-    if any(term in normalized_query for term in ("workflow", "next step", "happens next", "what happens next", "process", "after")):
-        return "workflow"
-    if any(term in normalized_query for term in ("model", "models", "cell types")):
-        return "model_support"
-
-    return "general_technical"
 
 
 def _is_expansion_eligible(query: str, scope: Mapping[str, str], intent_bucket: str) -> bool:
@@ -333,22 +260,24 @@ def build_retrieval_queries(
     product_names = product_names or []
     service_names = service_names or []
 
-    effective_scope = _resolve_retrieval_scope(
+    scope_input = _default_scope_context(
         query=query,
         active_service_name=active_service_name,
         active_product_name=active_product_name,
         product_names=product_names,
         service_names=service_names,
-        scope_context=scope_context,
     )
+    if scope_context:
+        scope_input.update(scope_context)
+    effective_scope = resolve_effective_scope(scope_input)
 
     rewrite_reason = "no_rewrite_no_scope"
     rewritten_query = ""
-    intent_bucket = _detect_intent_bucket(query)
+    intent_bucket = detect_intent_bucket(query)
 
     if not effective_scope.get("scope_type"):
         rewrite_reason = f"no_rewrite_{effective_scope.get('reason', 'no_scope')}"
-    elif _query_mentions_scope(query, effective_scope.get("name", "")):
+    elif query_mentions_scope(query, effective_scope.get("name", "")):
         rewrite_reason = "no_rewrite_query_already_scoped"
     else:
         normalized_query = normalize_scope_query(query)

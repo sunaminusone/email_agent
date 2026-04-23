@@ -103,6 +103,27 @@ def is_service_scoped_follow_up(query: str, active_service_name: str) -> bool:
     return bool(str(active_service_name or "").strip()) and query_has_service_scope_marker(query)
 
 
+def query_mentions_scope(query: str, scope_name: str) -> bool:
+    normalized_query = normalize_scope_query(query)
+    normalized_scope = normalize_scope_query(scope_name)
+    return bool(normalized_scope and normalized_scope in normalized_query)
+
+
+def detect_intent_bucket(query: str) -> str:
+    normalized_query = normalize_scope_query(query)
+    if not normalized_query:
+        return "general_technical"
+
+    if any(term in normalized_query for term in ("service plan", "plan", "timeline", "phase", "stages")):
+        return "service_plan"
+    if any(term in normalized_query for term in ("workflow", "next step", "happens next", "what happens next", "process", "after")):
+        return "workflow"
+    if any(term in normalized_query for term in ("model", "models", "cell types")):
+        return "model_support"
+
+    return "general_technical"
+
+
 def _first_value(values: Any) -> str:
     if isinstance(values, list):
         for value in values:
@@ -288,18 +309,11 @@ def resolve_active_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
     if current_scope["scope_type"]:
         return _no_scope(f"blocked_by_{current_scope['reason']}")
 
-    if not _is_continuation_turn(agent_input):
-        return _no_scope("blocked_by_non_continuation_turn")
-
     query = _query(agent_input)
     if query_matches_non_technical_fallback_path(query):
         return _no_scope("blocked_by_non_technical_path")
 
     session_payload = _session_payload(agent_input)
-    active_entity = _active_entity(agent_input)
-    prior_active_entity = _prior_active_entity(agent_input)
-    current_active_entity_kind = str(active_entity.get("entity_kind") or "").strip()
-    prior_active_entity_kind = str(prior_active_entity.get("entity_kind") or "").strip()
     active_service_name = str(
         agent_input.get("active_service_name")
         or session_payload.get("active_service_name")
@@ -311,31 +325,64 @@ def resolve_active_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
         or ""
     ).strip()
 
-    if current_active_entity_kind in {"service", "product"}:
-        active_entity_kind = current_active_entity_kind
-    elif prior_active_entity_kind in {"service", "product"}:
-        active_entity_kind = prior_active_entity_kind
-    elif active_service_name:
-        active_entity_kind = "service"
-    elif active_product_name:
-        active_entity_kind = "product"
-    else:
-        active_entity_kind = current_active_entity_kind or prior_active_entity_kind
+    if active_service_name and query_mentions_scope(query, active_service_name):
+        return _resolved_scope(
+            "service",
+            "current",
+            active_service_name,
+            "query_mentions_active_service_name",
+        )
+    if active_product_name and query_mentions_scope(query, active_product_name):
+        return _resolved_scope(
+            "product",
+            "current",
+            active_product_name,
+            "query_mentions_active_product_name",
+        )
 
-    if active_entity_kind == "service" and is_service_scoped_follow_up(query, active_service_name):
+    if _is_continuation_turn(agent_input):
+        active_entity = _active_entity(agent_input)
+        prior_active_entity = _prior_active_entity(agent_input)
+        current_active_entity_kind = str(active_entity.get("entity_kind") or "").strip()
+        prior_active_entity_kind = str(prior_active_entity.get("entity_kind") or "").strip()
+
+        if current_active_entity_kind in {"service", "product"}:
+            active_entity_kind = current_active_entity_kind
+        elif prior_active_entity_kind in {"service", "product"}:
+            active_entity_kind = prior_active_entity_kind
+        elif active_service_name:
+            active_entity_kind = "service"
+        elif active_product_name:
+            active_entity_kind = "product"
+        else:
+            active_entity_kind = current_active_entity_kind or prior_active_entity_kind
+
+        if active_entity_kind == "service" and is_service_scoped_follow_up(query, active_service_name):
+            return _resolved_scope(
+                "service",
+                "active",
+                active_service_name,
+                "active_service_follow_up_matched_service_scope_markers",
+            )
+
+        if active_entity_kind == "product" and active_product_name and query_has_product_scope_marker(query):
+            return _resolved_scope(
+                "product",
+                "active",
+                active_product_name,
+                "active_product_follow_up_matched_product_scope_markers",
+            )
+
+    # An active service is a strong anchor: any technical-ish query (already
+    # past the non_technical_fallback gate above) should retrieve within that
+    # service's scope even on cold-start turns without a follow-up marker.
+    if active_service_name:
+        intent_bucket = detect_intent_bucket(query)
         return _resolved_scope(
             "service",
             "active",
             active_service_name,
-            "active_service_follow_up_matched_service_scope_markers",
-        )
-
-    if active_entity_kind == "product" and active_product_name and query_has_product_scope_marker(query):
-        return _resolved_scope(
-            "product",
-            "active",
-            active_product_name,
-            "active_product_follow_up_matched_product_scope_markers",
+            f"active_service_retrieval_fallback_{intent_bucket}",
         )
 
     return _no_scope("no_active_scope")
@@ -404,12 +451,14 @@ __all__ = [
     "PRODUCT_SCOPE_QUERY_PATTERNS",
     "SERVICE_SCOPE_QUERY_PATTERNS",
     "canonicalize_service_name",
+    "detect_intent_bucket",
     "has_current_scope",
     "is_service_scoped_follow_up",
     "normalize_scope_query",
     "query_has_product_scope_marker",
     "query_matches_non_technical_fallback_path",
     "query_has_service_scope_marker",
+    "query_mentions_scope",
     "resolve_active_scope",
     "resolve_current_scope",
     "resolve_effective_scope",
