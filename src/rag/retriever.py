@@ -1,8 +1,10 @@
 import re
 from typing import Any, Dict, List, Set
 
+from src.rag.context_matching import compute_retrieval_context_matches
 from src.rag.reranker import rerank_matches
 from src.rag.service_page_ingestion import load_service_page_documents
+from src.rag.terminology import find_explicit_terms, find_volume_ref
 from src.rag.vectorstore import get_vectorstore
 
 
@@ -32,9 +34,20 @@ _TIER_SUPPLEMENTARY_PHASE = 3
 _TIER_PLAN_COMPARISON = 4
 _TIER_DEFAULT = 5
 
-_ACTIVE_SERVICE_BOOST: float = 0.15
+_ACTIVE_ENTITY_BOOST: float = 0.15
+_ACTIVE_BUSINESS_LINE_BOOST: float = 0.06
 _EXPLICIT_TERM_EXACT_BOOST: float = 0.20
 _EXPLICIT_TERM_ONLY_BOOST: float = 0.10
+_EXPERIMENT_TYPE_BOOST: float = 0.16
+_USAGE_CONTEXT_BOOST: float = 0.12
+_PAIN_POINT_BOOST: float = 0.09
+_GOAL_OR_ACTION_BOOST: float = 0.06
+_KEYWORD_BOOST: float = 0.04
+
+# Recall pool is independent of caller's top_k — biencoder may rank the best chunk mid-pack.
+_VECTOR_SEARCH_K: int = 80
+_RERANK_POOL_SIZE: int = 60
+_QUERY_VARIANT_LIMIT: int = 6
 
 
 def _normalize_text(text: str) -> str:
@@ -90,19 +103,6 @@ def _extract_after_step(query: str) -> str:
     return ""
 
 
-def _extract_volume_ref(query: str) -> str:
-    normalized = _normalize_text(query)
-    volume_patterns = [
-        (r"\b1\s*liter\b", "1 liter"),
-        (r"\b500\s*(?:ml|milliliter|milliliters)\b", "500 milliliters"),
-        (r"\b100\s*(?:ml|milliliter|milliliters)\b", "100 milliliters"),
-    ]
-    for pattern, label in volume_patterns:
-        if re.search(pattern, normalized):
-            return label
-    return ""
-
-
 def _is_plan_comparison_query(query: str) -> bool:
     lowered = _normalize_text(query)
     if not lowered:
@@ -112,35 +112,106 @@ def _is_plan_comparison_query(query: str) -> bool:
     return mentions_both_plans and any(marker in lowered for marker in comparison_markers)
 
 
+def _compute_retrieval_confidence(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute observable confidence signals for the top-k retrieved matches.
+
+    Phase 1: level is always "observed" — downstream must not act on it as
+    a decision signal yet. Gather real distributions first, then define
+    low/medium/high thresholds in a later iteration.
+    """
+    if not matches:
+        return {
+            "level": "observed",
+            "top_final_score": 0.0,
+            "top_base_score": 0.0,
+            "top_margin": 0.0,
+            "matches_count": 0,
+            "top_query_variant": "",
+            "top_is_synthesized": False,
+        }
+
+    top = matches[0]
+    top_final = float(top.get("final_score", 0.0))
+    top_breakdown = top.get("score_breakdown") or {}
+    top_base = float(top_breakdown.get("base", 0.0))
+    top_variant = str(top.get("query_variant", "") or "")
+
+    rest_finals = [float(m.get("final_score", 0.0)) for m in matches[1:4]]
+    top_margin = top_final - (sum(rest_finals) / len(rest_finals)) if rest_finals else 0.0
+
+    return {
+        "level": "observed",
+        "top_final_score": top_final,
+        "top_base_score": top_base,
+        "top_margin": top_margin,
+        "matches_count": len(matches),
+        "top_query_variant": top_variant,
+        "top_is_synthesized": top_variant in {"exact_phase_priority", "explicit_term_fallback"},
+    }
+
+
 def _build_query_variants(
     *,
     query: str,
     rewritten_query: str = "",
+    contextual_query_specs: List[Dict[str, str]] | None = None,
     active_product_name: str = "",
     active_service_name: str = "",
-    active_target: str = "",
     product_names: List[str] | None = None,
     service_names: List[str] | None = None,
-    targets: List[str] | None = None,
     expanded_queries: List[str] | None = None,
-) -> List[str]:
-    variants = [query.strip()]
+) -> List[Dict[str, str]]:
+    plans: List[Dict[str, str]] = [{"query": query.strip(), "kind": "original"}]
     if rewritten_query:
-        variants.append(rewritten_query.strip())
-    variants.extend([active_product_name, active_service_name, active_target])
-    variants.extend(product_names or [])
-    variants.extend(service_names or [])
-    variants.extend(targets or [])
-    variants.extend(expanded_queries or [])
+        plans.append({"query": rewritten_query.strip(), "kind": "rewrite_scope"})
 
-    deduped: List[str] = []
-    seen = set()
-    for variant in variants:
-        normalized = _normalize_text(variant)
-        if not normalized or normalized in seen:
+    plans.extend(contextual_query_specs or [])
+
+    for entity_query in [active_product_name, active_service_name]:
+        cleaned = str(entity_query or "").strip()
+        if cleaned:
+            plans.append({"query": cleaned, "kind": "active_entity"})
+
+    for variant in product_names or []:
+        plans.append({"query": str(variant).strip(), "kind": "entity_name"})
+    for variant in service_names or []:
+        plans.append({"query": str(variant).strip(), "kind": "entity_name"})
+    for variant in expanded_queries or []:
+        plans.append({"query": str(variant).strip(), "kind": "intent_expansion"})
+
+    deduped: List[Dict[str, str]] = []
+    seen_queries = set()
+    per_kind_counts: Dict[str, int] = {}
+    per_kind_limits = {
+        "original": 1,
+        "rewrite_scope": 1,
+        "context_experiment": 1,
+        "context_usage": 1,
+        "context_pain_point": 1,
+        "context_goal": 1,
+        "context_action": 1,
+        "context_regulatory": 1,
+        "context_keyword": 1,
+        "context_note": 1,
+        "active_entity": 1,
+        "entity_name": 1,
+        "intent_expansion": 1,
+    }
+
+    for plan in plans:
+        query_text = str(plan.get("query") or "").strip()
+        normalized = _normalize_text(query_text)
+        if not normalized or normalized in seen_queries:
             continue
-        seen.add(normalized)
-        deduped.append(variant.strip())
+        kind = str(plan.get("kind") or "unknown").strip() or "unknown"
+        if per_kind_counts.get(kind, 0) >= per_kind_limits.get(kind, 1):
+            continue
+        seen_queries.add(normalized)
+        per_kind_counts[kind] = per_kind_counts.get(kind, 0) + 1
+        deduped.append({"query": query_text, "kind": kind})
+        if len(deduped) >= _QUERY_VARIANT_LIMIT:
+            break
+
     return deduped
 
 
@@ -153,12 +224,32 @@ def _match_key(metadata: Dict[str, Any]) -> Any:
 
 
 def _service_label(metadata: Dict[str, Any]) -> str:
+    # Used only by service-discovery paths (_best_service_match,
+    # _exact_phase_priority_matches, _explicit_term_priority_matches) where
+    # the caller has already decided the scope is service. For entity-aware
+    # active-entity scoring, use _entity_matches instead.
     return str(
         metadata.get("parent_service")
         or metadata.get("service_name")
         or metadata.get("page_title")
+        or metadata.get("entity_name")
         or ""
     ).strip()
+
+
+def _entity_matches(metadata: Dict[str, Any], kind: str, canonical_normalized: str) -> bool:
+    # Type-aware match for the Layer-2 active-entity boost. Requires the
+    # chunk's entity_type to equal `kind` so a product chunk cannot match
+    # active_service (or vice versa) via string equality on entity_name.
+    # Both service_page_ingestion and email_knowledge_extraction set
+    # entity_type explicitly; legacy chunks without it forfeit the boost.
+    if not canonical_normalized:
+        return False
+    meta_kind = str(metadata.get("entity_type") or "").strip().lower()
+    if meta_kind != kind:
+        return False
+    meta_name = str(metadata.get("entity_name") or "").strip()
+    return bool(meta_name) and _normalize_text(meta_name) == canonical_normalized
 
 
 def _mark_logical_jump_targets(
@@ -229,8 +320,11 @@ def _compute_soft_score(
     match: Dict[str, Any],
     *,
     intent_bucket: str,
-    active_service_name: str,
+    active_service_name: str = "",
+    active_product_name: str = "",
     query: str,
+    retrieval_context: Dict[str, Any] | None = None,
+    business_line_hint: str = "",
 ) -> tuple[float, dict]:
     metadata = match.get("metadata", {})
 
@@ -240,19 +334,29 @@ def _compute_soft_score(
     section_type = str(metadata.get("section_type", "") or "").strip()
     section_type_boost = float(boosts.get(section_type, 0.0))
 
-    normalized_active = _normalize_text(active_service_name)
-    active_service_boost = 0.0
-    if normalized_active and _normalize_text(_service_label(metadata)) == normalized_active:
-        active_service_boost = _ACTIVE_SERVICE_BOOST
+    # Layer-2 active-entity boost. Service and product are checked
+    # independently, but since a chunk's entity_type is single-valued the
+    # two branches are effectively mutually exclusive in practice.
+    active_service_normalized = _normalize_text(active_service_name)
+    active_product_normalized = _normalize_text(active_product_name)
+    active_entity_boost = 0.0
+    if _entity_matches(metadata, "service", active_service_normalized):
+        active_entity_boost = _ACTIVE_ENTITY_BOOST
+    elif _entity_matches(metadata, "product", active_product_normalized):
+        active_entity_boost = _ACTIVE_ENTITY_BOOST
+
+    active_business_line_boost = 0.0
+    if business_line_hint and business_line_hint not in {"unknown", "cross_line"}:
+        if metadata.get("business_line") == business_line_hint:
+            active_business_line_boost = _ACTIVE_BUSINESS_LINE_BOOST
 
     normalized_query = _normalize_text(query)
-    explicit_terms = [t for t in ("purification", "production") if t in normalized_query]
+    explicit_pair = find_explicit_terms(normalized_query, business_line_hint)
     explicit_term_boost = 0.0
 
-    if len(explicit_terms) == 1:
-        target_term = explicit_terms[0]
-        competing_term = "production" if target_term == "purification" else "purification"
-        volume_ref = _extract_volume_ref(query)
+    if explicit_pair is not None:
+        target_term, competing_term = explicit_pair
+        volume_ref = find_volume_ref(normalized_query, business_line_hint)
         text = _explicit_match_text(match)
         has_target = target_term in text
         has_competing = competing_term in text
@@ -263,14 +367,143 @@ def _compute_soft_score(
         elif has_target and not has_competing:
             explicit_term_boost = _EXPLICIT_TERM_ONLY_BOOST
 
-    final_score = base + section_type_boost + active_service_boost + explicit_term_boost
+    retrieval_context = dict(retrieval_context or {})
+    context_matches = compute_retrieval_context_matches(match, retrieval_context)
+    experiment_type_boost = 0.0
+    usage_context_boost = 0.0
+    pain_point_boost = 0.0
+    goal_or_action_boost = 0.0
+    keyword_boost = 0.0
+
+    if context_matches["experiment_type"].get("matched"):
+        experiment_type_boost = _EXPERIMENT_TYPE_BOOST
+
+    if context_matches["usage_context"].get("matched"):
+        usage_context_boost = _USAGE_CONTEXT_BOOST
+
+    if context_matches["pain_point"].get("matched"):
+        pain_point_boost = _PAIN_POINT_BOOST
+
+    if any(
+        context_matches[field].get("matched")
+        for field in ("customer_goal", "requested_action", "regulatory_or_compliance_note")
+    ):
+        goal_or_action_boost = _GOAL_OR_ACTION_BOOST
+
+    matched_keywords = int(context_matches["keywords"].get("matched_count", 0))
+    if matched_keywords:
+        keyword_boost = min(matched_keywords, 2) * _KEYWORD_BOOST
+
+    final_score = (
+        base
+        + section_type_boost
+        + active_entity_boost
+        + active_business_line_boost
+        + explicit_term_boost
+        + experiment_type_boost
+        + usage_context_boost
+        + pain_point_boost
+        + goal_or_action_boost
+        + keyword_boost
+    )
     score_breakdown = {
         "base": base,
         "section_type_boost": section_type_boost,
-        "active_service_boost": active_service_boost,
+        "active_entity_boost": active_entity_boost,
+        "active_business_line_boost": active_business_line_boost,
         "explicit_term_boost": explicit_term_boost,
+        "experiment_type_boost": experiment_type_boost,
+        "usage_context_boost": usage_context_boost,
+        "pain_point_boost": pain_point_boost,
+        "goal_or_action_boost": goal_or_action_boost,
+        "keyword_boost": keyword_boost,
+        "context_matches": context_matches,
     }
     return final_score, score_breakdown
+
+
+def _variant_group(kind: str) -> str:
+    if kind in {"original", "rewrite_scope"}:
+        return "scope"
+    if kind.startswith("context_"):
+        return "context"
+    if kind in {"active_entity", "entity_name"}:
+        return "entity"
+    if kind == "intent_expansion":
+        return "expansion"
+    return "other"
+
+
+def _build_variant_observability(
+    query_variant_plan: List[Dict[str, str]],
+    raw_matches: List[Dict[str, Any]],
+    deduped: List[Dict[str, Any]],
+    reranked_pool: List[Dict[str, Any]],
+    final_matches: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    stats_by_kind: Dict[str, Dict[str, Any]] = {}
+
+    def _ensure(kind: str) -> Dict[str, Any]:
+        if kind not in stats_by_kind:
+            stats_by_kind[kind] = {
+                "variant_group": _variant_group(kind),
+                "planned_queries": 0,
+                "raw_hits": 0,
+                "unique_hits": 0,
+                "hits_survived_dedupe": 0,
+                "hits_survived_rerank": 0,
+                "hits_in_final_top_k": 0,
+                "exclusive_hits": 0,
+            }
+        return stats_by_kind[kind]
+
+    for variant_rank, item in enumerate(query_variant_plan):
+        stats = _ensure(item["kind"])
+        stats["planned_queries"] += 1
+
+    unique_hits_by_kind: Dict[str, set] = {}
+    all_hit_kinds_by_chunk: Dict[Any, set] = {}
+    for raw_rank, match in enumerate(raw_matches):
+        kind = str(match.get("query_variant_kind") or "unknown")
+        stats = _ensure(kind)
+        stats["raw_hits"] += 1
+        chunk_key = _match_key(match.get("metadata", {}))
+        unique_hits_by_kind.setdefault(kind, set()).add(chunk_key)
+        all_hit_kinds_by_chunk.setdefault(chunk_key, set()).add(kind)
+
+    for kind, keys in unique_hits_by_kind.items():
+        _ensure(kind)["unique_hits"] = len(keys)
+
+    for match in deduped:
+        kind = str(match.get("query_variant_kind") or "unknown")
+        _ensure(kind)["hits_survived_dedupe"] += 1
+
+    for match in reranked_pool:
+        kind = str(match.get("query_variant_kind") or "unknown")
+        _ensure(kind)["hits_survived_rerank"] += 1
+
+    for match in final_matches:
+        kind = str(match.get("query_variant_kind") or "unknown")
+        _ensure(kind)["hits_in_final_top_k"] += 1
+
+    for chunk_key, kinds in all_hit_kinds_by_chunk.items():
+        if len(kinds) != 1:
+            continue
+        only_kind = next(iter(kinds))
+        _ensure(only_kind)["exclusive_hits"] += 1
+
+    return {
+        "planned_variants": [
+            {
+                "query": item["query"],
+                "kind": item["kind"],
+                "variant_group": _variant_group(item["kind"]),
+                "variant_rank": index,
+            }
+            for index, item in enumerate(query_variant_plan)
+        ],
+        "stats_by_kind": stats_by_kind,
+    }
 
 
 def _best_service_match(query: str) -> tuple[str, int]:
@@ -327,13 +560,12 @@ def _explicit_term_priority_matches(
     active_service_name: str,
 ) -> List[Dict[str, Any]]:
     normalized_query = _normalize_text(query)
-    explicit_terms = [term for term in ("purification", "production") if term in normalized_query]
-    if len(explicit_terms) != 1:
+    explicit_pair = find_explicit_terms(normalized_query, business_line_hint)
+    if explicit_pair is None:
         return []
 
-    target_term = explicit_terms[0]
-    competing_term = "production" if target_term == "purification" else "purification"
-    volume_ref = _extract_volume_ref(query)
+    target_term, competing_term = explicit_pair
+    volume_ref = find_volume_ref(normalized_query, business_line_hint)
     active_service_normalized = _normalize_text(active_service_name)
 
     preferred: List[Dict[str, Any]] = []
@@ -492,36 +724,38 @@ def retrieve_chunks(
     business_line_hint: str = "",
     active_service_name: str = "",
     active_product_name: str = "",
-    active_target: str = "",
     product_names: List[str] | None = None,
     service_names: List[str] | None = None,
-    targets: List[str] | None = None,
     expanded_queries: List[str] | None = None,
+    contextual_query_specs: List[Dict[str, str]] | None = None,
     intent_bucket: str = "",
+    retrieval_context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     store = get_vectorstore()
-    query_variants = _build_query_variants(
+    query_variant_plan = _build_query_variants(
         query=query,
         rewritten_query=rewritten_query,
+        contextual_query_specs=contextual_query_specs,
         active_product_name=active_product_name,
         active_service_name=active_service_name,
-        active_target=active_target,
         product_names=product_names,
         service_names=service_names,
-        targets=targets,
         expanded_queries=expanded_queries,
     )
+    query_variants = [item["query"] for item in query_variant_plan]
 
     phase_refs = _extract_phase_refs(query)
     after_step = _extract_after_step(query)
 
     raw_matches: List[Dict[str, Any]] = []
-    search_k = max(top_k * 8, 32)
-    if phase_refs:
-        search_k = max(search_k, 64)
+    search_k = _VECTOR_SEARCH_K
 
-    for variant in query_variants[:4]:
-        for document, score in store.similarity_search_with_score(variant, k=search_k):
+    for variant_rank, variant_plan in enumerate(query_variant_plan):
+        variant = variant_plan["query"]
+        variant_kind = variant_plan["kind"]
+        for pre_dedupe_rank, (document, score) in enumerate(
+            store.similarity_search_with_score(variant, k=search_k)
+        ):
             metadata = dict(document.metadata)
             adjusted_score = float(score)
             if business_line_hint and business_line_hint not in {"unknown", "cross_line"}:
@@ -531,6 +765,10 @@ def retrieve_chunks(
             raw_matches.append(
                 {
                     "query_variant": variant,
+                    "query_variant_kind": variant_kind,
+                    "variant_group": _variant_group(variant_kind),
+                    "variant_rank": variant_rank,
+                    "pre_dedupe_rank": pre_dedupe_rank,
                     "score": adjusted_score,
                     "raw_score": float(score),
                     "content": document.page_content,
@@ -544,9 +782,7 @@ def retrieve_chunks(
 
     deduped: List[Dict[str, Any]] = []
     seen_keys = set()
-    candidate_limit = max(top_k * 6, 18)
-    if phase_refs:
-        candidate_limit = max(candidate_limit, 60)
+    candidate_limit = _RERANK_POOL_SIZE
     for match in raw_matches:
         key = _match_key(match["metadata"])
         if key in seen_keys:
@@ -556,7 +792,8 @@ def retrieve_chunks(
         if len(deduped) >= candidate_limit:
             break
 
-    reranked = rerank_matches(query, deduped, top_k=max(top_k * 2, 10))
+    rerank_query = rewritten_query or query
+    reranked_pool = rerank_matches(rerank_query, deduped, top_k=_RERANK_POOL_SIZE)
 
     exact_phase_matches = _exact_phase_priority_matches(
         query=query,
@@ -565,7 +802,7 @@ def retrieve_chunks(
     )
     explicit_fallback = _explicit_term_priority_matches(
         query=query,
-        matches=reranked,
+        matches=reranked_pool,
         all_candidates=deduped,
         business_line_hint=business_line_hint,
         active_service_name=active_service_name,
@@ -583,7 +820,7 @@ def retrieve_chunks(
 
     _add_to_pool(exact_phase_matches)
     _add_to_pool(explicit_fallback)
-    _add_to_pool(reranked)
+    _add_to_pool(reranked_pool)
 
     is_plan_comparison = _is_plan_comparison_query(query)
     unified_pool = _mark_logical_jump_targets(unified_pool, current_step, next_step)
@@ -596,7 +833,10 @@ def retrieve_chunks(
             match,
             intent_bucket=intent_bucket,
             active_service_name=active_service_name,
+            active_product_name=active_product_name,
             query=query,
+            retrieval_context=retrieval_context,
+            business_line_hint=business_line_hint,
         )
         match["priority_tier"] = tier
         match["final_score"] = final_score
@@ -607,6 +847,14 @@ def retrieve_chunks(
     )
 
     reranked = unified_pool[:top_k]
+    confidence = _compute_retrieval_confidence(reranked)
+    variant_observability = _build_variant_observability(
+        query_variant_plan=query_variant_plan,
+        raw_matches=raw_matches,
+        deduped=deduped,
+        reranked_pool=reranked_pool,
+        final_matches=reranked,
+    )
 
     return {
         "retrieval_mode": "chroma_similarity_bge_rerank",
@@ -615,4 +863,6 @@ def retrieve_chunks(
         "business_line_hint": business_line_hint,
         "documents_found": len(reranked),
         "matches": reranked,
+        "confidence": confidence,
+        "variant_observability": variant_observability,
     }
