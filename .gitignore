@@ -1,26 +1,48 @@
-data/
-*.ipynb_checkpoints
+# macOS
+.DS_Store
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Python test / lint caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
-.DS_Store
-.Python
-dist/
-build/
-.eggs/
-*.egg-info/
+
+# Jupyter
+*.ipynb_checkpoints/
+
+# Environments
 .env
 .env.*
+
+# Editor / agent dirs
+.vscode/
+.cursor/
+.claude/
 
 # Vim swap files
 *.swp
 *.swo
 *.swn
 
-# Claude Code project instructions (local only)
-CLAUDE.md
+# Local data (chromadb, tokens, exports)
+data/
+
+# HubSpot CLI auth (local only)
+hubspot.config.yml
+
+# HubSpot card (Node) subtree
+src/app/cards/node_modules/
+src/app/cards/dist/
+src/app/cards/.cache/
+src/app/cards/*.log

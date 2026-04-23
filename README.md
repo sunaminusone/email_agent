@@ -194,3 +194,17 @@ This repository is best understood as an actively evolving architecture prototyp
 - the main agent path is runnable end to end
 - the design docs are deeper than the README and remain the canonical architecture reference
 - some infrastructure and file-path assumptions are still local-development oriented
+
+## HubSpot Training Query Export
+
+To export real inbound customer queries from HubSpot for agent training, set `HUBSPOT_ACCESS_TOKEN` in `.env`, then run:
+
+`python scripts/export_hubspot_training_queries.py --out data/processed/hubspot_training_queries.jsonl`
+
+Useful options:
+
+- `--contact-email user@example.com` to export only specific contacts.
+- `--emails-only` to export only CRM email engagements.
+- `--conversations-only` to export only inbox conversation messages.
+
+The exporter keeps inbound customer-side messages and writes one JSON object per line with `input_text`, contact metadata, timestamp, and recent context.
