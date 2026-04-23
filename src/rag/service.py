@@ -219,7 +219,7 @@ def _resolve_retrieval_scope(
         # previously here excluded `general_technical`, which silently dropped
         # pronoun/short queries like "How does it work?" — query_matches_non_
         # technical_fallback_path is the authoritative gate for non-technical.
-        service_intent_bucket = _detect_intent_bucket(query, "service")
+        service_intent_bucket = _detect_intent_bucket(query)
         return {
             "scope_type": "service",
             "source": "active",
@@ -245,33 +245,17 @@ def _is_context_dependent_query(query: str) -> bool:
     return len(normalized_query.split()) <= 7
 
 
-def _detect_intent_bucket(query: str, scope_type: str) -> str:
+def _detect_intent_bucket(query: str) -> str:
     normalized_query = normalize_scope_query(query)
     if not normalized_query:
         return "general_technical"
 
-    # Scope-agnostic intent keywords: a cold-start query like
-    # "workflow for antibody production" has an obvious intent even before
-    # scope resolution. Previously these buckets were gated on
-    # scope_type == "service", so cold-start queries fell through to
-    # general_technical and missed the _SECTION_TYPE_BOOSTS lookup.
     if any(term in normalized_query for term in ("service plan", "plan", "timeline", "phase", "stages")):
         return "service_plan"
     if any(term in normalized_query for term in ("workflow", "next step", "happens next", "what happens next", "process", "after")):
         return "workflow"
     if any(term in normalized_query for term in ("model", "models", "cell types")):
         return "model_support"
-    if any(term in normalized_query for term in ("validate", "validation", "assay", "quality evidence")):
-        return "validation"
-
-    # product / scientific_target buckets remain scope-gated — "quote" or
-    # "species" are ambiguous in the abstract and only signal these buckets
-    # when the active scope is a product/target.
-    if scope_type in {"product", "scientific_target"}:
-        if any(term in normalized_query for term in ("price", "pricing", "cost", "quote")):
-            return "pricing_detail"
-        if any(term in normalized_query for term in ("application", "validated", "species", "reactivity", "host")):
-            return "product_attributes"
 
     return "general_technical"
 
@@ -360,7 +344,7 @@ def build_retrieval_queries(
 
     rewrite_reason = "no_rewrite_no_scope"
     rewritten_query = ""
-    intent_bucket = _detect_intent_bucket(query, effective_scope.get("scope_type", ""))
+    intent_bucket = _detect_intent_bucket(query)
 
     if not effective_scope.get("scope_type"):
         rewrite_reason = f"no_rewrite_{effective_scope.get('reason', 'no_scope')}"
