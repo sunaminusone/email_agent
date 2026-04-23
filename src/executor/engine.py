@@ -163,6 +163,19 @@ def build_execution_context(
         if obs.get("business_line") and "business_line" not in constraints:
             constraints.setdefault("business_line", obs["business_line"])
 
+    # Ambiguous aggregation: when primary is unresolved but all ambiguous
+    # candidates share a single business_line, promote it so RAG can apply
+    # a Layer-1 soft boost without waiting for clarification.
+    if "business_line" not in constraints and resolved_object_state.ambiguous_sets:
+        ambiguous_lines = {
+            candidate.business_line
+            for ambiguous_set in resolved_object_state.ambiguous_sets
+            for candidate in ambiguous_set.candidates
+            if candidate.business_line
+        }
+        if len(ambiguous_lines) == 1:
+            constraints["business_line"] = next(iter(ambiguous_lines))
+
     parser_signals = ingestion_bundle.turn_signals.parser_signals
 
     return ExecutionContext(

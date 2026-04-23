@@ -584,6 +584,119 @@ class TestBuildExecutionContext:
         assert ctx.parser_open_slots.experiment_type == "ELISA"
 
 
+class TestAmbiguousBusinessLineAggregation:
+    """杠杆三: when primary is unresolved, aggregate business_line from ambiguous_sets."""
+
+    def _build_context_with_ambiguous(
+        self,
+        ambiguous_sets: list,
+        primary: ObjectCandidate | None = None,
+    ):
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        bundle = IngestionBundle(
+            turn_core=TurnCore(raw_query="antibody discovery"),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(context=ParserContext()),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        resolved = ResolvedObjectState(
+            primary_object=primary,
+            ambiguous_sets=ambiguous_sets,
+        )
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        return build_execution_context(
+            ingestion_bundle=bundle,
+            resolved_object_state=resolved,
+            route_decision=route,
+        )
+
+    def test_aggregates_single_business_line_from_ambiguous_candidates(self) -> None:
+        from src.objects.models import AmbiguousObjectSet
+
+        candidates = [
+            ObjectCandidate(
+                object_type="service",
+                canonical_value="Mouse Monoclonal Antibody",
+                display_name="Mouse Monoclonal Antibody",
+                business_line="antibody",
+                is_ambiguous=True,
+            ),
+            ObjectCandidate(
+                object_type="service",
+                canonical_value="Rabbit Polyclonal Antibody Production",
+                display_name="Rabbit Polyclonal Antibody Production",
+                business_line="antibody",
+                is_ambiguous=True,
+            ),
+        ]
+        ambiguous_set = AmbiguousObjectSet(
+            object_type="service",
+            query_value="antibody discovery",
+            candidates=candidates,
+            resolution_strategy="clarify",
+        )
+        ctx = self._build_context_with_ambiguous([ambiguous_set])
+        assert ctx.resolved_object_constraints.get("business_line") == "antibody"
+
+    def test_does_not_aggregate_when_candidates_span_multiple_lines(self) -> None:
+        from src.objects.models import AmbiguousObjectSet
+
+        candidates = [
+            ObjectCandidate(
+                object_type="service",
+                canonical_value="CAR-T Cell Design and Development",
+                business_line="car_t_car_nk",
+                is_ambiguous=True,
+            ),
+            ObjectCandidate(
+                object_type="service",
+                canonical_value="Mouse Monoclonal Antibody",
+                business_line="antibody",
+                is_ambiguous=True,
+            ),
+        ]
+        ambiguous_set = AmbiguousObjectSet(
+            object_type="service",
+            candidates=candidates,
+            resolution_strategy="clarify",
+        )
+        ctx = self._build_context_with_ambiguous([ambiguous_set])
+        assert "business_line" not in ctx.resolved_object_constraints
+
+    def test_does_not_override_existing_primary_business_line(self) -> None:
+        from src.objects.models import AmbiguousObjectSet
+
+        primary = ObjectCandidate(
+            object_type="service",
+            canonical_value="CAR-T Cell Design and Development",
+            display_name="CAR-T Development",
+            business_line="car_t_car_nk",
+        )
+        ambiguous_set = AmbiguousObjectSet(
+            object_type="service",
+            candidates=[
+                ObjectCandidate(
+                    object_type="service",
+                    canonical_value="Mouse Monoclonal Antibody",
+                    business_line="antibody",
+                    is_ambiguous=True,
+                ),
+            ],
+            resolution_strategy="clarify",
+        )
+        ctx = self._build_context_with_ambiguous([ambiguous_set], primary=primary)
+        assert ctx.resolved_object_constraints.get("business_line") == "car_t_car_nk"
+
+
 class TestRunExecutor:
 
     def setup_method(self) -> None:
