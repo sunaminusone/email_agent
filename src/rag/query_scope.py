@@ -109,7 +109,25 @@ def query_mentions_scope(query: str, scope_name: str) -> bool:
     return bool(normalized_scope and normalized_scope in normalized_query)
 
 
-def detect_intent_bucket(query: str) -> str:
+_SEMANTIC_INTENT_BUCKET_MAP: dict[str, str] = {
+    "pricing_question": "pricing",
+    "timeline_question": "timeline",
+    "workflow_question": "workflow",
+    "model_support_question": "model_support",
+    "service_plan_question": "service_plan",
+    "documentation_request": "documentation",
+    "customization_request": "customization",
+}
+
+
+def detect_intent_bucket(query: str, semantic_intent: str = "") -> str:
+    # Parser-assigned semantic_intent is authoritative: map 1:1 to the
+    # retrieval bucket. Keyword detection on the raw query is a fallback for
+    # legacy callers / rows where parser did not produce an intent.
+    mapped = _SEMANTIC_INTENT_BUCKET_MAP.get(str(semantic_intent or "").strip())
+    if mapped:
+        return mapped
+
     normalized_query = normalize_scope_query(query)
     if not normalized_query:
         return "general_technical"

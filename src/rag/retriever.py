@@ -25,6 +25,15 @@ _SECTION_TYPE_BOOSTS: Dict[str, Dict[str, float]] = {
         "development_capabilities": 0.04,
         "development_capability_overview": 0.04,
     },
+    "pricing": {
+        "pricing_overview": 0.08,
+        "add_on_service_pricing": 0.06,
+    },
+    "timeline": {
+        "timeline_overview": 0.08,
+        "timeline_milestone": 0.06,
+        "service_phase": 0.04,
+    },
 }
 
 _TIER_EXACT_PHASE = 0

@@ -41,6 +41,20 @@ _REFERENTIAL_SCOPE_PATTERNS = (
 _MAX_EXPANDED_QUERIES = 4
 
 
+# Keywords injected into the expanded-query pool when parser reports a
+# demand-shaped semantic_intent. The biencoder+reranker needs lexical signal
+# to prefer pricing/timeline/etc. sections; the raw user query often lacks it.
+_SEMANTIC_INTENT_KEYWORDS: dict[str, str] = {
+    "pricing_question": "pricing",
+    "timeline_question": "timeline",
+    "workflow_question": "workflow",
+    "model_support_question": "model support",
+    "service_plan_question": "service plan",
+    "documentation_request": "documentation",
+    "customization_request": "customization",
+}
+
+
 def _first_value(values: Any) -> str:
     if isinstance(values, list):
         for value in values:
@@ -155,13 +169,37 @@ def _is_context_dependent_query(query: str) -> bool:
     return len(normalized_query.split()) <= 7
 
 
+def _inject_intent_keyword(query: str, semantic_intent: str) -> str:
+    keyword = _SEMANTIC_INTENT_KEYWORDS.get(str(semantic_intent or "").strip(), "")
+    cleaned = str(query or "").strip()
+    if not keyword or not cleaned:
+        return ""
+    if keyword in cleaned.lower():
+        return ""
+    suffix = cleaned.rstrip(" ?")
+    return f"{suffix} {keyword}"
+
+
 def _build_expanded_queries(
     *,
+    query: str = "",
+    semantic_intent: str = "",
     retrieval_hints: Mapping[str, Any] | None = None,
 ) -> list[str]:
     retrieval_hints = retrieval_hints or {}
-    candidates = list(retrieval_hints.get("expanded_queries", []))
+    candidates: list[str] = []
+    intent_variant = _inject_intent_keyword(query, semantic_intent)
+    if intent_variant:
+        candidates.append(intent_variant)
+    candidates.extend(retrieval_hints.get("expanded_queries", []))
     return _dedupe_variants(candidates)[:_MAX_EXPANDED_QUERIES]
+
+
+def _extract_semantic_intent(scope_input: Mapping[str, Any]) -> str:
+    context = scope_input.get("context") if isinstance(scope_input, Mapping) else None
+    if not isinstance(context, Mapping):
+        return ""
+    return str(context.get("semantic_intent") or "").strip()
 
 
 def _rewrite_query(query: str, scope: Mapping[str, str], intent_bucket: str) -> tuple[str, str]:
@@ -215,10 +253,11 @@ def build_retrieval_queries(
     if scope_context:
         scope_input.update(scope_context)
     effective_scope = resolve_effective_scope(scope_input)
+    semantic_intent = _extract_semantic_intent(scope_input)
 
     rewrite_reason = "no_rewrite_no_scope"
     rewritten_query = ""
-    intent_bucket = detect_intent_bucket(query)
+    intent_bucket = detect_intent_bucket(query, semantic_intent=semantic_intent)
 
     if not effective_scope.get("scope_type"):
         rewrite_reason = f"no_rewrite_{effective_scope.get('reason', 'no_scope')}"
@@ -237,7 +276,24 @@ def build_retrieval_queries(
         else:
             rewrite_reason = "no_rewrite_query_self_contained"
 
-    expanded_queries = _build_expanded_queries(retrieval_hints=retrieval_hints)
+    # Intent-keyword injection runs on top of any scope rewrite. The rerank
+    # cross-encoder scores against rewritten_query when set, so pushing the
+    # keyword here — not just into expanded_queries — is what moves the
+    # reranker to prefer the intent-aligned section (ablation evidence).
+    keyword_source = rewritten_query or query
+    intent_injected = _inject_intent_keyword(keyword_source, semantic_intent)
+    if intent_injected:
+        rewritten_query = intent_injected
+        if rewrite_reason.startswith("injected_scope"):
+            rewrite_reason = f"{rewrite_reason}_plus_intent_keyword"
+        else:
+            rewrite_reason = "injected_intent_keyword"
+
+    expanded_queries = _build_expanded_queries(
+        query=query,
+        semantic_intent=semantic_intent,
+        retrieval_hints=retrieval_hints,
+    )
 
     return {
         "primary_query": str(query or "").strip(),
@@ -245,6 +301,7 @@ def build_retrieval_queries(
         "expanded_queries": expanded_queries,
         "rewrite_reason": rewrite_reason,
         "intent_bucket": intent_bucket,
+        "semantic_intent": semantic_intent,
         "used_llm_contextualizer": False,
         "effective_scope": effective_scope,
         "retrieval_context": _normalize_retrieval_context(retrieval_context),
@@ -340,6 +397,7 @@ def retrieve_technical_knowledge(
             "rewritten_query": query_plan["rewritten_query"],
             "rewrite_reason": query_plan["rewrite_reason"],
             "intent_bucket": query_plan["intent_bucket"],
+            "semantic_intent": query_plan["semantic_intent"],
             "expanded_queries": query_plan["expanded_queries"],
             "retrieval_context": query_plan["retrieval_context"],
             "used_llm_contextualizer": query_plan["used_llm_contextualizer"],
