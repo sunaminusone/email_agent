@@ -38,38 +38,6 @@ _REFERENTIAL_SCOPE_PATTERNS = (
     re.compile(r"\bit\b", re.I),
 )
 
-_INTENT_EXPANSION_PACKS: dict[str, list[str]] = {
-    "service_plan": [
-        "discovery services plan",
-        "phases",
-        "project timeline",
-        "workflow summary",
-    ],
-    "workflow": [
-        "workflow",
-        "workflow overview",
-        "workflow step",
-        "next step",
-    ],
-    "model_support": [
-        "supported models",
-        "model support",
-        "cell types",
-        "application models",
-    ],
-}
-
-_EXPANSION_DENYLIST = (
-    "contact",
-    "representative",
-    "sales rep",
-    "support team",
-    "customer support",
-    "technical support",
-    "connect me",
-    "put me in touch",
-)
-
 _MAX_EXPANDED_QUERIES = 4
 
 
@@ -187,36 +155,13 @@ def _is_context_dependent_query(query: str) -> bool:
     return len(normalized_query.split()) <= 7
 
 
-def _is_expansion_eligible(query: str, scope: Mapping[str, str], intent_bucket: str) -> bool:
-    normalized_query = normalize_scope_query(query)
-    if not normalized_query:
-        return False
-    if not scope.get("scope_type") or not scope.get("name"):
-        return False
-    if intent_bucket not in _INTENT_EXPANSION_PACKS:
-        return False
-    if any(term in normalized_query for term in _EXPANSION_DENYLIST):
-        return False
-    return True
-
-
 def _build_expanded_queries(
     *,
-    query: str,
-    scope: Mapping[str, str],
-    intent_bucket: str,
     retrieval_hints: Mapping[str, Any] | None = None,
 ) -> list[str]:
     retrieval_hints = retrieval_hints or {}
-    if not _is_expansion_eligible(query, scope, intent_bucket):
-        return _dedupe_variants(list(retrieval_hints.get("expanded_queries", [])))
-
-    scope_name = str(scope.get("name") or "").strip()
-    pack = _INTENT_EXPANSION_PACKS.get(intent_bucket, [])
-
-    generated = [f"{scope_name} {term}".strip() for term in pack if term.strip()]
-    deduped = _dedupe_variants(generated + list(retrieval_hints.get("expanded_queries", [])))
-    return deduped[:_MAX_EXPANDED_QUERIES]
+    candidates = list(retrieval_hints.get("expanded_queries", []))
+    return _dedupe_variants(candidates)[:_MAX_EXPANDED_QUERIES]
 
 
 def _rewrite_query(query: str, scope: Mapping[str, str], intent_bucket: str) -> tuple[str, str]:
@@ -292,12 +237,7 @@ def build_retrieval_queries(
         else:
             rewrite_reason = "no_rewrite_query_self_contained"
 
-    expanded_queries = _build_expanded_queries(
-        query=query,
-        scope=effective_scope,
-        intent_bucket=intent_bucket,
-        retrieval_hints=retrieval_hints,
-    )
+    expanded_queries = _build_expanded_queries(retrieval_hints=retrieval_hints)
 
     return {
         "primary_query": str(query or "").strip(),

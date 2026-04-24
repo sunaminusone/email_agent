@@ -1,0 +1,43 @@
+idx,category,query,intent_bucket_on,intent_bucket_off,top_final_on,top_final_off,delta,top_section_on,top_section_off,parser_xq_count
+1,high,What is the service plan for CAR-T cell therapy?,service_plan,service_plan,3.617,3.617,0.0,service_plan,service_plan,3
+2,high,What is the workflow for antibody production?,workflow,workflow,1.117,1.117,0.0,workflow_overview,workflow_overview,3
+3,high,What models do you support for mRNA LNP development?,model_support,model_support,4.357,4.357,0.0,model_support,model_support,3
+4,high,How long does CAR-T cell therapy development take?,general_technical,general_technical,1.717,1.717,0.0,pricing_overview,pricing_overview,5
+5,high,What are the phases in antibody discovery?,service_plan,service_plan,1.317,1.317,0.0,plan_summary,plan_summary,3
+6,medium,How does it work?,general_technical,general_technical,3.52,3.52,0.0,workflow_overview,workflow_overview,0
+7,medium,I need antibody purification for 1 liter,general_technical,general_technical,4.896,4.896,0.0,add_on_service_pricing,add_on_service_pricing,3
+8,medium,Quote for antibody production service,general_technical,general_technical,3.21,3.21,0.0,service_component,service_component,3
+9,medium,What's the timeline for this service?,service_plan,service_plan,5.082,5.162,0.08,timeline_overview,timeline_overview,3
+10,low,What's your contact phone number?,general_technical,general_technical,-7.912,-7.872,0.04,technical_advantage,technical_advantage,0
+11,low,Do you ship to Europe?,general_technical,general_technical,-8.292,-8.332,-0.04,product_catalog,product_catalog,3
+12,low,When will I receive the invoice?,general_technical,general_technical,-9.938,-9.938,0.0,timeline_milestone,timeline_milestone,3
+13,low,Who is your sales rep for antibody products?,general_technical,general_technical,-4.145,-4.145,0.0,why_us,why_us,3
+14,irrelevant,What's the weather today in Boston?,general_technical,general_technical,-10.14,-10.14,0.0,technical_advantage,technical_advantage,0
+15,irrelevant,Can you recommend a good restaurant?,general_technical,general_technical,-10.193,-10.193,0.0,service_overview,service_overview,0
+16,irrelevant,Tell me about COVID vaccines,general_technical,general_technical,-1.912,-1.912,0.0,product_catalog,product_catalog,3
+17,high,How should I validate it for specificity?,general_technical,general_technical,-1.039,-1.039,0.0,validation_models,validation_models,3
+18,high,We need FDA-compliant antibody production with full audit tr,general_technical,general_technical,-4.472,-4.472,0.0,package_inclusions,package_inclusions,3
+19,high,Which of these antibodies works best for flow cytometry?,general_technical,general_technical,1.632,1.632,0.0,validation_models,validation_models,3
+20,high,Tell me about the workflow,workflow,workflow,0.192,0.232,0.04,workflow_overview,workflow_overview,0
+21,medium,What about the validation data?,general_technical,general_technical,0.817,0.817,0.0,package_inclusions,package_inclusions,3
+22,medium,Which cell lines does this platform use?,general_technical,general_technical,5.851,5.851,0.0,service_phase,service_phase,3
+23,high,We are interested in sequencing the VH and VL of a murine hy,general_technical,general_technical,3.386,3.386,0.0,service_overview,service_overview,3
+24,high,"For research purposes only, we are interested in a 'split' C",general_technical,general_technical,-0.639,-0.639,0.0,validation_models,validation_models,5
+25,high,I have two peptide sequences I would love for the company to,general_technical,general_technical,1.429,1.429,0.0,scientific_rationale,scientific_rationale,5
+26,high,I am an investigator interested in making a Dendritic Cell B,general_technical,general_technical,-0.053,-0.053,0.0,application_overview,application_overview,4
+27,high,I'd like to get a quote for a polyclonal antibody production,general_technical,general_technical,2.59,2.59,0.0,workflow_overview,workflow_overview,3
+28,medium,"We developed CAR T cells in our startup company, and we alre",general_technical,general_technical,0.233,-3.376,-3.609,service_plan,workflow_step,5
+29,medium,"I am writing from cancer vaccine science, Poland, Europe. I ",general_technical,general_technical,-4.629,-4.629,0.0,add_on_service_pricing,add_on_service_pricing,3
+30,high,We want rabbit monoclonal antibodies that recognize the N-te,general_technical,general_technical,-1.789,-1.789,0.0,service_phase,service_phase,5
+31,high,When producing the mRNA/LNPs are they in aqueous form? Is it,general_technical,general_technical,-2.88,-2.88,0.0,product_catalog,product_catalog,4
+32,high,I would like to produce human monoclonal antibodies to a few,general_technical,general_technical,0.278,0.278,0.0,service_phase,service_phase,3
+33,high,I am looking to get a quote for synthesizing mRNA. How much ,general_technical,general_technical,-0.961,-0.961,0.0,workflow_step,workflow_step,5
+34,high,How long does your LNP production service usually take from ,general_technical,general_technical,-2.536,-2.536,0.0,brochure_overview,brochure_overview,5
+35,high,We are interested in testing our drug product with a macroph,general_technical,general_technical,-0.831,-0.831,0.0,scientific_rationale,scientific_rationale,4
+36,high,I'm wondering if you could help us prepare lipid nanoparticl,general_technical,general_technical,-2.057,-2.057,0.0,workflow_step,workflow_step,5
+37,high,In my laboratory we are interested in a polyclonal antibody ,general_technical,general_technical,-4.153,-4.153,0.0,add_on_service_pricing,add_on_service_pricing,3
+38,irrelevant,I am contacting you on behalf of Al-Trust Investment KSC. I ,service_plan,service_plan,-6.463,-6.463,0.0,service_plan,service_plan,5
+39,low,I'm the Director of a biomedical and life sciences sales and,general_technical,general_technical,-7.526,-7.526,0.0,why_us,why_us,3
+40,low,I would be delighted to reinitiate conversations around apta,general_technical,general_technical,-5.478,-5.478,0.0,service_plan,service_plan,3
+41,high,I would like to set up a CAR mRNA-LNP delivery system for an,workflow,workflow,-0.494,-0.124,0.37,product_catalog,product_catalog,5
+42,medium,One of our multinational clients has expressed strong intere,general_technical,general_technical,0.097,0.097,0.0,platform_assets,platform_assets,5
