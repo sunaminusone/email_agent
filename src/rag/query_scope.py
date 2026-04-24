@@ -395,7 +395,7 @@ def resolve_active_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
     # past the non_technical_fallback gate above) should retrieve within that
     # service's scope even on cold-start turns without a follow-up marker.
     if active_service_name:
-        intent_bucket = detect_intent_bucket(query)
+        intent_bucket = detect_intent_bucket(query, _semantic_intent(agent_input))
         return _resolved_scope(
             "service",
             "active",
