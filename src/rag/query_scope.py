@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from typing import Any, Mapping
 
 from src.objects.registries.service_registry import (
@@ -109,6 +110,18 @@ def query_mentions_scope(query: str, scope_name: str) -> bool:
     return bool(normalized_scope and normalized_scope in normalized_query)
 
 
+# Full 1:1 projection from parser semantic_intent to retrieval bucket. Every
+# value in SEMANTIC_INTENT_VALUES must appear here — adding a new canonical
+# intent without updating this table triggers the warning path below.
+#
+# Notes:
+#   - `troubleshooting` → general_technical is pragmatic: KB currently has no
+#     troubleshooting_guide / faq section_type. If KB adds troubleshooting
+#     content, split troubleshooting into its own bucket with section boosts.
+#   - `follow_up` → follow_up is a placeholder bucket. Semantically follow_up
+#     is a dialogue_act concept; the "right" bucket is whatever the prior turn
+#     was asking about. Until routing carries that forward, follow_up stays a
+#     telemetry-only bucket (empty section boost).
 _SEMANTIC_INTENT_BUCKET_MAP: dict[str, str] = {
     "pricing_question": "pricing",
     "timeline_question": "timeline",
@@ -117,16 +130,37 @@ _SEMANTIC_INTENT_BUCKET_MAP: dict[str, str] = {
     "service_plan_question": "service_plan",
     "documentation_request": "documentation",
     "customization_request": "customization",
+    "technical_question": "general_technical",
+    "troubleshooting": "general_technical",
+    "product_inquiry": "general_technical",
+    "shipping_question": "operational",
+    "order_support": "operational",
+    "complaint": "operational",
+    "partnership_request": "general_info",
+    "general_info": "general_info",
+    "follow_up": "follow_up",
+    "unknown": "unknown",
 }
 
 
 def detect_intent_bucket(query: str, semantic_intent: str = "") -> str:
-    # Parser-assigned semantic_intent is authoritative: map 1:1 to the
-    # retrieval bucket. Keyword detection on the raw query is a fallback for
-    # legacy callers / rows where parser did not produce an intent.
-    mapped = _SEMANTIC_INTENT_BUCKET_MAP.get(str(semantic_intent or "").strip())
-    if mapped:
-        return mapped
+    # Parser-assigned semantic_intent is authoritative: 1:1 projection to the
+    # retrieval bucket. Keyword fallback only runs when parser did not produce
+    # an intent at all (legacy callers, empty string).
+    cleaned_intent = str(semantic_intent or "").strip()
+
+    if cleaned_intent:
+        mapped = _SEMANTIC_INTENT_BUCKET_MAP.get(cleaned_intent)
+        if mapped:
+            return mapped
+        # Non-empty intent that isn't in the map means parser emitted a value
+        # outside SEMANTIC_INTENT_VALUES — real drift, not a benign case.
+        warnings.warn(
+            f"detect_intent_bucket: unmapped semantic_intent {cleaned_intent!r}; "
+            "falling back to general_technical. Update _SEMANTIC_INTENT_BUCKET_MAP.",
+            stacklevel=2,
+        )
+        return "general_technical"
 
     normalized_query = normalize_scope_query(query)
     if not normalized_query:
@@ -140,6 +174,41 @@ def detect_intent_bucket(query: str, semantic_intent: str = "") -> str:
         return "model_support"
 
     return "general_technical"
+
+
+# Bucket modes separate three orthogonal concerns:
+#   - ranked: uses section_type boosts (must have an entry in _SECTION_TYPE_BOOSTS)
+#   - lexical_only: participates in RAG via keyword injection / query rewrite,
+#     no section boosts (either no section_type target in KB, or "no preference"
+#     by design — e.g. general_technical is the catch-all parent bucket)
+#   - non_rag: bucket's intents shouldn't drive technical RAG at all; reaching
+#     RAG with this mode emits a telemetry warning (weak enforcement for now —
+#     strong short-circuit is a separate PR once all callers are audited)
+#   - placeholder: runtime-equivalent to lexical_only, but flags "temporary,
+#     awaiting upgrade" vs. "by design" (e.g. follow_up needs prior-turn intent
+#     carry — see backlog #8; unknown is an admit-you-don't-know terminal)
+#
+# Invariants enforced by tests:
+#   - every bucket in _SEMANTIC_INTENT_BUCKET_MAP.values() must have a mode
+#   - ranked ↔ presence in _SECTION_TYPE_BOOSTS
+_BUCKET_MODES: dict[str, str] = {
+    "pricing": "ranked",
+    "timeline": "ranked",
+    "workflow": "ranked",
+    "model_support": "ranked",
+    "service_plan": "ranked",
+    "general_technical": "lexical_only",
+    "documentation": "lexical_only",
+    "customization": "lexical_only",
+    "operational": "non_rag",
+    "general_info": "non_rag",
+    "follow_up": "placeholder",
+    "unknown": "placeholder",
+}
+
+
+def get_bucket_mode(bucket: str) -> str:
+    return _BUCKET_MODES.get(str(bucket or "").strip(), "")
 
 
 def _first_value(values: Any) -> str:
@@ -470,6 +539,7 @@ __all__ = [
     "SERVICE_SCOPE_QUERY_PATTERNS",
     "canonicalize_service_name",
     "detect_intent_bucket",
+    "get_bucket_mode",
     "has_current_scope",
     "is_service_scoped_follow_up",
     "normalize_scope_query",

@@ -9,6 +9,8 @@ from .ingestion_config import (
     normalize_tags,
 )
 from .query_scope import (
+    detect_intent_bucket,
+    get_bucket_mode,
     has_current_scope,
     is_service_scoped_follow_up,
     normalize_scope_query,
@@ -41,6 +43,8 @@ __all__ = [
     "build_chunk_metadata",
     "build_embedding_string",
     "build_retrieval_queries",
+    "detect_intent_bucket",
+    "get_bucket_mode",
     "get_vectorstore",
     "has_current_scope",
     "is_service_scoped_follow_up",

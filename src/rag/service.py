@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+import warnings
 from typing import Any, Dict, List, Mapping
 
 from src.rag.query_scope import (
     canonicalize_service_name,
     detect_intent_bucket,
+    get_bucket_mode,
     normalize_scope_query,
     query_has_product_scope_marker,
     query_has_service_scope_marker,
@@ -258,6 +260,17 @@ def build_retrieval_queries(
     rewrite_reason = "no_rewrite_no_scope"
     rewritten_query = ""
     intent_bucket = detect_intent_bucket(query, semantic_intent=semantic_intent)
+    bucket_mode = get_bucket_mode(intent_bucket)
+    # Weak enforcement: non_rag buckets reaching build_retrieval_queries means
+    # an upstream caller routed a non-technical intent into RAG. Log and carry
+    # on for now; strong short-circuit is a separate PR once callers are audited.
+    if bucket_mode == "non_rag":
+        warnings.warn(
+            f"RAG invoked with non_rag bucket {intent_bucket!r} "
+            f"(semantic_intent={semantic_intent!r}); upstream should avoid routing "
+            "non-technical intents here.",
+            stacklevel=2,
+        )
 
     if not effective_scope.get("scope_type"):
         rewrite_reason = f"no_rewrite_{effective_scope.get('reason', 'no_scope')}"
@@ -301,6 +314,7 @@ def build_retrieval_queries(
         "expanded_queries": expanded_queries,
         "rewrite_reason": rewrite_reason,
         "intent_bucket": intent_bucket,
+        "bucket_mode": bucket_mode,
         "semantic_intent": semantic_intent,
         "used_llm_contextualizer": False,
         "effective_scope": effective_scope,
@@ -397,6 +411,7 @@ def retrieve_technical_knowledge(
             "rewritten_query": query_plan["rewritten_query"],
             "rewrite_reason": query_plan["rewrite_reason"],
             "intent_bucket": query_plan["intent_bucket"],
+            "bucket_mode": query_plan["bucket_mode"],
             "semantic_intent": query_plan["semantic_intent"],
             "expanded_queries": query_plan["expanded_queries"],
             "retrieval_context": query_plan["retrieval_context"],
