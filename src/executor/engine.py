@@ -183,7 +183,7 @@ def build_execution_context(
             ingestion_bundle.turn_core.normalized_query
             or ingestion_bundle.turn_core.raw_query
         ),
-        primary_intent=parser_signals.context.primary_intent,
+        semantic_intent=parser_signals.context.semantic_intent,
         primary_object=primary,
         secondary_objects=list(resolved_object_state.secondary_objects),
         dialogue_act=route_decision.dialogue_act,

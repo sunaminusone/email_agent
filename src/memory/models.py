@@ -53,7 +53,7 @@ class IntentMemory(_MemoryModel):
     """Tracks intent groups across turns with drift detection."""
     prior_intent_groups: list[IntentGroup] = Field(default_factory=list)
     stacked_intent_history: list[list[IntentGroup]] = Field(default_factory=list)
-    prior_primary_intent: str = "unknown"
+    prior_semantic_intent: str = "unknown"
     continuity_confidence: float = 0.0
     turns_since_last_intent_change: int = 0
 

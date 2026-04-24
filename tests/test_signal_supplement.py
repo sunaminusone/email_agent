@@ -30,7 +30,7 @@ def _make_signals(
     if invoice_numbers is not None:
         entities_kwargs["invoice_numbers"] = invoice_numbers
     return ParserSignals(
-        context=ParserContext(primary_intent=intent),
+        context=ParserContext(semantic_intent=intent),
         request_flags=flags or ParserRequestFlags(),
         entities=ParserEntitySignals(**entities_kwargs),
     )
@@ -142,7 +142,7 @@ def test_cross_family_pricing_intent_technical_flags():
             flags=ParserRequestFlags(needs_protocol=True),
         ),
     )
-    assert result.context.primary_intent == "pricing_question"
+    assert result.context.semantic_intent == "pricing_question"
     assert result.request_flags.needs_protocol is True
     assert result.request_flags.needs_price is True  # gap-filled
 
@@ -155,7 +155,7 @@ def test_cross_family_technical_intent_commercial_flags():
             flags=ParserRequestFlags(needs_price=True),
         ),
     )
-    assert result.context.primary_intent == "pricing_question"
+    assert result.context.semantic_intent == "pricing_question"
     assert result.request_flags.needs_price is True
 
 
@@ -168,7 +168,7 @@ def test_cross_family_no_fix_when_family_matches():
         ),
     )
     # commercial is present in flag families, so no cross-family fix
-    assert result.context.primary_intent == "pricing_question"
+    assert result.context.semantic_intent == "pricing_question"
 
 
 def test_cross_family_skips_vague_intent():
@@ -180,7 +180,7 @@ def test_cross_family_skips_vague_intent():
         ),
     )
     # validate_intent_and_flags handles vague→specific, not cross-family
-    assert result.context.primary_intent == "unknown"
+    assert result.context.semantic_intent == "unknown"
 
 
 def test_cross_family_skips_no_flags():
@@ -188,7 +188,7 @@ def test_cross_family_skips_no_flags():
     signals = _make_signals(intent="pricing_question")
     result = reconcile_intent_and_flags(signals)
     # Gap fill adds needs_price; cross-family sees family match → no fix
-    assert result.context.primary_intent == "pricing_question"
+    assert result.context.semantic_intent == "pricing_question"
     assert result.request_flags.needs_price is True
 
 
@@ -202,7 +202,7 @@ def test_cross_family_operational_intent_technical_flags():
             flags=ParserRequestFlags(needs_troubleshooting=True),
         ),
     )
-    assert result.context.primary_intent == "order_support"
+    assert result.context.semantic_intent == "order_support"
     assert result.request_flags.needs_order_status is True  # gap-filled
     assert result.request_flags.needs_troubleshooting is True
 
@@ -216,7 +216,7 @@ def test_cross_family_pure_documentation_intent_commercial_flags():
             flags=ParserRequestFlags(needs_price=True),
         ),
     )
-    assert result.context.primary_intent == "pricing_question"
+    assert result.context.semantic_intent == "pricing_question"
     assert result.request_flags.needs_price is True
 
 
@@ -229,5 +229,5 @@ def test_cross_family_pure_troubleshooting_intent_operational_flags():
             flags=ParserRequestFlags(needs_order_status=True),
         ),
     )
-    assert result.context.primary_intent == "order_support"
+    assert result.context.semantic_intent == "order_support"
     assert result.request_flags.needs_order_status is True

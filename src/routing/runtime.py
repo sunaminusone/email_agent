@@ -41,7 +41,7 @@ def route_single_group(
         intent_groups = assemble_intent_groups(
             request_flags=parser_signals.request_flags,
             resolved_objects=resolved_objects,
-            primary_intent=parser_signals.context.primary_intent,
+            semantic_intent=parser_signals.context.semantic_intent,
         )
         demand_profile = build_demand_profile(parser_signals, intent_groups)
 

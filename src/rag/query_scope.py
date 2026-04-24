@@ -256,17 +256,17 @@ def _turn_type(agent_input: Mapping[str, Any]) -> str:
     return str(turn_resolution.get("turn_type") or "").strip()
 
 
-def _primary_intent(agent_input: Mapping[str, Any]) -> str:
+def _semantic_intent(agent_input: Mapping[str, Any]) -> str:
     context = agent_input.get("context", {})
     if not isinstance(context, Mapping):
         return ""
-    return str(context.get("primary_intent") or "").strip()
+    return str(context.get("semantic_intent") or "").strip()
 
 
 def _is_continuation_turn(agent_input: Mapping[str, Any]) -> bool:
     if _turn_type(agent_input) in {"follow_up", "route_continuation"}:
         return True
-    if _primary_intent(agent_input) == "follow_up":
+    if _semantic_intent(agent_input) == "follow_up":
         return True
     return bool(_routing_memory(agent_input).get("should_stick_to_active_route"))
 

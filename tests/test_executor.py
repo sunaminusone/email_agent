@@ -54,7 +54,7 @@ def _make_context(
     object_type: str = "product",
     dialogue_act: str = "inquiry",
     request_flags: ParserRequestFlags | None = None,
-    primary_intent: str = "product_inquiry",
+    semantic_intent: str = "product_inquiry",
     parser_constraints: ParserConstraints | None = None,
     parser_open_slots: ParserOpenSlots | None = None,
 ) -> ExecutionContext:
@@ -68,7 +68,7 @@ def _make_context(
     ) if object_type else None
     return ExecutionContext(
         query=query,
-        primary_intent=primary_intent,
+        semantic_intent=semantic_intent,
         primary_object=primary,
         dialogue_act=DialogueActResult(act=dialogue_act),
         request_flags=request_flags,
@@ -187,7 +187,7 @@ class TestScoreTool:
         )
         flags = ParserRequestFlags(needs_protocol=True)
         active = {"needs_protocol"}
-        ctx = _make_context(object_type="product", request_flags=flags, primary_intent="technical_question")
+        ctx = _make_context(object_type="product", request_flags=flags, semantic_intent="technical_question")
 
         rag_score, _ = _score_tool(rag_cap, ctx, "technical", active)
         catalog_score, _ = _score_tool(catalog_cap, ctx, "technical", active)
@@ -214,11 +214,11 @@ class TestScoreTool:
             supported_modalities=["unstructured_retrieval"],
         )
         # Technical demand → RAG aligns
-        ctx_tech = _make_context(primary_intent="technical_question")
+        ctx_tech = _make_context(semantic_intent="technical_question")
         score_tech, _ = _score_tool(rag_cap, ctx_tech, "technical", set())
 
         # Commercial demand → RAG doesn't align
-        ctx_comm = _make_context(primary_intent="product_inquiry")
+        ctx_comm = _make_context(semantic_intent="product_inquiry")
         score_comm, _ = _score_tool(rag_cap, ctx_comm, "commercial", set())
 
         assert score_tech > score_comm
@@ -274,7 +274,7 @@ class TestClassifyDemand:
 
     def test_general_when_no_active_demand(self) -> None:
         """No active_demand → conservative general, no re-classification."""
-        ctx = _make_context(primary_intent="technical_question")
+        ctx = _make_context(semantic_intent="technical_question")
         assert _classify_demand(ctx) == "general"
 
     def test_operational_from_active_demand(self) -> None:
@@ -344,7 +344,7 @@ class TestSelectTools:
         flags = ParserRequestFlags(needs_protocol=True)
         ctx = _make_context(
             object_type="product", dialogue_act="inquiry",
-            request_flags=flags, primary_intent="technical_question",
+            request_flags=flags, semantic_intent="technical_question",
         )
         ctx.active_demand = GroupDemand(
             primary_demand="technical", request_flags=["needs_protocol"],
@@ -381,7 +381,7 @@ class TestSelectTools:
         flags = ParserRequestFlags(needs_protocol=True, needs_price=True)
         ctx = _make_context(
             object_type="product", dialogue_act="inquiry",
-            request_flags=flags, primary_intent="technical_question",
+            request_flags=flags, semantic_intent="technical_question",
         )
         ctx.active_demand = GroupDemand(
             primary_demand="technical",
@@ -841,7 +841,7 @@ class TestRunExecutor:
             turn_core=TurnCore(raw_query="CAR-T availability and protocol", normalized_query="CAR-T availability and protocol"),
             turn_signals=TurnSignals(
                 parser_signals=ParserSignals(
-                    context=ParserContext(primary_intent="product_inquiry"),
+                    context=ParserContext(semantic_intent="product_inquiry"),
                     request_flags=ParserRequestFlags(needs_availability=True, needs_protocol=True),
                 ),
                 deterministic_signals=DeterministicSignals(),
@@ -969,7 +969,7 @@ class TestEvaluateCompleteness:
 
     def test_retry_when_flag_demand_unsatisfied(self) -> None:
         """needs_protocol active but only catalog called → demand unsatisfied → retry with RAG."""
-        context = _make_context(primary_intent="technical_question")
+        context = _make_context(semantic_intent="technical_question")
         context.active_demand = GroupDemand(
             primary_demand="technical", request_flags=["needs_protocol"],
         )
@@ -983,7 +983,7 @@ class TestEvaluateCompleteness:
 
     def test_sufficient_when_demand_tool_already_called(self) -> None:
         """needs_protocol active + RAG already called → demand satisfied."""
-        context = _make_context(primary_intent="technical_question")
+        context = _make_context(semantic_intent="technical_question")
         context.active_demand = GroupDemand(
             primary_demand="technical", request_flags=["needs_protocol"],
         )
@@ -996,7 +996,7 @@ class TestEvaluateCompleteness:
 
     def test_retry_add_shipping_when_demanded(self) -> None:
         """needs_shipping_info active but shipping tool not called → retry."""
-        context = _make_context(primary_intent="shipping_question")
+        context = _make_context(semantic_intent="shipping_question")
         context.active_demand = GroupDemand(
             primary_demand="operational", request_flags=["needs_shipping_info"],
         )
@@ -1010,7 +1010,7 @@ class TestEvaluateCompleteness:
 
     def test_no_retry_when_no_active_demand_and_primary_ok(self) -> None:
         """No active_demand + primary ok → sufficient (no phantom demand)."""
-        context = _make_context(primary_intent="product_inquiry")
+        context = _make_context(semantic_intent="product_inquiry")
         calls = [_make_executed_call(
             "catalog_lookup_tool", "ok",
             result=_make_tool_result("catalog_lookup_tool", "ok", primary_records=[{"name": "CD3"}]),

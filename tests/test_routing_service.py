@@ -29,7 +29,7 @@ def test_product_inquiry_routes_to_execute():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="product_inquiry", intent_confidence=0.85)
+                context=ParserContext(semantic_intent="product_inquiry", intent_confidence=0.85)
             )
         ),
     )
@@ -63,7 +63,7 @@ def test_service_inquiry_routes_to_execute():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="product_inquiry", intent_confidence=0.80)
+                context=ParserContext(semantic_intent="product_inquiry", intent_confidence=0.80)
             )
         ),
     )
@@ -94,7 +94,7 @@ def test_ambiguous_object_routes_to_clarify():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="product_inquiry", intent_confidence=0.80)
+                context=ParserContext(semantic_intent="product_inquiry", intent_confidence=0.80)
             )
         ),
     )
@@ -129,7 +129,7 @@ def test_order_tracking_routes_to_execute():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="order_support", intent_confidence=0.90)
+                context=ParserContext(semantic_intent="order_support", intent_confidence=0.90)
             )
         ),
     )
@@ -161,7 +161,7 @@ def test_acknowledgement_routes_to_respond():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="unknown", intent_confidence=0.1)
+                context=ParserContext(semantic_intent="unknown", intent_confidence=0.1)
             )
         ),
     )
@@ -186,7 +186,7 @@ def test_termination_routes_to_respond():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="unknown", intent_confidence=0.1)
+                context=ParserContext(semantic_intent="unknown", intent_confidence=0.1)
             )
         ),
     )
@@ -212,7 +212,7 @@ def test_technical_question_without_object_routes_to_execute():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="technical_question"),
+                context=ParserContext(semantic_intent="technical_question"),
                 request_flags=ParserRequestFlags(needs_protocol=True),
             )
         ),
@@ -248,7 +248,7 @@ def test_troubleshooting_without_object_routes_to_execute():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="troubleshooting"),
+                context=ParserContext(semantic_intent="troubleshooting"),
                 request_flags=ParserRequestFlags(needs_troubleshooting=True),
             )
         ),
@@ -284,7 +284,7 @@ def test_recommendation_without_object_routes_to_execute():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="technical_question"),
+                context=ParserContext(semantic_intent="technical_question"),
                 request_flags=ParserRequestFlags(needs_recommendation=True),
             )
         ),
@@ -384,7 +384,7 @@ def test_technical_with_resolved_object_routes_to_execute():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="technical_question"),
+                context=ParserContext(semantic_intent="technical_question"),
                 request_flags=ParserRequestFlags(needs_protocol=True),
             )
         ),
@@ -432,7 +432,7 @@ def test_elaboration_routes_to_execute_with_continuation():
         ),
         turn_signals=TurnSignals(
             parser_signals=ParserSignals(
-                context=ParserContext(primary_intent="follow_up", intent_confidence=0.8)
+                context=ParserContext(semantic_intent="follow_up", intent_confidence=0.8)
             )
         ),
     )

@@ -252,7 +252,7 @@ def gray_zone_reasons(
 ) -> list[str]:
     reasons: list[str] = []
     request_flags = _safe_request_flags(agent_input)
-    intent = agent_input.get("context", {}).get("primary_intent", "unknown")
+    intent = agent_input.get("context", {}).get("semantic_intent", "unknown")
 
     if 4 <= custom_signals["score"] <= 5 and not request_flags.get("needs_customization"):
         reasons.append("customization_borderline")

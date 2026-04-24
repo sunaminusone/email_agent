@@ -12,7 +12,7 @@ from src.ingestion.models import ParserContext, ParserRequestFlags, ParserSignal
 
 def test_build_demand_profile_prefers_intent_aligned_primary_demand() -> None:
     parser_signals = ParserSignals(
-        context=ParserContext(primary_intent="technical_question"),
+        context=ParserContext(semantic_intent="technical_question"),
         request_flags=ParserRequestFlags(needs_protocol=True, needs_price=True),
     )
     intent_groups = [
@@ -42,7 +42,7 @@ def test_build_demand_profile_prefers_intent_aligned_primary_demand() -> None:
 
 def test_build_demand_profile_preserves_group_level_semantics() -> None:
     parser_signals = ParserSignals(
-        context=ParserContext(primary_intent="order_support"),
+        context=ParserContext(semantic_intent="order_support"),
         request_flags=ParserRequestFlags(needs_order_status=True),
     )
     intent_groups = [
@@ -72,7 +72,7 @@ def test_narrow_demand_profile_matches_focus_group() -> None:
     )
     profile = build_demand_profile(
         ParserSignals(
-            context=ParserContext(primary_intent="documentation_request"),
+            context=ParserContext(semantic_intent="documentation_request"),
             request_flags=ParserRequestFlags(needs_documentation=True),
         ),
         [focus_group],

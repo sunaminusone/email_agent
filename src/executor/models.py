@@ -65,7 +65,7 @@ class ExecutionContext(_ExecutionModel):
 
     # From upstream modules
     query: str = ""
-    primary_intent: str = "unknown"
+    semantic_intent: str = "unknown"
     primary_object: ObjectCandidate | None = None
     secondary_objects: list[ObjectCandidate] = Field(default_factory=list)
     dialogue_act: DialogueActResult = Field(default_factory=DialogueActResult)

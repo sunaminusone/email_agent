@@ -15,6 +15,27 @@ RecencyType = Literal["CURRENT_TURN", "CONTEXTUAL"]
 SourceType = Literal["deterministic", "parser", "attachment", "stateful_anchor"]
 
 
+SEMANTIC_INTENT_VALUES: tuple[str, ...] = (
+    "product_inquiry",
+    "technical_question",
+    "workflow_question",
+    "model_support_question",
+    "service_plan_question",
+    "pricing_question",
+    "timeline_question",
+    "customization_request",
+    "documentation_request",
+    "shipping_question",
+    "troubleshooting",
+    "order_support",
+    "complaint",
+    "follow_up",
+    "partnership_request",
+    "general_info",
+    "unknown",
+)
+
+
 class SourceAttribution(CommonSourceAttribution):
     pass
 
@@ -58,7 +79,7 @@ class TurnCore(_IngestionModel):
 class ParserContext(_IngestionModel):
     language: str = "other"
     channel: str = "internal_qa"
-    primary_intent: str = "unknown"
+    semantic_intent: str = "unknown"
     intent_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     query_type: str = "question"
     urgency: str = "low"

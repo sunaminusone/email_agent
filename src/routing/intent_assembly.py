@@ -9,7 +9,7 @@ Usage:
     groups = assemble_intent_groups(
         request_flags=ingestion_bundle.turn_signals.parser_signals.request_flags,
         resolved_objects=[resolved_object_state.primary_object, *resolved_object_state.secondary_objects],
-        primary_intent=ingestion_bundle.turn_signals.parser_signals.context.primary_intent,
+        semantic_intent=ingestion_bundle.turn_signals.parser_signals.context.semantic_intent,
     )
 """
 from __future__ import annotations
@@ -86,7 +86,7 @@ assert set(_FLAG_INTENT) == _ALL_FLAGS, (
 def assemble_intent_groups(
     request_flags: ParserRequestFlags,
     resolved_objects: list,
-    primary_intent: str = "unknown",
+    semantic_intent: str = "unknown",
 ) -> list[IntentGroup]:
     """Deterministically bind active request_flags to resolved objects.
 
@@ -94,7 +94,7 @@ def assemble_intent_groups(
         request_flags: flat boolean flags from ingestion parser.
         resolved_objects: list of ObjectCandidate (or any object with
             object_type, identifier, display_name attributes).
-        primary_intent: fallback intent from parser context.
+        semantic_intent: fallback intent from parser context.
 
     Returns:
         List of IntentGroup, one per resolved-object (or one unbound group
@@ -104,7 +104,7 @@ def assemble_intent_groups(
     active_flags = _get_active_flags(request_flags)
 
     if not active_flags:
-        return _single_group_from_intent(primary_intent, objects)
+        return _single_group_from_intent(semantic_intent, objects)
 
     # Step 1: For each flag, find objects whose type matches the flag's affinity
     flag_bindings: dict[str, list] = {}
@@ -131,7 +131,7 @@ def assemble_intent_groups(
         obj = _find_object_by_key(obj_key, objects)
         deduped_flags = list(dict.fromkeys(flags))
         groups.append(IntentGroup(
-            intent=_infer_group_intent(deduped_flags, primary_intent),
+            intent=_infer_group_intent(deduped_flags, semantic_intent),
             request_flags=deduped_flags,
             object_type=getattr(obj, "object_type", "") if obj else "",
             object_identifier=getattr(obj, "identifier", "") if obj else "",
@@ -142,12 +142,12 @@ def assemble_intent_groups(
     # Step 4: Unbound flags → general group (no specific object)
     if unbound_flags:
         groups.append(IntentGroup(
-            intent=_infer_group_intent(unbound_flags, primary_intent),
+            intent=_infer_group_intent(unbound_flags, semantic_intent),
             request_flags=list(dict.fromkeys(unbound_flags)),
             confidence=0.60,
         ))
 
-    return groups or _single_group_from_intent(primary_intent, objects)
+    return groups or _single_group_from_intent(semantic_intent, objects)
 
 
 # ---------------------------------------------------------------------------
@@ -185,13 +185,13 @@ def _infer_group_intent(flags: list[str], fallback_intent: str) -> str:
     return fallback_intent
 
 
-def _single_group_from_intent(primary_intent: str, objects: list) -> list[IntentGroup]:
-    """Fallback: no active flags → one group from primary_intent."""
+def _single_group_from_intent(semantic_intent: str, objects: list) -> list[IntentGroup]:
+    """Fallback: no active flags → one group from semantic_intent."""
     if not objects:
-        return [IntentGroup(intent=primary_intent, confidence=0.50)]
+        return [IntentGroup(intent=semantic_intent, confidence=0.50)]
     primary = objects[0]
     return [IntentGroup(
-        intent=primary_intent,
+        intent=semantic_intent,
         object_type=getattr(primary, "object_type", ""),
         object_identifier=getattr(primary, "identifier", ""),
         object_display_name=getattr(primary, "display_name", ""),

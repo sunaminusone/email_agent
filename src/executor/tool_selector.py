@@ -136,7 +136,7 @@ def _classify_demand(context: ExecutionContext) -> DemandType:
     """Classify the user's information demand from the pre-computed GroupDemand.
 
     GroupDemand (via active_demand) is the single source of truth.
-    No fallback to raw flags or primary_intent — if active_demand is
+    No fallback to raw flags or semantic_intent — if active_demand is
     absent the executor treats the demand as general (conservative).
 
     Low demand_confidence (< 0.5) suppresses mixed classification —

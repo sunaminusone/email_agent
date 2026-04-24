@@ -67,31 +67,31 @@ def validate_intent_and_flags(
     parser_signals: ParserSignals,
     normalized_query: str,
 ) -> ParserSignals:
-    """Validate primary_intent against request_flags. Non-destructive.
+    """Validate semantic_intent against request_flags. Non-destructive.
 
-    Only corrects when primary_intent is too vague ('unknown', 'general_info')
+    Only corrects when semantic_intent is too vague ('unknown', 'general_info')
     and a dominant intent can be inferred from request_flags. Does NOT overwrite
     a specific intent the parser already classified — multi-intent information
     in request_flags is preserved untouched.
     """
     context = parser_signals.context
     flags = parser_signals.request_flags
-    primary_intent = context.primary_intent
+    semantic_intent = context.semantic_intent
     confidence = context.intent_confidence or 0.0
 
     dominant_intent = _dominant_intent_from_flags(flags, normalized_query)
-    if dominant_intent and primary_intent in {"unknown", "general_info"}:
-        primary_intent = dominant_intent
+    if dominant_intent and semantic_intent in {"unknown", "general_info"}:
+        semantic_intent = dominant_intent
         confidence = max(confidence, 0.80)
 
-    if primary_intent == context.primary_intent and confidence == context.intent_confidence:
+    if semantic_intent == context.semantic_intent and confidence == context.intent_confidence:
         return parser_signals
 
     return parser_signals.model_copy(
         update={
             "context": context.model_copy(
                 update={
-                    "primary_intent": primary_intent,
+                    "semantic_intent": semantic_intent,
                     "intent_confidence": confidence,
                 }
             )
@@ -100,7 +100,7 @@ def validate_intent_and_flags(
 
 
 def _dominant_intent_from_flags(flags: ParserRequestFlags, query: str) -> str | None:
-    """Pick the most specific intent from flags. Used only when primary_intent
+    """Pick the most specific intent from flags. Used only when semantic_intent
     is too vague. Does NOT override a specific parser classification."""
     flag_intent_map = [
         (flags.needs_invoice or flags.needs_order_status, "order_support"),
@@ -226,7 +226,7 @@ def _gap_fill_flags(
     Only handles commercial and operational families.  Technical family is
     not gap-filled by reconciliation.
     """
-    intent = parser_signals.context.primary_intent
+    intent = parser_signals.context.semantic_intent
     default_flag = _INTENT_DEFAULT_FLAG.get(intent)
     if default_flag is None:
         return parser_signals
@@ -256,7 +256,7 @@ def _fix_cross_family(
     Example: intent=pricing_question but only needs_protocol is set.
     The flags are more granular evidence — correct intent to match.
     """
-    intent = parser_signals.context.primary_intent
+    intent = parser_signals.context.semantic_intent
     intent_family = INTENT_DEMAND.get(intent, "general")
 
     # Vague intents don't constitute a contradiction.
@@ -289,7 +289,7 @@ def _fix_cross_family(
     return parser_signals.model_copy(
         update={
             "context": parser_signals.context.model_copy(
-                update={"primary_intent": corrected_intent}
+                update={"semantic_intent": corrected_intent}
             )
         }
     )
@@ -323,8 +323,8 @@ def _log_refinement_corrections(
     - flags_added: flags supplemented by gap fill
     - flags_removed: flags dropped by correction rules
     """
-    orig_intent = original.context.primary_intent
-    final_intent = refined.context.primary_intent
+    orig_intent = original.context.semantic_intent
+    final_intent = refined.context.semantic_intent
     orig_flags = set(_active_flag_names(original.request_flags))
     final_flags = set(_active_flag_names(refined.request_flags))
 

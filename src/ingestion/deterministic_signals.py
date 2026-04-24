@@ -54,7 +54,7 @@ def _derive_product_context(parser_signals: ParserSignals | None) -> bool:
         parser_signals.entities.product_names
         or parser_signals.entities.catalog_numbers
         or parser_signals.entities.service_names
-        or parser_signals.context.primary_intent in _PRODUCT_INTENTS
+        or parser_signals.context.semantic_intent in _PRODUCT_INTENTS
     )
 
 
@@ -64,7 +64,7 @@ def _derive_operational_context(parser_signals: ParserSignals | None) -> bool:
     return bool(
         parser_signals.entities.order_numbers
         or parser_signals.entities.invoice_numbers
-        or parser_signals.context.primary_intent in _OPERATIONAL_INTENTS
+        or parser_signals.context.semantic_intent in _OPERATIONAL_INTENTS
     )
 
 

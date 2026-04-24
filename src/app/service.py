@@ -306,7 +306,7 @@ def _build_agent_input_payload(
         "thread_id": ingestion_bundle.turn_core.thread_id,
         "query": ingestion_bundle.turn_core.normalized_query,
         "raw_query": ingestion_bundle.turn_core.raw_query,
-        "primary_intent": parser_context.primary_intent,
+        "semantic_intent": parser_context.semantic_intent,
         "missing_information": (
             list(clarification.missing_information)
             if clarification is not None
@@ -320,7 +320,7 @@ def _build_agent_input_payload(
             "action": agent_state.overall_action,
             "dialogue_act": route_decision.dialogue_act.act,
             "dialogue_act_confidence": route_decision.dialogue_act.confidence,
-            "intent": parser_context.primary_intent,
+            "intent": parser_context.semantic_intent,
             "intent_confidence": parser_context.intent_confidence,
             "business_line": getattr(primary_object, "business_line", "") if primary_object is not None else "",
             "business_line_confidence": resolved_object_state.resolution_confidence,
@@ -723,7 +723,7 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
             resolved_object_state.primary_object,
             *resolved_object_state.secondary_objects,
         ],
-        primary_intent=ingestion_bundle.turn_signals.parser_signals.context.primary_intent,
+        semantic_intent=ingestion_bundle.turn_signals.parser_signals.context.semantic_intent,
     )
     demand_profile = build_demand_profile(
         ingestion_bundle.turn_signals.parser_signals,

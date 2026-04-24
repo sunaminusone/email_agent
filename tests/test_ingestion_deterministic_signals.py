@@ -22,7 +22,7 @@ def _signal_values(signals):
 
 
 def _make_parser_signals(*, intent: str = "unknown") -> ParserSignals:
-    return ParserSignals(context=ParserContext(primary_intent=intent))
+    return ParserSignals(context=ParserContext(semantic_intent=intent))
 
 
 def test_numeric_product_identifier_promotes_to_catalog_number():

@@ -275,7 +275,7 @@ class TestRecall:
             thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="answer"),
             intent_memory=IntentMemory(
                 prior_intent_groups=groups,
-                prior_primary_intent="technical_question",
+                prior_semantic_intent="technical_question",
             ),
         )
         ctx = recall(thread_id="t1", user_query="tell me more about CAR-T", prior_state=snapshot)

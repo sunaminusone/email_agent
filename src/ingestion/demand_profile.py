@@ -56,7 +56,7 @@ def build_demand_profile(
     matching groups receive a confidence boost.
     """
     active_flags = _active_flags(parser_signals.request_flags)
-    intent_hint = parser_signals.context.primary_intent
+    intent_hint = parser_signals.context.semantic_intent
     primary_demand, secondary_demands = _resolve_demands(
         active_flags,
         intent_hint=intent_hint,

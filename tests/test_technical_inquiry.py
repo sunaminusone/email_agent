@@ -127,7 +127,7 @@ class TestTechnicalInquiryNoObject:
             ),
             turn_signals=TurnSignals(
                 parser_signals=ParserSignals(
-                    context=ParserContext(primary_intent="technical_question"),
+                    context=ParserContext(semantic_intent="technical_question"),
                     request_flags=ParserRequestFlags(needs_protocol=True),
                 ),
                 deterministic_signals=DeterministicSignals(),
@@ -140,7 +140,7 @@ class TestTechnicalInquiryNoObject:
         intent_groups = assemble_intent_groups(
             request_flags=ingestion_bundle.turn_signals.parser_signals.request_flags,
             resolved_objects=[None],
-            primary_intent="technical_question",
+            semantic_intent="technical_question",
         )
         demand_profile = build_demand_profile(
             ingestion_bundle.turn_signals.parser_signals,
@@ -309,7 +309,7 @@ class TestTechnicalInquiryWithObject:
             ),
             turn_signals=TurnSignals(
                 parser_signals=ParserSignals(
-                    context=ParserContext(primary_intent="technical_question"),
+                    context=ParserContext(semantic_intent="technical_question"),
                     request_flags=ParserRequestFlags(needs_protocol=True),
                 ),
                 deterministic_signals=DeterministicSignals(),
@@ -331,7 +331,7 @@ class TestTechnicalInquiryWithObject:
         intent_groups = assemble_intent_groups(
             request_flags=ingestion_bundle.turn_signals.parser_signals.request_flags,
             resolved_objects=[primary_object],
-            primary_intent="technical_question",
+            semantic_intent="technical_question",
         )
         demand_profile = build_demand_profile(
             ingestion_bundle.turn_signals.parser_signals,

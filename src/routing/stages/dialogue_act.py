@@ -29,7 +29,7 @@ def resolve_dialogue_act(
     """
     selection = parser_signals.selection_resolution
     context = parser_signals.context
-    intent = context.primary_intent
+    intent = context.semantic_intent
 
     # ---- selection --------------------------------------------------------
     if selection is not None and selection.selection_confidence >= 0.5:
@@ -70,7 +70,7 @@ def _is_closing(intent: str, intent_confidence: float, flags: ParserRequestFlags
     """Determine if the turn is a closing signal based on parser output.
 
     Closing = the parser found no meaningful customer intent.  This is
-    signalled by an 'unknown' primary_intent with low confidence AND no
+    signalled by an 'unknown' semantic_intent with low confidence AND no
     request flags set.
     """
     if intent not in _CLOSING_INTENTS:

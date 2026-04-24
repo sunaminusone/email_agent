@@ -78,7 +78,7 @@ def _can_execute_without_object(
     """Decide if execution can proceed without a resolved object.
 
     Reads only from GroupDemand (the semantic layer) — raw request_flags
-    and primary_intent are builder inputs, not routing judgment sources.
+    and semantic_intent are builder inputs, not routing judgment sources.
     """
     if scoped_demand is None:
         return False

@@ -18,16 +18,17 @@ General rules:
 6. Use missing_information to note key details that may be required for downstream handling.
 7. Set needs_human_review=true if the message is high-risk, escalated, sensitive, complaint-heavy, or likely requires human judgment.
 8. Keep reasoning_note short, factual, and non-speculative.
-9. The primary_intent and request_flags must be logically consistent.
-   If primary_intent is "pricing_question", at least one of needs_price or needs_quote should be true.
-   If primary_intent is "timeline_question", needs_timeline should be true.
-   If primary_intent is "technical_question", at least one of needs_protocol, needs_troubleshooting, needs_documentation, or needs_recommendation should be true.
-   If primary_intent is "troubleshooting", needs_troubleshooting should be true.
-   If primary_intent is "order_support", at least one of needs_order_status, needs_invoice, or needs_shipping_info should be true.
-   If primary_intent is "shipping_question", needs_shipping_info should be true.
-   If primary_intent is "complaint", needs_refund_or_cancellation should be true.
-   If primary_intent is "documentation_request", needs_documentation should be true.
-   If primary_intent is "customization_request", needs_customization should be true.
+9. The semantic_intent and request_flags must be logically consistent.
+   If semantic_intent is "pricing_question", at least one of needs_price or needs_quote should be true.
+   If semantic_intent is "timeline_question", needs_timeline should be true.
+   If semantic_intent is "technical_question", at least one of needs_protocol, needs_troubleshooting, needs_documentation, or needs_recommendation should be true.
+   If semantic_intent is "troubleshooting", needs_troubleshooting should be true.
+   If semantic_intent is "order_support", at least one of needs_order_status, needs_invoice, or needs_shipping_info should be true.
+   If semantic_intent is "shipping_question", needs_shipping_info should be true.
+   If semantic_intent is "complaint", needs_refund_or_cancellation should be true.
+   If semantic_intent is "documentation_request", needs_documentation should be true.
+   If semantic_intent is "customization_request", needs_customization should be true.
+   If semantic_intent is "workflow_question", "model_support_question", or "service_plan_question", at least one of needs_protocol, needs_documentation, or needs_recommendation should be true.
 
 How to interpret the schema:
 - normalized_query: a cleaned version of the user's request. You MUST preserve:
@@ -46,7 +47,10 @@ How to interpret the schema:
 
 Intent guidance:
 - product_inquiry: asks whether a product/service exists, is available, or requests general product details
-- technical_question: asks about scientific rationale, protocol, experimental design, validation, mechanism, or technical suitability
+- technical_question: asks about scientific rationale, protocol, experimental design, validation, mechanism, or technical suitability (use when none of workflow_question / model_support_question / service_plan_question applies)
+- workflow_question: asks specifically about the workflow, process steps, sequence, or what happens next in a service
+- model_support_question: asks about supported cell types, species models, platforms, or strains
+- service_plan_question: asks about the service plan, service phases, stages, or how the engagement is structured
 - pricing_question: asks about price, cost, discount, quotation, or budget-related matters
 - timeline_question: asks about turnaround time, lead time, ETA, or delivery timing
 - customization_request: asks for a custom design, custom service, modification, or tailored solution
@@ -85,7 +89,7 @@ Entity resolution guidance:
 - Do not split one named service phrase into multiple product_names.
 - Plural offering names such as "Mouse Monoclonal Antibodies", "Rabbit Monoclonal Antibodies", or "Rabbit Polyclonal Antibody Production" often refer to service lines, not individual products.
 - If the user only gives an alias, extract the alias as mentioned; do not invent a catalog number or canonical title.
-- For short product alias questions like "Tell me about NPM1" or "Tell me about 6 His epitope tag", prefer context.primary_intent = "product_inquiry" unless the user explicitly asks for a document, quote, or order action.
+- For short product alias questions like "Tell me about NPM1" or "Tell me about 6 His epitope tag", prefer context.semantic_intent = "product_inquiry" unless the user explicitly asks for a document, quote, or order action.
 
 Short-query handling guidance:
 - Very short product-like queries often still contain a usable catalog identifier.
@@ -99,26 +103,26 @@ Few-shot examples:
 User: i want product 20001
 Key extraction:
 - entities.catalog_numbers = [{{"text": "20001", "raw": "20001", "start": 15, "end": 20}}]
-- context.primary_intent = "product_inquiry"
+- context.semantic_intent = "product_inquiry"
 - request_flags.needs_availability = true
 
 User: catalog no PM-12345
 Key extraction:
 - entities.catalog_numbers = [{{"text": "PM-12345", "raw": "PM-12345", "start": 11, "end": 19}}]
-- context.primary_intent = "product_inquiry"
+- context.semantic_intent = "product_inquiry"
 - request_flags.needs_availability = true
 
 User: tell me about NPM1
 Key extraction:
 - entities.product_names = [{{"text": "NPM1", "raw": "NPM1", "start": 14, "end": 18}}]
-- context.primary_intent = "product_inquiry"
+- context.semantic_intent = "product_inquiry"
 - request_flags.needs_availability = true
 
 User: do you offer mRNA-LNP delivery?
 Key extraction:
 - entities.service_names = [{{"text": "mRNA-LNP delivery", "raw": "mRNA-LNP delivery", "start": 13, "end": 30}}]
 - entities.product_names = []
-- context.primary_intent = "product_inquiry"
+- context.semantic_intent = "product_inquiry"
 - request_flags.needs_availability = true
 
 --- Technical / troubleshooting ---
@@ -127,77 +131,89 @@ User: What is the CAR-T cell therapy development workflow?
 Key extraction:
 - entities.service_names = [{{"text": "CAR-T cell therapy", "raw": "CAR-T cell therapy", "start": 12, "end": 30}}]
 - entities.product_names = []
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "workflow_question"
 - request_flags.needs_protocol = true
 
 User: I'm having issues with low CAR expression after transduction
 Key extraction:
 - entities.product_names = []
-- context.primary_intent = "troubleshooting"
+- context.semantic_intent = "troubleshooting"
 - request_flags.needs_troubleshooting = true
 
 User: What's the difference between in vitro and in vivo antibody production?
 Key extraction:
 - entities.service_names = [{{"text": "antibody production", "raw": "antibody production", "start": 52, "end": 71}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "technical_question"
 - request_flags.needs_protocol = true
 - request_flags.needs_comparison = true
 
 User: Can I get ELISA and western blot validation as add-ons for my antibody project?
 Key extraction:
 - entities.applications = [{{"text": "ELISA", "raw": "ELISA", "start": 10, "end": 15}}, {{"text": "western blot", "raw": "western blot", "start": 20, "end": 32}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "technical_question"
 - request_flags.needs_protocol = true
 - request_flags.needs_price = true
 
 User: How does the mRNA-LNP delivery process work?
 Key extraction:
 - entities.service_names = [{{"text": "mRNA-LNP delivery", "raw": "mRNA-LNP delivery", "start": 13, "end": 30}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "workflow_question"
+- request_flags.needs_protocol = true
+
+User: Which cell lines does your CAR-T platform support?
+Key extraction:
+- entities.service_names = [{{"text": "CAR-T platform", "raw": "CAR-T platform", "start": 30, "end": 44}}]
+- context.semantic_intent = "model_support_question"
+- request_flags.needs_protocol = true
+
+User: What are the phases of your antibody discovery service plan?
+Key extraction:
+- entities.service_names = [{{"text": "antibody discovery", "raw": "antibody discovery", "start": 30, "end": 48}}]
+- context.semantic_intent = "service_plan_question"
 - request_flags.needs_protocol = true
 
 User: What validation assays are available for CAR-T?
 Key extraction:
 - entities.service_names = [{{"text": "CAR-T", "raw": "CAR-T", "start": 43, "end": 48}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "technical_question"
 - request_flags.needs_protocol = true
 
 User: Can you explain the antibody humanization process?
 Key extraction:
 - entities.service_names = [{{"text": "antibody humanization", "raw": "antibody humanization", "start": 20, "end": 41}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "technical_question"
 - request_flags.needs_protocol = true
 
 User: What documents do you have on your antibody discovery workflow?
 Key extraction:
 - entities.service_names = [{{"text": "antibody discovery", "raw": "antibody discovery", "start": 38, "end": 56}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "technical_question"
 - request_flags.needs_protocol = true
 - request_flags.needs_documentation = true
 
 User: Do you offer flow cytometry services for antibody validation?
 Key extraction:
 - entities.service_names = [{{"text": "flow cytometry services", "raw": "flow cytometry services", "start": 13, "end": 36}}]
-- context.primary_intent = "product_inquiry"
+- context.semantic_intent = "product_inquiry"
 - request_flags.needs_availability = true
 
 User: What readouts are included in the T cell activation assay?
 Key extraction:
 - entities.service_names = [{{"text": "T cell activation assay", "raw": "T cell activation assay", "start": 37, "end": 60}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "technical_question"
 - request_flags.needs_protocol = true
 
 User: We need baculovirus expression for a 50 kDa glycoprotein, what purity can you guarantee?
 Key extraction:
 - entities.service_names = [{{"text": "baculovirus expression", "raw": "baculovirus expression", "start": 8, "end": 30}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "technical_question"
 - request_flags.needs_protocol = true
 - constraints.format_or_size = "50 kDa glycoprotein"
 
 User: Can you do macrophage polarization assays with our construct?
 Key extraction:
 - entities.service_names = [{{"text": "macrophage polarization assays", "raw": "macrophage polarization assays", "start": 11, "end": 41}}]
-- context.primary_intent = "technical_question"
+- context.semantic_intent = "technical_question"
 - request_flags.needs_protocol = true
 
 --- Commercial (pricing / timeline / customization) ---
@@ -205,27 +221,27 @@ Key extraction:
 User: quote for 20001
 Key extraction:
 - entities.catalog_numbers = [{{"text": "20001", "raw": "20001", "start": 10, "end": 15}}]
-- context.primary_intent = "pricing_question"
+- context.semantic_intent = "pricing_question"
 - request_flags.needs_price = true
 - request_flags.needs_quote = true
 
 User: How much does custom peptide synthesis cost?
 Key extraction:
 - entities.service_names = [{{"text": "custom peptide synthesis", "raw": "custom peptide synthesis", "start": 14, "end": 37}}]
-- context.primary_intent = "pricing_question"
+- context.semantic_intent = "pricing_question"
 - request_flags.needs_price = true
 
 User: what is the timeline for Mouse Monoclonal Antibodies?
 Key extraction:
 - entities.service_names = [{{"text": "Mouse Monoclonal Antibodies", "raw": "Mouse Monoclonal Antibodies", "start": 25, "end": 53}}]
 - entities.product_names = []
-- context.primary_intent = "timeline_question"
+- context.semantic_intent = "timeline_question"
 - request_flags.needs_timeline = true
 
 User: I need the price, timeline, and service flyer for custom rabbit monoclonal antibody development
 Key extraction:
 - entities.service_names = [{{"text": "custom rabbit monoclonal antibody development", "raw": "custom rabbit monoclonal antibody development", "start": 49, "end": 95}}]
-- context.primary_intent = "pricing_question"
+- context.semantic_intent = "pricing_question"
 - request_flags.needs_price = true
 - request_flags.needs_timeline = true
 - request_flags.needs_documentation = true
@@ -233,7 +249,7 @@ Key extraction:
 User: We need a modified version of your anti-CD4 antibody with a different conjugate
 Key extraction:
 - entities.product_names = [{{"text": "anti-CD4 antibody", "raw": "anti-CD4 antibody", "start": 38, "end": 55}}]
-- context.primary_intent = "customization_request"
+- context.semantic_intent = "customization_request"
 - request_flags.needs_customization = true
 
 --- Operational (order / shipping / invoice / complaint) ---
@@ -241,25 +257,25 @@ Key extraction:
 User: status of invoice 20001
 Key extraction:
 - entities.order_numbers = [{{"text": "20001", "raw": "20001", "start": 18, "end": 23}}]
-- context.primary_intent = "order_support"
+- context.semantic_intent = "order_support"
 - request_flags.needs_invoice = true
 
 User: Where is my order PO-2024-0389? It was supposed to arrive last week.
 Key extraction:
 - entities.order_numbers = [{{"text": "PO-2024-0389", "raw": "PO-2024-0389", "start": 18, "end": 30}}]
-- context.primary_intent = "order_support"
+- context.semantic_intent = "order_support"
 - request_flags.needs_order_status = true
 - request_flags.needs_shipping_info = true
 
 User: Can you ship to South Korea? What are the cold chain options?
 Key extraction:
-- context.primary_intent = "shipping_question"
+- context.semantic_intent = "shipping_question"
 - request_flags.needs_shipping_info = true
 - constraints.destination = "South Korea"
 
 User: We received the wrong product and need a replacement or refund immediately
 Key extraction:
-- context.primary_intent = "complaint"
+- context.semantic_intent = "complaint"
 - context.urgency = "high"
 - context.needs_human_review = true
 - request_flags.needs_refund_or_cancellation = true
@@ -269,7 +285,7 @@ Key extraction:
 User: datasheet for 20001
 Key extraction:
 - entities.catalog_numbers = [{{"text": "20001", "raw": "20001", "start": 14, "end": 19}}]
-- context.primary_intent = "documentation_request"
+- context.semantic_intent = "documentation_request"
 - request_flags.needs_documentation = true
 
 User: can you send the brochure for that service?
@@ -278,7 +294,7 @@ Key extraction:
 - entities.service_names = []
 - entities.catalog_numbers = []
 - open_slots.referenced_prior_context = "that service"
-- context.primary_intent = "documentation_request"
+- context.semantic_intent = "documentation_request"
 - request_flags.needs_documentation = true
 
 --- Follow-up / partnership ---
@@ -289,17 +305,17 @@ Key extraction:
 - entities.service_names = []
 - entities.catalog_numbers = []
 - open_slots.referenced_prior_context = "it"
-- context.primary_intent = "follow_up"
+- context.semantic_intent = "follow_up"
 
 User: Can you update me on the quote I requested last week for the anti-PD1 antibody?
 Key extraction:
 - entities.product_names = [{{"text": "anti-PD1 antibody", "raw": "anti-PD1 antibody", "start": 60, "end": 77}}]
-- context.primary_intent = "follow_up"
+- context.semantic_intent = "follow_up"
 - request_flags.needs_price = true
 
 User: We'd like to explore a distribution partnership for your reagent portfolio in Southeast Asia
 Key extraction:
-- context.primary_intent = "partnership_request"
+- context.semantic_intent = "partnership_request"
 - context.needs_human_review = true
 - constraints.destination = "Southeast Asia"
 
@@ -375,7 +391,7 @@ Context-dependent follow-up guidance:
 - If the user refers to an object indirectly using phrases like "this antibody", "this service", "that one", "it", "its", "the product", or similar follow-up language, do not guess the missing entity.
 - In those cases, leave product_names / service_names / catalog_numbers empty unless the entity is explicitly restated in the current message.
 - Use open_slots.referenced_prior_context to capture the referring phrase, such as "this antibody" or "that service".
-- If the query clearly depends on prior context, prefer context.primary_intent = "follow_up" unless another intent such as technical_question, documentation_request, or timeline_question is more clearly primary.
+- If the query clearly depends on prior context, prefer context.semantic_intent = "follow_up" unless another intent such as technical_question, documentation_request, or timeline_question is more clearly primary.
 - Never invent a specific product or service name just to make the schema look complete.
 
 Selection resolution guidance:

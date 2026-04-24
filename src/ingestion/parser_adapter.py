@@ -269,7 +269,7 @@ def _map_parser_context(payload: Mapping[str, Any]) -> ParserContext:
     return ParserContext(
         language=str(context.get("language", "other") or "other"),
         channel=str(context.get("channel", "internal_qa") or "internal_qa"),
-        primary_intent=str(context.get("primary_intent", "unknown") or "unknown"),
+        semantic_intent=str(context.get("semantic_intent", "unknown") or "unknown"),
         intent_confidence=float(context.get("intent_confidence", 0.0) or 0.0),
         query_type=str(context.get("query_type", "question") or "question"),
         urgency=str(context.get("urgency", "low") or "low"),

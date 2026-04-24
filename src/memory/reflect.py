@@ -268,7 +268,7 @@ def _store_intent_groups(
             "intent_memory": IntentMemory(
                 prior_intent_groups=new_groups,
                 stacked_intent_history=stacked,
-                prior_primary_intent=new_primary,
+                prior_semantic_intent=new_primary,
                 continuity_confidence=current_intent_memory.continuity_confidence,
                 turns_since_last_intent_change=0 if intents_changed else current_intent_memory.turns_since_last_intent_change,
             ),
