@@ -30,7 +30,12 @@ General rules:
    If primary_intent is "customization_request", needs_customization should be true.
 
 How to interpret the schema:
-- normalized_query: a cleaned version of the user's request that preserves meaning while removing obvious noise
+- normalized_query: a cleaned version of the user's request. You MUST preserve:
+  * All technical terms and biotech terminology mentioned by the user (e.g. CAR-T, xenograft, mRNA-LNP, ELISA, hybridoma, PK/PD, IHC, toxicology, transduction, split CAR, immunostaining, lyophilized, bacterium, target gene, etc.)
+  * All background context the user states about prior work, their material, or their experimental setup (e.g. "we already conducted xenograft studies", "we developed CAR T cells", "we can send inactivated bacteria")
+  * Any specific constraint numbers or scales ("2-4 constructs", "1 mg", "3500 bp")
+  Only remove: greetings ("Hi", "Hello"), sign-offs ("Thanks", "Regards", "-Name"), politeness templates ("I would like to", "Could you please", "we are interested in", "I'm wondering if", "For research purposes only", "In my laboratory"), institution/location self-introductions ("I'm writing from X, Poland"), and form metadata ("[From Promab Web Form]").
+  If unsure whether a phrase is context or noise, KEEP IT. An over-preserved normalized_query is safe; an over-trimmed one destroys retrieval.
 - context: the overall meaning, tone, urgency, and handling risk of the message
 - entities: concrete things explicitly mentioned, such as products, services, targets, species, documents, order numbers, or company names
 - request_flags: what the user is asking for or needs help with. Multiple flags can be true when the user has multiple needs in one message.
@@ -343,6 +348,28 @@ Use open_slots for important context that does not fit fixed schema cleanly:
 - delivery_or_logistics_note
 - regulatory_or_compliance_note
 - other_notes
+
+Retrieval hints guidance:
+The retrieval_hints field provides keywords and expanded queries that help the downstream retrieval system match the user's request against documentation titles and section labels in the knowledge base. These hints are consumed by a vector retriever; they should read like concise documentation phrases, not like natural-language questions.
+
+For retrieval_hints.keywords:
+- Extract 3-8 short keywords directly supported by the message.
+- Include canonical terminology drawn from entities, applications, and constraints.format_or_size.
+- Prefer technical nouns; skip filler such as "looking", "question", "service".
+- Do not repeat the full entity text verbatim — use short canonical terms.
+
+For retrieval_hints.expanded_queries:
+- Generate 3-5 concise reformulations of the user's request, each a short phrase (5-12 words) written in the style of a documentation section title (e.g. "Custom Rabbit Polyclonal Antibody Development", "mRNA-LNP Development Service Workflow", "Split CAR-T Cytotoxicity Assessment").
+- Do NOT copy the original query verbatim.
+- Do NOT include greetings, politeness phrases, or verbose qualifiers ("we are interested in", "could you please", "in my laboratory", "for research purposes only").
+- Translate colloquial phrasing into canonical biotech terminology (e.g. user says "polyclonal antibody against our bacterium" → write "Custom Rabbit Polyclonal Antibody against bacterial whole-cell immunogen").
+- **Business-line anchoring (strict)**: If the user's message mentions a ProMab business line keyword (CAR-T, CAR T cells, mRNA-LNP, LNP, antibody, antibody production, hybridoma, polyclonal, monoclonal, protein expression, cell line), every expanded query MUST include that business-line anchor. Do not drop the anchor even when reformulating to "documentation title" style.
+  * Example: user says "CAR T cells... toxicology, PK/PD, and IHC analyses of xenograft tumor samples" → each expansion must keep "CAR-T" or "CAR-T xenograft": ["CAR-T xenograft toxicology analysis", "CAR-T PK/PD study workflow", "CAR-T IHC tumor sample analysis", "CAR-T efficacy validation models"]. Do NOT generate bare "Quote for toxicology studies" — that drops the CAR-T anchor and pulls unrelated docs.
+  * Example: user says "split CAR for transduction into T cells" → each expansion keeps "CAR" or "CAR-T".
+  * Example: user says "mRNA/LNPs... lyophilized or spray dried" → each expansion keeps "mRNA-LNP" or "lipid nanoparticle"; never bare "lyophilization" (matches peptide docs).
+- **Do not seed expansions from non-technical context**: Do not generate expansions from institution names, geographic locations, sign-offs, or self-introductions. If user says "I'm writing from cancer vaccine science, Poland", do NOT generate "Pricing for cancer vaccine products" — "cancer vaccine science" is an institution name, not a product category.
+- Write in English regardless of user language (the knowledge base is English).
+- Leave expanded_queries as [] only when the message is clearly off-domain (investment partnership, distributor agreement, general shipping question) or too ambiguous to reformulate.
 
 Context-dependent follow-up guidance:
 - If the user refers to an object indirectly using phrases like "this antibody", "this service", "that one", "it", "its", "the product", or similar follow-up language, do not guess the missing entity.
