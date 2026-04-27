@@ -253,6 +253,15 @@ def _store_intent_groups(
         new_primary = new_groups[0].intent if new_groups else "unknown"
         old_groups = list(current_intent_memory.prior_intent_groups)
 
+        # follow_up / unknown are dialogue-act / no-signal labels — not
+        # retrieval bucket intents. Keep prior_semantic_intent as the last
+        # meaningful bucket so chained follow-ups still inherit the right one.
+        prior_semantic_intent = (
+            current_intent_memory.prior_semantic_intent
+            if new_primary in {"follow_up", "unknown"}
+            else new_primary
+        )
+
         # Check if intents actually changed
         old_intents = {g.intent for g in old_groups}
         new_intents = {g.intent for g in new_groups}
@@ -268,7 +277,7 @@ def _store_intent_groups(
             "intent_memory": IntentMemory(
                 prior_intent_groups=new_groups,
                 stacked_intent_history=stacked,
-                prior_semantic_intent=new_primary,
+                prior_semantic_intent=prior_semantic_intent,
                 continuity_confidence=current_intent_memory.continuity_confidence,
                 turns_since_last_intent_change=0 if intents_changed else current_intent_memory.turns_since_last_intent_change,
             ),

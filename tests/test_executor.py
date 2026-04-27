@@ -17,7 +17,7 @@ from src.executor.merger import final_status_for_calls, merge_execution_results
 from src.executor.models import ExecutionContext, ToolSelection
 from src.executor.request_builder import build_tool_request
 from src.executor.tool_selector import select_tools, _score_tool, _classify_demand, _get_active_flags
-from src.executor.engine import build_execution_context, run_executor
+from src.executor.engine import _resolve_follow_up_intent, build_execution_context, run_executor
 from src.ingestion.models import ParserConstraints, ParserOpenSlots, ParserRequestFlags, ParserRetrievalHints
 from src.objects.models import ObjectCandidate
 from src.routing.models import DialogueActResult, RouteDecision
@@ -582,6 +582,36 @@ class TestBuildExecutionContext:
         assert ctx.parser_constraints.budget == "3000 USD"
         assert ctx.parser_open_slots is not None
         assert ctx.parser_open_slots.experiment_type == "ELISA"
+
+
+class TestResolveFollowUpIntent:
+    """Backlog #8: follow_up turn substitutes prior_semantic_intent so RAG
+    sees the meaningful retrieval bucket instead of the placeholder."""
+
+    def _snapshot_with_prior(self, prior: str):
+        from src.memory.models import IntentMemory, MemorySnapshot
+        return MemorySnapshot(intent_memory=IntentMemory(prior_semantic_intent=prior))
+
+    def test_substitutes_when_follow_up_with_meaningful_prior(self) -> None:
+        snap = self._snapshot_with_prior("pricing_question")
+        assert _resolve_follow_up_intent("follow_up", snap) == "pricing_question"
+
+    def test_passes_through_non_follow_up(self) -> None:
+        snap = self._snapshot_with_prior("pricing_question")
+        assert _resolve_follow_up_intent("technical_question", snap) == "technical_question"
+
+    def test_keeps_follow_up_when_prior_is_unknown(self) -> None:
+        snap = self._snapshot_with_prior("unknown")
+        assert _resolve_follow_up_intent("follow_up", snap) == "follow_up"
+
+    def test_keeps_follow_up_when_prior_is_also_follow_up(self) -> None:
+        # Belt-and-suspenders: writer-side fix should prevent this state, but
+        # the resolver shouldn't loop to itself even if it ever sees one.
+        snap = self._snapshot_with_prior("follow_up")
+        assert _resolve_follow_up_intent("follow_up", snap) == "follow_up"
+
+    def test_passes_through_when_no_memory(self) -> None:
+        assert _resolve_follow_up_intent("follow_up", None) == "follow_up"
 
 
 class TestAmbiguousBusinessLineAggregation:

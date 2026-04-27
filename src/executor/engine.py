@@ -124,6 +124,24 @@ def run_executor(
 # Context construction
 # ---------------------------------------------------------------------------
 
+def _resolve_follow_up_intent(
+    parser_intent: str,
+    memory_snapshot: MemorySnapshot | None,
+) -> str:
+    """Substitute prior turn's meaningful intent when this turn is follow_up.
+
+    follow_up is a dialogue-act label, not a retrieval bucket. Without
+    substitution, RAG sees the placeholder follow_up bucket and loses the
+    section-type boosts the prior topic deserves (backlog #8).
+    """
+    if parser_intent != "follow_up" or memory_snapshot is None:
+        return parser_intent
+    prior = memory_snapshot.intent_memory.prior_semantic_intent
+    if prior and prior not in {"follow_up", "unknown"}:
+        return prior
+    return parser_intent
+
+
 def build_execution_context(
     ingestion_bundle: IngestionBundle,
     resolved_object_state: ResolvedObjectState,
@@ -183,7 +201,10 @@ def build_execution_context(
             ingestion_bundle.turn_core.normalized_query
             or ingestion_bundle.turn_core.raw_query
         ),
-        semantic_intent=parser_signals.context.semantic_intent,
+        semantic_intent=_resolve_follow_up_intent(
+            parser_signals.context.semantic_intent,
+            memory_snapshot,
+        ),
         primary_object=primary,
         secondary_objects=list(resolved_object_state.secondary_objects),
         dialogue_act=route_decision.dialogue_act,

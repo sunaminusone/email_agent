@@ -449,6 +449,35 @@ class TestIntentGroupStorage:
         result = _store_intent_groups(snapshot, contribs)
         assert result.intent_memory.turns_since_last_intent_change == 3
 
+    def test_follow_up_intent_does_not_overwrite_prior_semantic_intent(self):
+        """Chain follow-ups must keep prior_semantic_intent pointing at the
+        last meaningful retrieval bucket (backlog #8 writer side)."""
+        snapshot = MemorySnapshot(
+            intent_memory=IntentMemory(
+                prior_intent_groups=[IntentGroup(intent="pricing_question")],
+                prior_semantic_intent="pricing_question",
+            ),
+        )
+        new_groups = [IntentGroup(intent="follow_up", object_display_name="CAR-T")]
+        contribs = [MemoryContribution(source="ingestion", intent_groups=new_groups)]
+        result = _store_intent_groups(snapshot, contribs)
+        # prior_intent_groups gets the new follow_up group (drift tracking unchanged)
+        assert result.intent_memory.prior_intent_groups[0].intent == "follow_up"
+        # But prior_semantic_intent stays pinned to the meaningful intent
+        assert result.intent_memory.prior_semantic_intent == "pricing_question"
+
+    def test_unknown_intent_does_not_overwrite_prior_semantic_intent(self):
+        snapshot = MemorySnapshot(
+            intent_memory=IntentMemory(
+                prior_intent_groups=[IntentGroup(intent="technical_question")],
+                prior_semantic_intent="technical_question",
+            ),
+        )
+        new_groups = [IntentGroup(intent="unknown")]
+        contribs = [MemoryContribution(source="ingestion", intent_groups=new_groups)]
+        result = _store_intent_groups(snapshot, contribs)
+        assert result.intent_memory.prior_semantic_intent == "technical_question"
+
     def test_stack_depth_limited(self):
         snapshot = MemorySnapshot(
             intent_memory=IntentMemory(
