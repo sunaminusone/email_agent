@@ -113,6 +113,10 @@ MANUAL_SERVICE_ALIASES: dict[str, tuple[str, ...]] = {
     ),
     "Stable Cell Line Development": (
         "stable cell line service",
+        # CHO is shared with Mammalian Protein Expression on purpose so a
+        # bare "CHO" / "CHO work" surfaces multi-match → ambiguous_set.
+        "CHO",
+        "CHO cell line",
     ),
     "T Cell Activation and Proliferation Assay": (
         "T cell activation",
@@ -127,6 +131,10 @@ MANUAL_SERVICE_ALIASES: dict[str, tuple[str, ...]] = {
     ),
     "Mammalian Protein Expression": (
         "mammalian expression",
+        # See note on Stable Cell Line Development — CHO intentionally
+        # ambiguous between the two services.
+        "CHO",
+        "CHO cell line",
     ),
     "Baculovirus Protein Expression": (
         "baculovirus expression",
@@ -327,10 +335,15 @@ def _resolve_alias_lookup_key(alias: str) -> str:
             if not stripped or stripped == candidate:
                 continue
             normalized = normalize_object_alias(stripped)
-            # Require at least two tokens — single-word strips would
-            # produce overly generic keys ("rabbit", "antibody") that
-            # might collide across services.
-            if not normalized or len(normalized.split()) < 2:
+            if not normalized:
+                continue
+            # Single-token strips would otherwise produce overly generic
+            # keys ("rabbit", "antibody") that could collide across
+            # services.  Allow them ONLY when the stripped form is itself
+            # a registered alias — acronyms ("CHO") and catalog-style
+            # tokens that the alias map intentionally indexes as
+            # multi-target ambiguity triggers.
+            if len(normalized.split()) < 2 and normalized not in alias_index:
                 continue
             candidate = normalized
             progressed = True
