@@ -31,9 +31,10 @@ from src.routing import route
 
 logger = logging.getLogger(__name__)
 
-# Phase 1 gate: RAG confidence is observed and logged, but does NOT yet trigger
-# a handoff override. Flip to True only after the observed distribution from
-# real traffic has been used to define low/medium/high thresholds.
+# RAG confidence levels are now tiered (low/medium/high) using thresholds
+# derived from synthetic corpora. The gate stays disabled until real traffic
+# validates those cutoffs and the action target ("handoff" vs "clarify")
+# is reconciled with the backlog.
 _RAG_CONFIDENCE_HANDOFF_ENABLED = False
 
 

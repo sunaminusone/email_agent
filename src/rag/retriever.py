@@ -124,13 +124,15 @@ def _is_plan_comparison_query(query: str) -> bool:
 def _compute_retrieval_confidence(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Compute observable confidence signals for the top-k retrieved matches.
 
-    Phase 1: level is always "observed" — downstream must not act on it as
-    a decision signal yet. Gather real distributions first, then define
-    low/medium/high thresholds in a later iteration.
+    Phase 1.5: level is now tiered (low/medium/high) using thresholds derived
+    from the Phase 1 observation distributions across the synthetic corpora
+    (top_final q25=-4.3 / median=-0.9 / q75=1.9; top_margin q25=0.37 / q75=0.95).
+    The handoff gate in src/app/service.py remains disabled — these tiers are
+    telemetry only until real production traffic validates the cutoffs.
     """
     if not matches:
         return {
-            "level": "observed",
+            "level": "low",
             "top_final_score": 0.0,
             "top_base_score": 0.0,
             "top_margin": 0.0,
@@ -148,8 +150,15 @@ def _compute_retrieval_confidence(matches: List[Dict[str, Any]]) -> Dict[str, An
     rest_finals = [float(m.get("final_score", 0.0)) for m in matches[1:4]]
     top_margin = top_final - (sum(rest_finals) / len(rest_finals)) if rest_finals else 0.0
 
+    if top_final < -3.0 and top_margin < 0.4:
+        level = "low"
+    elif top_final > 2.0 or top_margin > 1.0:
+        level = "high"
+    else:
+        level = "medium"
+
     return {
-        "level": "observed",
+        "level": level,
         "top_final_score": top_final,
         "top_base_score": top_base,
         "top_margin": top_margin,
