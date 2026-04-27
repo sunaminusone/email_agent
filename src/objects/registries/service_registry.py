@@ -49,21 +49,36 @@ MANUAL_SERVICE_ALIASES: dict[str, tuple[str, ...]] = {
         "mRNA LNP",
         "mRNA LNP development",
     ),
+    # The three species-specific monoclonal services share the bare
+    # "monoclonal antibody" / "monoclonal antibodies" / "mAb" aliases on
+    # purpose: when a customer says it without species, the alias index
+    # surfaces all three canonicals so service_extractor's multi-match
+    # branch fires AmbiguousObjectSet → routing emits
+    # object_disambiguation clarify rather than picking one arbitrarily.
     "Mouse Monoclonal Antibodies": (
         "Mouse Monoclonal Antibody Service",
         "Mouse Monoclonal Antibody Development",
         "mouse monoclonal",
         "mouse mAb",
+        "monoclonal antibody",
+        "monoclonal antibodies",
+        "mAb",
     ),
     "Rabbit Monoclonal Antibodies": (
         "Rabbit Monoclonal Antibody Service",
         "Rabbit Monoclonal Antibody Development",
         "rabbit monoclonal",
         "rabbit mAb",
+        "monoclonal antibody",
+        "monoclonal antibodies",
+        "mAb",
     ),
     "Human Monoclonal Antibodies": (
         "human monoclonal",
         "human mAb",
+        "monoclonal antibody",
+        "monoclonal antibodies",
+        "mAb",
     ),
     "Rabbit Polyclonal Antibody Production": (
         "Rabbit Polyclonal Antibodies",
