@@ -127,7 +127,7 @@ def _default_scope_context(
         "original_query": query,
         "effective_query": query,
         "context": {
-            "semantic_intent": "technical_question",
+            "semantic_intent": "",
         },
         "entities": {
             "service_names": list(service_names),
