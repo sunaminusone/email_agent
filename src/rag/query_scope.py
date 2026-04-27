@@ -136,7 +136,6 @@ _SEMANTIC_INTENT_BUCKET_MAP: dict[str, str] = {
     "shipping_question": "operational",
     "order_support": "operational",
     "complaint": "operational",
-    "partnership_request": "general_info",
     "general_info": "general_info",
     "follow_up": "follow_up",
     "unknown": "unknown",
@@ -201,7 +200,7 @@ _BUCKET_MODES: dict[str, str] = {
     "documentation": "lexical_only",
     "customization": "lexical_only",
     "operational": "non_rag",
-    "general_info": "non_rag",
+    "general_info": "lexical_only",
     "follow_up": "placeholder",
     "unknown": "placeholder",
 }
