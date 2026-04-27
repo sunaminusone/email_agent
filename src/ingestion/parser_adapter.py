@@ -31,8 +31,12 @@ def _format_pending_clarification(stateful_anchors: StatefulAnchors | None) -> s
     options = stateful_anchors.pending_candidate_options
     if not options:
         return "None"
+    # 1-based labels match the user's mental model (assistant turns
+    # typically present options as "1) X 2) Y 3) Z").  The schema's
+    # selected_index remains 0-based; the parser_prompt rule + the
+    # 第二个 / "the first one" few-shots cover the 1→0 translation.
     lines = [f"Type: {stateful_anchors.pending_clarification_field}", "Options:"]
-    for idx, option in enumerate(options):
+    for idx, option in enumerate(options, start=1):
         lines.append(f"  {idx}: {option}")
     return "\n".join(lines)
 
