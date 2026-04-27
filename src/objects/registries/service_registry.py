@@ -257,12 +257,82 @@ def get_service_registry_payload() -> dict[str, Any]:
     }
 
 
+# Trailing-suffix patterns applied at lookup time when the parser's raw
+# entity span doesn't match the alias index exactly.  The first seven
+# mirror `_generate_service_phrase_variants` so lookup picks up the
+# phrase variants the registry has ALREADY indexed at registration time
+# (e.g. canonical "Rabbit Polyclonal Antibody Production" registers
+# variant "Rabbit Polyclonal Antibody" by stripping "Production"; without
+# symmetric strip at lookup, parser's "rabbit polyclonal antibody
+# project" cannot reach it).  The last three are extras the parser
+# emits in natural-language phrasing that registration does not generate
+# from canonical names.
+_LOOKUP_TRAIL_STRIP_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\bdesign and development\b$", ""),
+    (r"\bservices\b$", ""),
+    (r"\bservice\b$", ""),
+    (r"\bdevelopment\b$", ""),
+    (r"\bmanufacturing\b$", ""),
+    (r"\bproduction\b$", ""),
+    (r"\bassay\b$", ""),
+    (r"\bproject\b$", ""),
+    (r"\bprojects\b$", ""),
+    (r"\bwork\b$", ""),
+)
+
+
+def _resolve_alias_lookup_key(alias: str) -> str:
+    """Return an alias-index key that hits the registry, applying iterative
+    trailing-suffix stripping when the raw input misses.
+
+    Returns "" when no transformation produces a hit.
+
+    Symmetry with registration: `_generate_service_phrase_variants`
+    pre-generates phrase variants by stripping the same trailing
+    suffixes from canonical names.  Without this lookup-side
+    counterpart, parser-emitted phrases like "X service" / "X
+    development" / "X project" would miss even though registration
+    already indexed "X" as a phrase variant.
+    """
+    primary = normalize_object_alias(alias)
+    if not primary:
+        return ""
+    payload = get_service_registry_payload()
+    alias_index = payload["alias_to_services"]
+    if primary in alias_index:
+        return primary
+
+    candidate = primary
+    # Iteratively strip — multi-suffix shapes ("X development project")
+    # need more than one pass.  Bounded by len(patterns) so it terminates.
+    for _ in range(len(_LOOKUP_TRAIL_STRIP_PATTERNS)):
+        progressed = False
+        for pattern, replacement in _LOOKUP_TRAIL_STRIP_PATTERNS:
+            stripped = re.sub(pattern, replacement, candidate, flags=re.IGNORECASE).strip()
+            if not stripped or stripped == candidate:
+                continue
+            normalized = normalize_object_alias(stripped)
+            # Require at least two tokens — single-word strips would
+            # produce overly generic keys ("rabbit", "antibody") that
+            # might collide across services.
+            if not normalized or len(normalized.split()) < 2:
+                continue
+            candidate = normalized
+            progressed = True
+            if candidate in alias_index:
+                return candidate
+            break
+        if not progressed:
+            break
+    return ""
+
+
 def lookup_services_by_alias(alias: str) -> list[dict[str, Any]]:
-    normalized = normalize_object_alias(alias)
-    if not normalized:
+    key = _resolve_alias_lookup_key(alias)
+    if not key:
         return []
     payload = get_service_registry_payload()
-    names = payload["alias_to_services"].get(normalized, [])
+    names = payload["alias_to_services"].get(key, [])
     return [
         payload["by_canonical_name"][name]
         for name in names
@@ -271,11 +341,11 @@ def lookup_services_by_alias(alias: str) -> list[dict[str, Any]]:
 
 
 def lookup_service_alias_matches(alias: str) -> list[dict[str, str]]:
-    normalized = normalize_object_alias(alias)
-    if not normalized:
+    key = _resolve_alias_lookup_key(alias)
+    if not key:
         return []
     payload = get_service_registry_payload()
-    return payload["alias_to_match_records"].get(normalized, [])
+    return payload["alias_to_match_records"].get(key, [])
 
 
 def canonicalize_service_name(value: str) -> str:
