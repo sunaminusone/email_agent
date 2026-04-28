@@ -38,6 +38,11 @@ htmlcov/
 # Local data (chromadb, tokens, exports)
 data/
 
+# Benchmark / observation / ablation run artifacts (timestamped CSV/JSON
+# scratch produced by tests/eval_* and scripts/bench_*; key numbers live in
+# memory and design docs, the artifacts themselves are run-local).
+outputs/
+
 # HubSpot CLI auth (local only)
 hubspot.config.yml
 
