@@ -215,7 +215,6 @@ def _build_ingestion_contribution(
 def _build_routing_contribution(
     route,
     current_snapshot,
-    final_response: FinalResponsePayload,
     active_object: ObjectRef | None,
     should_soft_reset: bool,
 ) -> MemoryContribution:
@@ -228,7 +227,9 @@ def _build_routing_contribution(
     return MemoryContribution(
         source="routing",
         active_route=route.action,
-        route_phase="waiting_for_user" if final_response.response_type == "clarification" else "active",
+        # v4 CSR mode renders every turn as csr_draft; no clarification-typed
+        # response_type can ever be produced, so route_phase is always "active".
+        route_phase="active",
         active_business_line=getattr(active_object, "business_line", "") if active_object is not None else "",
         set_pending_clarification=(
             ClarificationMemory(
@@ -401,7 +402,7 @@ def _persist_session_state(
     contributions = [
         _build_ingestion_contribution(intent_groups),
         _build_objects_contribution(resolved_object_state, should_soft_reset),
-        _build_routing_contribution(primary_route, memory_context.snapshot, final_response, _to_object_ref(active_object), should_soft_reset),
+        _build_routing_contribution(primary_route, memory_context.snapshot, _to_object_ref(active_object), should_soft_reset),
         _build_response_contribution(response_bundle.response_plan),
     ]
 
@@ -412,11 +413,12 @@ def _persist_session_state(
         normalized_query=ingestion_bundle.turn_core.normalized_query or ingestion_bundle.turn_core.raw_query,
         last_turn_type=final_response.response_type,
     )
-    waiting_for_user = final_response.response_type in ("clarification", "partial_answer")
-    route_phase = "waiting_for_user" if waiting_for_user else "active"
+    # v4 CSR mode: every turn produces a csr_draft, so no response_type can
+    # signal that we are blocked waiting for the user — route_phase is always
+    # "active".
     route_state = snapshot_to_route_state(
         updated_snapshot,
-        route_phase=route_phase,
+        route_phase="active",
         last_assistant_prompt_type=final_response.response_type,
     )
     assistant_message = {
@@ -444,7 +446,7 @@ def _persist_session_state(
     )
     session_store.persist_memory_snapshot(
         thread_id, updated_snapshot,
-        route_phase=route_phase,
+        route_phase="active",
         last_assistant_prompt_type=final_response.response_type,
     )
     return assistant_message
