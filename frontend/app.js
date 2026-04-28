@@ -4,7 +4,6 @@ const clearChatButton = document.getElementById("clear-chat-btn");
 const newChatButton = document.getElementById("new-chat-btn");
 const parsedResult = document.getElementById("parsed_result");
 const agentInput = document.getElementById("agent_input");
-const replyPreview = document.getElementById("reply_preview");
 const workflow = document.getElementById("workflow");
 const executionPlan = document.getElementById("execution_plan");
 const executionRun = document.getElementById("execution_run");
@@ -13,21 +12,15 @@ const responseTopicSummary = document.getElementById("response_topic_summary");
 const responseContentBlocks = document.getElementById("response_content_blocks");
 const documentResults = document.getElementById("document_results");
 const technicalResults = document.getElementById("technical_results");
+const historicalResults = document.getElementById("historical_results");
+const trustSummary = document.getElementById("trust_summary");
+const routingNoteSummary = document.getElementById("routing_note_summary");
 const routeResult = document.getElementById("route_result");
-const routingSignals = document.getElementById("routing_signals");
-const routingSummary = document.getElementById("routing_summary");
-const secondaryRoutesSummary = document.getElementById("secondary_routes_summary");
 const chatHistory = document.getElementById("chat_history");
 const historyNav = document.getElementById("history_nav");
-const intentTags = document.getElementById("intent_tags");
-const currentIntent = document.getElementById("current_intent");
-const currentConfidence = document.getElementById("current_confidence");
-const currentRoute = document.getElementById("current_route");
-const currentStatus = document.getElementById("current_status");
 const sessionHint = document.getElementById("session_hint");
 const questionSamples = document.getElementById("question_samples");
 const refreshSamplesButton = document.getElementById("refresh-samples-btn");
-const quickActionButtons = Array.from(document.querySelectorAll(".quick-card"));
 
 const CHAT_STORAGE_KEY = "email_agent.chat_messages";
 const THREAD_STORAGE_KEY = "email_agent.thread_id";
@@ -114,6 +107,33 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function formatSlackInline(escaped) {
+  return escaped
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>")
+    .replace(/_([^_\n]+)_/g, "<em>$1</em>");
+}
+
+function formatSlackMessage(text) {
+  const lines = String(text || "").split("\n");
+  const out = [];
+  for (const raw of lines) {
+    const trimmed = raw.replace(/^\s+/, "");
+    if (trimmed.startsWith(">")) {
+      const inner = trimmed.replace(/^>\s?/, "");
+      out.push(`<blockquote>${formatSlackInline(escapeHtml(inner))}</blockquote>`);
+    } else if (trimmed.startsWith("•")) {
+      const inner = trimmed.replace(/^•\s?/, "");
+      out.push(`<div class="msg-bullet">${formatSlackInline(escapeHtml(inner))}</div>`);
+    } else if (raw.trim() === "") {
+      out.push("<br />");
+    } else {
+      out.push(`<div>${formatSlackInline(escapeHtml(raw))}</div>`);
+    }
+  }
+  return out.join("");
+}
+
 function createThreadId() {
   if (window.crypto?.randomUUID) {
     return `thread-${window.crypto.randomUUID()}`;
@@ -184,17 +204,6 @@ function renderQuestionSamples() {
   });
 }
 
-function bindQuickActions() {
-  quickActionButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const category = button.dataset.sampleCategory || "product";
-      const options = SAMPLE_QUESTIONS[category] || SAMPLE_QUESTIONS.product;
-      const question = options[Math.floor(Math.random() * options.length)] || "";
-      applySampleQuestion(question);
-    });
-  });
-}
-
 function renderChatHistory() {
   if (!messages.length) {
     chatHistory.innerHTML = `
@@ -207,21 +216,16 @@ function renderChatHistory() {
   }
 
   chatHistory.innerHTML = messages.map((message) => {
-    const roleClass = message.role === "assistant" ? "chat-message-assistant" : "chat-message-user";
-    const roleLabel = message.role === "assistant" ? "Assistant" : "User";
+    const isAssistant = message.role === "assistant";
+    const roleClass = isAssistant ? "chat-message-assistant" : "chat-message-user";
+    const roleLabel = isAssistant ? "Assistant" : "CSR";
     const metaParts = [];
 
     if (message.metadata?.response_type) {
       metaParts.push(`type: ${message.metadata.response_type}`);
     }
-    if (message.metadata?.response_topic) {
-      metaParts.push(`topic: ${message.metadata.response_topic}`);
-    }
     if (message.metadata?.response_path) {
       metaParts.push(`path: ${message.metadata.response_path}`);
-    }
-    if (message.metadata?.route_state?.active_route) {
-      metaParts.push(`route: ${message.metadata.route_state.active_route}`);
     }
 
     const metaLine = metaParts.length
@@ -235,10 +239,14 @@ function renderChatHistory() {
       ? `<div class="document-actions chat-document-actions">${documentLinks}</div>`
       : "";
 
+    const body = isAssistant
+      ? `<div class="message-formatted">${formatSlackMessage(message.content || "")}</div>`
+      : escapeHtml(message.content || "");
+
     return `
       <div class="chat-message ${roleClass}">
-        <strong>${roleLabel}</strong><br />
-        ${escapeHtml(message.content || "")}
+        <strong>${roleLabel}</strong>
+        ${body}
         ${documentSection}
         ${metaLine}
       </div>
@@ -274,33 +282,20 @@ function renderHistoryNav() {
   historyNav.innerHTML = items.join("") || '<p class="history-empty">No conversation yet.</p>';
 }
 
-function updateAgentOverview({ intent = "Awaiting input", confidence = "-", route = "-", status = "Idle" }) {
-  currentIntent.textContent = intent;
-  currentConfidence.textContent = confidence;
-  currentRoute.textContent = route;
-  currentStatus.textContent = status;
-}
-
-function renderIntentTags(tags = ["Product Inquiry", "Pricing", "Technical Question"]) {
-  intentTags.innerHTML = tags.map((tag) => `<span class="intent-tag">${escapeHtml(tag)}</span>`).join("");
-}
-
 function resetInspectorPanels(errorMessage = "等待输入...") {
-  replyPreview.textContent = errorMessage;
   executionPlan.textContent = "{}";
   executionRun.textContent = "{}";
-  responseResolution.textContent = "{}";
   routeResult.textContent = "{}";
   parsedResult.textContent = "{}";
   agentInput.textContent = "{}";
-  responseTopicSummary.innerHTML = '<p class="signal-state">当前没有可展示的 response topic。</p>';
-  responseContentBlocks.innerHTML = '<p class="signal-state">当前没有可展示的内容块。</p>';
-  documentResults.innerHTML = '<p class="signal-state">当前没有可展示的文档结果。</p>';
-  technicalResults.innerHTML = '<p class="signal-state">当前没有可展示的技术检索结果。</p>';
-  updateAgentOverview({});
-  renderIntentTags();
-  renderSecondaryRoutes({});
-  renderRoutingSignals({});
+  answerFocusEl.textContent = "";
+  responseTopicSummary.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
+  responseContentBlocks.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
+  documentResults.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
+  technicalResults.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
+  historicalResults.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
+  trustSummary.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
+  routingNoteSummary.innerHTML = '<p class="signal-state">No routing flag yet.</p>';
   renderWorkflow([]);
 }
 
@@ -352,10 +347,7 @@ ensureThreadId();
 renderSessionHint();
 renderChatHistory();
 renderHistoryNav();
-renderIntentTags();
-updateAgentOverview({});
 renderQuestionSamples();
-bindQuickActions();
 
 function renderWorkflow(items) {
   workflow.innerHTML = "";
@@ -374,60 +366,75 @@ function renderWorkflow(items) {
   });
 }
 
-function renderRoutingSignals(signals) {
-  routingSignals.textContent = JSON.stringify(signals || {}, null, 2);
+function renderTrust(executionRunPayload) {
+  const actions = executionRunPayload?.executed_actions || [];
+  const tech = actions.find((a) => a.action_type === "retrieve_technical_knowledge");
+  const hist = actions.find((a) => a.tool_name === "historical_thread_tool");
+  const conf = tech?.output?.retrieval_confidence || {};
+  const level = String(conf.level || "n/a").toLowerCase();
+  const tierLabels = { high: "📈 High", medium: "📊 Medium", low: "⚠️ Low", "n/a": "—" };
+  const tierLabel = tierLabels[level] || level;
 
-  if (!signals || !Object.keys(signals).length) {
-    routingSummary.innerHTML = '<p class="signal-state">当前没有可展示的路由证据。</p>';
-    updateAgentOverview({});
-    return;
-  }
+  const docCount = (tech?.output?.matches || []).length;
+  const histCount = (hist?.output?.threads || []).length;
 
-  const businessLine = signals.business_line || "unknown";
-  const businessLineConfidence = signals.business_line_confidence || "unknown";
-  const engagementType = signals.engagement_type || "unknown";
-  const customizationScore = signals.customization_score ?? "n/a";
-  const grayReasons = signals.gray_zone_reasons || [];
-  const badgeClass = signals.is_gray_zone ? "signal-badge signal-badge-gray" : "signal-badge signal-badge-clear";
-  const badgeText = signals.is_gray_zone ? "灰区，交给 LLM 仲裁" : "高置信度，规则直接通过";
-  const reasonsText = grayReasons.length ? grayReasons.join(" / ") : "无";
-  const intent = signals.engagement_type || signals.intent || "Routed request";
-  const confidence = signals.business_line_confidence ?? signals.intent_confidence ?? "unknown";
+  const fmt = (n) => Number.isFinite(n) ? Number(n).toFixed(2) : "n/a";
 
-  routingSummary.innerHTML = `
-    <div class="${badgeClass}">${badgeText}</div>
-    <p class="signal-line"><strong>Business Line Hint:</strong> ${businessLine}</p>
-    <p class="signal-line"><strong>Hint Confidence:</strong> ${businessLineConfidence}</p>
-    <p class="signal-line"><strong>Engagement Type:</strong> ${engagementType}</p>
-    <p class="signal-line"><strong>Customization Score:</strong> ${customizationScore}</p>
-    <p class="signal-line"><strong>灰区原因:</strong> ${reasonsText}</p>
+  trustSummary.innerHTML = `
+    <p class="signal-line"><span class="trust-tier trust-tier-${level}">${tierLabel}</span></p>
+    <p class="signal-line"><strong>Top score:</strong> ${fmt(conf.top_final_score)} · margin ${fmt(conf.top_margin)}</p>
+    <p class="signal-line"><strong>Sources:</strong> ${histCount} similar past · ${docCount} docs</p>
   `;
-
-  updateAgentOverview({
-    intent,
-    confidence: String(confidence),
-    route: signals.active_route || signals.route_name || businessLine || "-",
-    status: signals.is_gray_zone ? "Reviewing" : "Ready",
-  });
 }
 
-function renderSecondaryRoutes(route) {
-  const secondaryRoutes = route?.secondary_routes || [];
-  const blockingPrimaryRoutes = new Set(["human_review", "complaint_review", "clarification_request"]);
+function renderRoutingNote(output) {
+  const reason = output?.route?.reason || "";
+  if (!reason.startsWith("AI_ROUTING_NOTE")) {
+    routingNoteSummary.innerHTML = '<p class="signal-state">No routing flag — agent took the confident execute path.</p>';
+    return;
+  }
+  routingNoteSummary.innerHTML = `<p class="signal-line">${escapeHtml(reason)}</p>`;
+}
 
-  if (!secondaryRoutes.length) {
-    secondaryRoutesSummary.innerHTML = '<p class="signal-state">当前没有检测到次路由。</p>';
+function renderHistoricalThreads(executionRunPayload) {
+  const actions = executionRunPayload?.executed_actions || [];
+  const action = actions.find((a) => a.tool_name === "historical_thread_tool");
+  if (!action) {
+    historicalResults.innerHTML = '<p class="signal-state">No historical-thread retrieval ran.</p>';
+    return;
+  }
+  const threads = action.output?.threads || [];
+  if (!threads.length) {
+    historicalResults.innerHTML = `
+      <p class="signal-line"><strong>Status:</strong> ${escapeHtml(action.status || "unknown")}</p>
+      <p class="signal-line">No similar past inquiries returned.</p>
+    `;
     return;
   }
 
-  const modeText = blockingPrimaryRoutes.has(route.route_name)
-    ? "当前主路由是 blocking，次路由先挂起为待办。"
-    : "当前主路由是 non-blocking，次路由可作为补充检索参考。";
+  const items = threads.slice(0, 3).map((thread, index) => {
+    const units = thread.units || [];
+    const first = units[0] || {};
+    const inst = first.institution || "unknown";
+    const sender = first.sender_name || "unknown sender";
+    const service = first.service_of_interest || "—";
+    const date = (first.submitted_at || "").slice(0, 10);
+    const score = Number(thread.best_score || 0).toFixed(2);
+    const replies = units
+      .map((u) => (u.page_content || "").trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 600);
+    return `
+      <div class="thread-card">
+        <p class="thread-title">[${index + 1}] ${escapeHtml(sender)} — ${escapeHtml(inst)}</p>
+        <p class="thread-meta">${escapeHtml(date)} · service: ${escapeHtml(service)} · score ${score} · ${units.length} reply unit(s)</p>
+        <pre class="thread-snippet">${escapeHtml(replies)}</pre>
+      </div>
+    `;
+  }).join("");
 
-  secondaryRoutesSummary.innerHTML = `
-    <p class="signal-line"><strong>处理策略:</strong> ${modeText}</p>
-    <p class="signal-line"><strong>Secondary Routes:</strong> ${secondaryRoutes.join(", ")}</p>
-  `;
+  historicalResults.innerHTML = `<div class="document-list">${items}</div>`;
 }
 
 function renderDocumentResults(executionRunPayload) {
@@ -565,13 +572,8 @@ form.addEventListener("submit", async (event) => {
     syncStoredMessages();
     renderChatHistory();
     renderHistoryNav();
-    renderIntentTags(["Classifying intent", "Checking sources", "Preparing response"]);
-    updateAgentOverview({
-      intent: "Analyzing request",
-      confidence: "-",
-      route: "Pending",
-      status: "Retrieving",
-    });
+    trustSummary.innerHTML = '<p class="signal-state">Retrieving similar threads + docs…</p>';
+    routingNoteSummary.innerHTML = '<p class="signal-state">Routing in progress…</p>';
     userQueryField.value = "";
 
     const response = await fetch("/email-agent/invoke", {
@@ -601,32 +603,20 @@ form.addEventListener("submit", async (event) => {
       renderSessionHint();
     }
 
-    replyPreview.textContent = output.reply_preview || "";
     executionPlan.textContent = JSON.stringify(output.execution_plan || {}, null, 2);
     executionRun.textContent = JSON.stringify(output.execution_run || {}, null, 2);
     answerFocusEl.textContent = output.answer_focus || "";
     routeResult.textContent = JSON.stringify(output.route || {}, null, 2);
     parsedResult.textContent = JSON.stringify(output.parsed || {}, null, 2);
     agentInput.textContent = JSON.stringify(output.agent_input || {}, null, 2);
+    renderTrust(output.execution_run || {});
+    renderRoutingNote(output);
+    renderHistoricalThreads(output.execution_run || {});
     renderResponseTopic(output);
     renderResponseContentBlocks(output);
     renderDocumentResults(output.execution_run || {});
     renderTechnicalResults(output.execution_run || {});
-    renderSecondaryRoutes(output.route || {});
-    renderRoutingSignals(output.agent_input?.routing_debug || {});
     renderWorkflow(output.suggested_workflow || []);
-
-    const derivedTags = [];
-    if (output.route?.route_name) {
-      derivedTags.push(output.route.route_name.replaceAll("_", " "));
-    }
-    if (output.final_response?.response_type) {
-      derivedTags.push(output.final_response.response_type.replaceAll("_", " "));
-    }
-    if (output.execution_run?.executed_actions?.length) {
-      derivedTags.push(...output.execution_run.executed_actions.slice(0, 2).map((action) => action.action_type.replaceAll("_", " ")));
-    }
-    renderIntentTags(derivedTags.length ? derivedTags : undefined);
   } catch (error) {
     if (messages.length && messages[messages.length - 1].role === "user") {
       messages = messages.slice(0, -1);
