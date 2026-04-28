@@ -5,9 +5,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import src.responser.composer as composer_module
-
-from src.agent.state import AgentState, GroupOutcome
+from src.agent.state import GroupOutcome
 from src.common.execution_models import ExecutedToolCall, ExecutionResult
 from src.common.models import DemandProfile, IntentGroup
 from src.ingestion.models import ParserConstraints
@@ -26,7 +24,12 @@ def _empty_execution_result(
     )
 
 
-def test_compose_response_returns_direct_answer_for_grounded_lookup() -> None:
+# ---------------------------------------------------------------------------
+# answer_focus + csr_draft renderer wiring
+# ---------------------------------------------------------------------------
+
+
+def test_grounded_lookup_yields_commercial_focus_in_csr_draft() -> None:
     executed_call = ExecutedToolCall(
         call_id="1",
         tool_name="catalog_lookup_tool",
@@ -47,30 +50,11 @@ def test_compose_response_returns_direct_answer_for_grounded_lookup() -> None:
         )
     )
 
-    assert plan.response_mode == "direct_answer"
-    assert response.response_type == "answer"
-    assert "CD3" in response.message
+    assert plan.answer_focus == "commercial_or_operational_lookup"
+    assert response.response_type == "csr_draft"
 
 
-def test_compose_response_returns_clarification_prompt() -> None:
-    response, plan = compose_response(
-        ResponseInput(
-            query="that one",
-            execution_result=_empty_execution_result(),
-            action="clarify",
-            clarification=ClarificationPayload(
-                prompt="Which product did you mean?",
-                missing_information=["product identifier"],
-            ),
-        )
-    )
-
-    assert plan.response_mode == "clarification"
-    assert response.response_type == "clarification"
-    assert response.message == "Which product did you mean?"
-
-
-def test_compose_response_returns_termination_message() -> None:
+def test_termination_signal_sets_conversation_close_focus() -> None:
     response, plan = compose_response(
         ResponseInput(
             query="stop",
@@ -83,12 +67,62 @@ def test_compose_response_returns_termination_message() -> None:
         )
     )
 
-    assert plan.response_mode == "termination"
-    assert response.response_type == "termination"
-    assert response.message == "Understood. I will stop here on this topic."
+    assert plan.answer_focus == "conversation_close"
+    assert response.response_type == "csr_draft"
+    # Termination must trigger soft_reset so the next turn starts fresh.
+    assert plan.memory_update.soft_reset_current_topic is True
 
 
-def test_build_response_bundle_derives_resolution_and_path() -> None:
+def test_closing_without_terminate_signal_yields_conversation_control() -> None:
+    response, plan = compose_response(
+        ResponseInput(
+            query="ok thanks",
+            locale="en",
+            dialogue_act=DialogueActResult(act="closing"),
+            execution_result=_empty_execution_result(),
+        )
+    )
+
+    assert plan.answer_focus == "conversation_control"
+    assert response.response_type == "csr_draft"
+    assert plan.memory_update.soft_reset_current_topic is False
+
+
+def test_clarify_action_yields_missing_information_focus() -> None:
+    _, plan = compose_response(
+        ResponseInput(
+            query="that one",
+            execution_result=_empty_execution_result(),
+            action="clarify",
+            clarification=ClarificationPayload(
+                prompt="Which product did you mean?",
+                missing_information=["product identifier"],
+            ),
+        )
+    )
+
+    assert plan.answer_focus == "missing_information"
+
+
+def test_handoff_action_yields_human_review_focus() -> None:
+    _, plan = compose_response(
+        ResponseInput(
+            query="I need to speak to a manager",
+            locale="en",
+            execution_result=_empty_execution_result(),
+            action="handoff",
+        )
+    )
+
+    assert plan.answer_focus == "human_review"
+
+
+# ---------------------------------------------------------------------------
+# response_topic + response_path derivation
+# ---------------------------------------------------------------------------
+
+
+def test_build_response_bundle_derives_topic_and_path() -> None:
     executed_call = ExecutedToolCall(
         call_id="1",
         tool_name="technical_rag_tool",
@@ -110,37 +144,12 @@ def test_build_response_bundle_derives_resolution_and_path() -> None:
 
     assert bundle.response_plan.answer_focus == "knowledge_lookup"
     assert bundle.response_topic == "knowledge_lookup"
-    assert bundle.response_path in {"deterministic", "llm_rewrite"}
+    assert bundle.response_path == "csr_renderer_direct"
 
 
-def test_compose_response_falls_back_when_rewrite_fails(monkeypatch) -> None:
-    executed_call = ExecutedToolCall(
-        call_id="1",
-        tool_name="catalog_lookup_tool",
-        status="ok",
-        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
-            tool_name="catalog_lookup_tool",
-            status="ok",
-            primary_records=[{"display_name": "CD3 Antibody"}],
-            structured_facts={"species": ["human"]},
-        ),
-    )
-
-    def _raise_rewrite(*args, **kwargs):
-        raise RuntimeError("rewrite unavailable")
-
-    monkeypatch.setattr(composer_module, "_rewrite_message", _raise_rewrite)
-
-    bundle = build_response_bundle(
-        ResponseInput(
-            query="CD3",
-            execution_result=_empty_execution_result(executed_calls=[executed_call]),
-        )
-    )
-
-    assert bundle.response_path == "deterministic"
-    assert bundle.composed_response.debug_info["rewrite_applied"] is False
+# ---------------------------------------------------------------------------
+# Memory update wiring
+# ---------------------------------------------------------------------------
 
 
 def test_response_plan_updates_last_tool_results_memory() -> None:
@@ -174,53 +183,41 @@ def test_response_plan_updates_last_tool_results_memory() -> None:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Locale tests
-# ---------------------------------------------------------------------------
-
-def test_compose_response_acknowledgement_zh() -> None:
-    response, plan = compose_response(
-        ResponseInput(
-            query="好的",
-            locale="zh",
-            dialogue_act=DialogueActResult(act="closing"),
-            execution_result=_empty_execution_result(),
-        )
+def test_memory_update_stores_primary_demand_only() -> None:
+    """Memory should store primary demand's flags, not all flags from mixed query."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool", status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+        ),
     )
-    assert plan.response_mode == "acknowledgement"
-    assert "收到" in response.message
 
+    bundle = build_response_bundle(ResponseInput(
+        query="CD3 price and protocol",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        demand_profile=DemandProfile(
+            primary_demand="technical",
+            secondary_demands=["commercial"],
+            active_request_flags=["needs_protocol", "needs_price"],
+        ),
+    ))
 
-def test_compose_response_acknowledgement_en() -> None:
-    response, plan = compose_response(
-        ResponseInput(
-            query="ok thanks",
-            locale="en",
-            dialogue_act=DialogueActResult(act="closing"),
-            execution_result=_empty_execution_result(),
-        )
-    )
-    assert plan.response_mode == "acknowledgement"
-    assert "Understood" in response.message
-
-
-def test_compose_response_handoff_en() -> None:
-    response, plan = compose_response(
-        ResponseInput(
-            query="I need to speak to a manager",
-            locale="en",
-            execution_result=_empty_execution_result(),
-            action="handoff",
-        )
-    )
-    assert plan.response_mode == "handoff"
-    assert response.response_type == "handoff"
-    assert "human review" in response.message.lower()
+    mem = bundle.response_plan.memory_update.response_memory
+    assert mem.last_demand_type == "technical"
+    # Only technical flags stored — needs_price (commercial) excluded
+    assert "needs_protocol" in mem.last_demand_flags
+    assert "needs_price" not in mem.last_demand_flags
 
 
 # ---------------------------------------------------------------------------
-# Multi-group / partial_answer tests
+# Group-outcome → answer_focus shortcuts
 # ---------------------------------------------------------------------------
+
 
 def _make_group_outcome(
     intent: str,
@@ -259,34 +256,8 @@ def _make_group_outcome(
     )
 
 
-def test_partial_answer_when_mixed_outcomes() -> None:
-    """Some groups resolved + some need clarification → partial_answer mode."""
-    resolved = _make_group_outcome("pricing_question", "execute", "resolved")
-    needs_clar = _make_group_outcome(
-        "order_support", "clarify", "needs_clarification",
-        clarification=ClarificationPayload(prompt="Which order?", missing_information=["order_number"]),
-    )
-
-    merged_result = ExecutionResult(
-        executed_calls=list(resolved.execution_result.executed_calls),
-        final_status="ok",
-    )
-
-    bundle = build_response_bundle(ResponseInput(
-        query="check price and order status",
-        locale="en",
-        execution_result=merged_result,
-        action="execute",
-        group_outcomes=[resolved, needs_clar],
-    ))
-
-    assert bundle.response_plan.response_mode == "partial_answer"
-    assert bundle.composed_response.response_type == "partial_answer"
-    assert "Which order?" in bundle.composed_response.message
-
-
-def test_all_clarification_outcomes() -> None:
-    """All groups need clarification → clarification mode."""
+def test_group_outcomes_with_clarification_yield_missing_info_focus() -> None:
+    """Any group needing clarification → answer_focus collapses to missing_information."""
     needs_clar = _make_group_outcome(
         "order_support", "clarify", "needs_clarification",
         clarification=ClarificationPayload(prompt="Which order?"),
@@ -301,11 +272,11 @@ def test_all_clarification_outcomes() -> None:
         group_outcomes=[needs_clar],
     ))
 
-    assert bundle.response_plan.response_mode == "clarification"
+    assert bundle.response_plan.answer_focus == "missing_information"
 
 
-def test_all_resolved_outcomes_no_partial() -> None:
-    """All groups resolved → normal answer mode, not partial_answer."""
+def test_all_resolved_outcomes_yield_informational_focus() -> None:
+    """All groups resolved + tool results → falls through to informational focus inference."""
     resolved1 = _make_group_outcome("pricing_question", "execute", "resolved", "pricing_lookup_tool")
     resolved2 = _make_group_outcome("technical_question", "execute", "resolved", "technical_rag_tool")
 
@@ -323,149 +294,17 @@ def test_all_resolved_outcomes_no_partial() -> None:
         group_outcomes=[resolved1, resolved2],
     ))
 
-    assert bundle.response_plan.response_mode == "direct_answer"
+    assert bundle.response_plan.answer_focus in {
+        "knowledge_lookup",
+        "commercial_or_operational_lookup",
+        "general_support",
+    }
 
 
 # ---------------------------------------------------------------------------
-# Technical snippets rendering
+# Topic continuity behaviour
 # ---------------------------------------------------------------------------
 
-def test_technical_snippets_cleaned_in_answer() -> None:
-    """RAG snippet metadata prefixes should be stripped from the answer."""
-    executed_call = ExecutedToolCall(
-        call_id="1",
-        tool_name="technical_rag_tool",
-        status="ok",
-        request=ToolRequest(tool_name="technical_rag_tool", query="CAR-T workflow"),
-        result=ToolResult(
-            tool_name="technical_rag_tool",
-            status="ok",
-            unstructured_snippets=[{
-                "content": "company: ProMab | tags: CAR-T, workflow | title: CAR-T workflow overview | body: The CAR-T development process involves antibody selection, construct generation, and cell production.",
-                "title": "CAR-T workflow overview",
-                "section_type": "workflow_overview",
-            }],
-        ),
-    )
-
-    response, plan = compose_response(
-        ResponseInput(
-            query="CAR-T workflow",
-            locale="en",
-            execution_result=_empty_execution_result(executed_calls=[executed_call]),
-        )
-    )
-
-    assert "company: ProMab" not in response.message
-    assert "tags:" not in response.message
-    assert "CAR-T development process" in response.message or "antibody selection" in response.message
-
-
-# ---------------------------------------------------------------------------
-# Demand-aware planner tests
-# ---------------------------------------------------------------------------
-
-def test_mixed_demand_still_returns_direct_answer() -> None:
-    """Mixed demand (technical + commercial) → direct_answer, no separate hybrid mode."""
-    executed_call = ExecutedToolCall(
-        call_id="1",
-        tool_name="catalog_lookup_tool",
-        status="ok",
-        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
-            tool_name="catalog_lookup_tool",
-            status="ok",
-            primary_records=[{"display_name": "CD3 Antibody"}],
-        ),
-    )
-
-    bundle = build_response_bundle(ResponseInput(
-        query="CD3 price and protocol",
-        locale="en",
-        execution_result=_empty_execution_result(executed_calls=[executed_call]),
-        demand_profile=DemandProfile(
-            primary_demand="technical",
-            secondary_demands=["commercial"],
-            active_request_flags=["needs_protocol", "needs_price"],
-        ),
-    ))
-
-    assert bundle.response_plan.response_mode == "direct_answer"
-
-
-def test_planner_selects_direct_when_demand_single_focus() -> None:
-    """Pure technical demand → direct_answer even with multiple blocks."""
-    calls = [
-        ExecutedToolCall(
-            call_id="1",
-            tool_name="catalog_lookup_tool",
-            status="ok",
-            request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-            result=ToolResult(
-                tool_name="catalog_lookup_tool", status="ok",
-                primary_records=[{"display_name": "CD3 Antibody"}],
-                structured_facts={"species": ["human"]},
-            ),
-        ),
-        ExecutedToolCall(
-            call_id="2",
-            tool_name="technical_rag_tool",
-            status="ok",
-            request=ToolRequest(tool_name="technical_rag_tool", query="CD3"),
-            result=ToolResult(
-                tool_name="technical_rag_tool", status="ok",
-                unstructured_snippets=[{"content": "Protocol info"}],
-            ),
-        ),
-    ]
-
-    bundle = build_response_bundle(ResponseInput(
-        query="CD3 protocol details",
-        locale="en",
-        execution_result=_empty_execution_result(executed_calls=calls),
-        demand_profile=DemandProfile(
-            primary_demand="technical",
-            active_request_flags=["needs_protocol"],
-        ),
-    ))
-
-    assert bundle.response_plan.response_mode == "direct_answer"
-
-
-def test_memory_update_stores_primary_demand_only() -> None:
-    """Memory should store primary demand's flags, not all flags from mixed query."""
-    executed_call = ExecutedToolCall(
-        call_id="1",
-        tool_name="catalog_lookup_tool",
-        status="ok",
-        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
-            tool_name="catalog_lookup_tool", status="ok",
-            primary_records=[{"display_name": "CD3 Antibody"}],
-        ),
-    )
-
-    bundle = build_response_bundle(ResponseInput(
-        query="CD3 price and protocol",
-        locale="en",
-        execution_result=_empty_execution_result(executed_calls=[executed_call]),
-        demand_profile=DemandProfile(
-            primary_demand="technical",
-            secondary_demands=["commercial"],
-            active_request_flags=["needs_protocol", "needs_price"],
-        ),
-    ))
-
-    mem = bundle.response_plan.memory_update.response_memory
-    assert mem.last_demand_type == "technical"
-    # Only technical flags stored — needs_price (commercial) excluded
-    assert "needs_protocol" in mem.last_demand_flags
-    assert "needs_price" not in mem.last_demand_flags
-
-
-# ---------------------------------------------------------------------------
-# Topic continuity tests
-# ---------------------------------------------------------------------------
 
 def _make_response_memory_with_topics(topics: list[str]):
     from src.memory.models import ResponseMemory
@@ -533,43 +372,9 @@ def test_topic_continuing_demotes_object_summary_block() -> None:
     assert "object_summary" not in primary_types
 
 
-def test_topic_continuing_enables_llm_rewrite() -> None:
-    """Consecutive same-topic turns should prefer LLM rewrite."""
-    executed_call = ExecutedToolCall(
-        call_id="1",
-        tool_name="catalog_lookup_tool",
-        status="ok",
-        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
-            tool_name="catalog_lookup_tool",
-            status="ok",
-            primary_records=[{"display_name": "CD3 Antibody"}],
-        ),
-    )
-
-    # Without prior topics — only primary_records, no informational blocks → no rewrite
-    bundle_cold = build_response_bundle(ResponseInput(
-        query="CD3",
-        locale="en",
-        execution_result=_empty_execution_result(executed_calls=[executed_call]),
-    ))
-
-    # With matching prior topic → rewrite enabled even with same blocks
-    bundle_warm = build_response_bundle(ResponseInput(
-        query="CD3",
-        locale="en",
-        execution_result=_empty_execution_result(executed_calls=[executed_call]),
-        response_memory=_make_response_memory_with_topics([
-            bundle_cold.response_plan.answer_focus,
-        ]),
-    ))
-
-    assert bundle_warm.response_plan.should_use_llm_rewrite is True
-
-
 def test_no_topic_continuity_for_control_topics() -> None:
-    """Control topics (closing, clarification) should not trigger continuity."""
-    response, plan = compose_response(
+    """Control-topic acknowledgement should not activate continuity rules."""
+    _, plan = compose_response(
         ResponseInput(
             query="ok thanks",
             locale="en",
@@ -579,13 +384,13 @@ def test_no_topic_continuity_for_control_topics() -> None:
         )
     )
 
-    # acknowledgement is a control topic — should not activate continuity rules
-    assert plan.response_mode == "acknowledgement"
+    assert plan.answer_focus == "conversation_control"
 
 
 # ---------------------------------------------------------------------------
 # Parser constraints in content blocks
 # ---------------------------------------------------------------------------
+
 
 def test_object_summary_block_includes_customer_constraints() -> None:
     """When parser_constraints has non-None values, they appear in block data."""
@@ -618,11 +423,13 @@ def test_object_summary_block_includes_customer_constraints() -> None:
         parser_constraints=constraints,
     ))
 
-    # Find the object_summary block
-    obj_blocks = [
-        b for b in bundle.composed_response.content_blocks
-        if b.block_type == "object_summary"
+    # csr_draft renders a single csr_draft block; the planner's content blocks
+    # (where object_summary lives) live on the ResponsePlan instead.
+    plan_blocks = [
+        *bundle.response_plan.primary_content_blocks,
+        *bundle.response_plan.supporting_content_blocks,
     ]
+    obj_blocks = [b for b in plan_blocks if b.block_type == "object_summary"]
     assert len(obj_blocks) == 1
     data = obj_blocks[0].data
     assert "customer_constraints" in data
@@ -660,9 +467,10 @@ def test_no_customer_constraints_when_none() -> None:
         dialogue_act=DialogueActResult(act="inquiry"),
     ))
 
-    obj_blocks = [
-        b for b in bundle.composed_response.content_blocks
-        if b.block_type == "object_summary"
+    plan_blocks = [
+        *bundle.response_plan.primary_content_blocks,
+        *bundle.response_plan.supporting_content_blocks,
     ]
+    obj_blocks = [b for b in plan_blocks if b.block_type == "object_summary"]
     if obj_blocks:
         assert "customer_constraints" not in obj_blocks[0].data

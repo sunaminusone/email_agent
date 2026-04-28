@@ -195,8 +195,8 @@ class TestTechnicalInquiryNoObject:
         assert "catalog_lookup_tool" not in tool_names
         assert result.final_status == "ok"
 
-    def test_response_mode_is_direct_answer(self):
-        """Pure technical → direct_answer with LLM rewrite."""
+    def test_answer_focus_is_knowledge_lookup(self):
+        """Pure technical RAG-driven inquiry → answer_focus=knowledge_lookup, csr_draft renderer."""
         ingestion_bundle, resolved, intent_groups, demand_profile = self._build_scenario()
         focus_group = intent_groups[0]
 
@@ -221,9 +221,8 @@ class TestTechnicalInquiryNoObject:
             demand_profile=demand_profile,
         ))
 
-        assert bundle.response_plan.response_mode == "direct_answer"
-        assert bundle.response_plan.should_use_llm_rewrite is True
-        assert bundle.composed_response.response_type == "answer"
+        assert bundle.response_plan.answer_focus == "knowledge_lookup"
+        assert bundle.composed_response.response_type == "csr_draft"
 
     def test_response_contains_rag_content(self):
         """Response message should include content from the RAG tool."""
@@ -411,8 +410,8 @@ class TestTechnicalInquiryWithObject:
         assert rag_call.request.primary_object.object_type == "product"
         assert rag_call.request.primary_object.display_name == "Anti-CD3 Antibody"
 
-    def test_response_is_direct_answer_with_content(self):
-        """Full pipeline: technical + object → direct_answer with RAG content."""
+    def test_response_focuses_on_knowledge_with_content(self):
+        """Full pipeline: technical + object → answer_focus=knowledge_lookup with non-empty csr_draft message."""
         ingestion_bundle, resolved, intent_groups, demand_profile = self._build_scenario()
         focus_group = intent_groups[0]
 
@@ -438,6 +437,6 @@ class TestTechnicalInquiryWithObject:
             demand_profile=demand_profile,
         ))
 
-        assert bundle.response_plan.response_mode == "direct_answer"
-        assert bundle.composed_response.response_type == "answer"
+        assert bundle.response_plan.answer_focus == "knowledge_lookup"
+        assert bundle.composed_response.response_type == "csr_draft"
         assert bundle.composed_response.message  # non-empty
