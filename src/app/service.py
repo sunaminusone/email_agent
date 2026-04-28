@@ -564,6 +564,23 @@ def _run_agent_loop(
             scoped_demand=scoped_demand,
         )
 
+        # CSR mode invariant: clarify/handoff are informational signals for
+        # the rep, not gates that block retrieval. Force every group through
+        # the execute path; preserve the original routing judgment on the
+        # decision's `reason` so the composer can surface it as a draft note.
+        if route_decision.action != "execute":
+            note_parts = [f"AI_ROUTING_NOTE original_action={route_decision.action}"]
+            if route_decision.reason:
+                note_parts.append(route_decision.reason)
+            if route_decision.clarification and route_decision.clarification.reason:
+                note_parts.append(
+                    f"clarification_reason={route_decision.clarification.reason}"
+                )
+            route_decision = route_decision.model_copy(update={
+                "action": "execute",
+                "reason": " | ".join(note_parts),
+            })
+
         if route_decision.action == "execute":
             # Build context (shared by path evaluation and executor)
             context = build_execution_context(
@@ -647,13 +664,10 @@ def _run_agent_loop(
                         })
                     status = "needs_clarification"
 
-        elif route_decision.action == "handoff":
-            execution_result = empty_execution_result(reason="needs handoff")
-            status = "needs_handoff"
-        elif route_decision.action == "clarify":
-            execution_result = empty_execution_result(reason="needs clarification")
-            status = "needs_clarification"
         else:
+            # Unreachable in CSR mode (action is always coerced to "execute"
+            # above), but kept as defensive default in case future code
+            # introduces a non-execute action.
             execution_result = empty_execution_result(
                 reason=f"No execution needed: action={route_decision.action}",
             )

@@ -21,6 +21,14 @@ def compose_final_response(
     *,
     locale: str = "zh",
 ) -> ComposedResponse:
+    # CSR mode: the renderer already produces the final structured output
+    # (draft + reference cards + routing notes). The legacy LLM rewrite
+    # was designed to polish customer-facing language; running it here
+    # would collapse the Slack-style sections back into a flowing reply.
+    if draft.response_type == "csr_draft":
+        draft.debug_info.setdefault("response_path", "csr_renderer_direct")
+        return draft
+
     if not response_plan.should_use_llm_rewrite:
         draft.debug_info.setdefault("response_path", "deterministic")
         return draft
