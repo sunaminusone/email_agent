@@ -145,6 +145,43 @@ def test_expand_record_uses_latest_customer_reply_when_present():
     assert rows[1]["reply_message"] == "Perfect, I will prepare the quote."
 
 
+def test_expand_record_keeps_first_sales_reply_paired_to_original_submission():
+    record = {
+        "submission_id": "sub-3b",
+        "message": "Form submission message.",
+        "thread_messages": [
+            {
+                "timestamp": "2026-04-01T10:00:00Z",
+                "message_id": "form-3b",
+                "role": "customer",
+                "source": "form_submission",
+                "text": "Form submission message.",
+            },
+            {
+                "timestamp": "2026-04-01T10:30:00Z",
+                "message_id": "c0",
+                "role": "customer",
+                "source": "crm_email",
+                "text": "Extra customer email before sales replied.",
+            },
+            {
+                "timestamp": "2026-04-01T11:00:00Z",
+                "message_id": "r1",
+                "role": "sales",
+                "source": "crm_email",
+                "text": "First sales reply.",
+            },
+        ],
+    }
+
+    rows = expand_record(record, skip_empty=False)
+
+    assert len(rows) == 1
+    assert rows[0]["customer_message"] == "Form submission message."
+    assert rows[0]["customer_message_source"] == "form_submission"
+    assert rows[0]["reply_message"] == "First sales reply."
+
+
 def test_expand_record_clears_customer_message_for_second_sales_after_same_customer_reply():
     record = {
         "submission_id": "sub-4",

@@ -12,20 +12,27 @@ ProMab RAG 知识库邮件知识提取流水线
         [--dry-run]
 
 输出的 JSONL 文件可直接传入 facts_to_ingestion_sections()，
-生成可导入向量数据库的 IngestionSection 对象。
+生成候选知识条目，供后续审核与入库使用。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from langchain_core.documents import Document
 
 from src.objects.registries.service_registry import KNOWN_BUSINESS_LINES
+from .ingestion_config import build_chunk_metadata, build_embedding_string
+
+EMAIL_KNOWLEDGE_JSONL_PATH = Path(
+    "/Users/promab/anaconda_projects/email_agent/data/processed/rag_email_facts.jsonl"
+)
 
 # ---------------------------------------------------------------------------
 # 提取提示词
@@ -131,7 +138,7 @@ def facts_to_ingestion_sections(
     将原始提取的知识点字典转换为 IngestionSection 兼容对象。
     可直接传入 IngestionSection(**d) 后导入向量数据库。
     """
-    from src.rag.ingestion_config import IngestionSection  # 延迟导入，保持模块可独立运行
+    from .ingestion_config import IngestionSection  # 延迟导入，保持模块可独立运行
 
     sections = []
     for f in facts:
@@ -171,6 +178,53 @@ def facts_to_ingestion_sections(
     return sections
 
 
+def annotate_fact_records_for_review(
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    为抽取出的邮件知识候选项补充审核字段。
+    当前阶段这些记录默认属于候选知识池，不直接视为正式 KB。
+    """
+    annotated: list[dict[str, Any]] = []
+    for record in records:
+        copied = dict(record)
+        copied.setdefault("review_status", "pending")
+        copied.setdefault("approved", False)
+        annotated.append(copied)
+    return annotated
+
+
+def parse_response_payload(raw_response: Any) -> list[dict[str, Any]]:
+    """
+    解析 CSV `responses` 列中的 JSON 内容，兼容 Markdown 代码块包装。
+
+    支持以下常见格式：
+    - {"facts": [...]}
+    - [...]
+    - ```json {"facts": [...]} ```
+    """
+    text = str(raw_response or "").strip()
+    if not text:
+        return []
+
+    if text.startswith("```"):
+        fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.S | re.I)
+        if fence_match:
+            text = fence_match.group(1).strip()
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    if isinstance(payload, dict):
+        facts = payload.get("facts") or []
+        return facts if isinstance(facts, list) else []
+    if isinstance(payload, list):
+        return payload
+    return []
+
+
 def _category_title(category: str, fact: dict[str, Any]) -> str:
     prefixes = {
         "service_capability": "服务能力",
@@ -183,6 +237,79 @@ def _category_title(category: str, fact: dict[str, Any]) -> str:
     tags = fact.get("tags") or []
     suffix = f" — {tags[0]}" if tags else ""
     return f"{prefix}{suffix}"
+
+
+def fact_record_to_documents(
+    record: dict[str, Any],
+    *,
+    source_path: str = "",
+) -> list[Document]:
+    """
+    将一条 JSONL 记录转换为 LangChain Document 列表。
+    """
+    email_index = record.get("email_index", "")
+    facts = list(record.get("facts") or [])
+    source_ref = source_path or f"email_facts:{email_index}"
+    documents: list[Document] = []
+
+    for chunk_index, section in enumerate(
+        facts_to_ingestion_sections(facts, source_email_index=email_index)
+    ):
+        metadata = build_chunk_metadata(section, chunk_index=chunk_index)
+        metadata.update(
+            {
+                "prechunked": True,
+                "source_format": "email_knowledge_jsonl",
+                "chunk_label": section.title,
+                "section_title": section.title,
+                "chunk_level": "section",
+                "source_path": source_ref,
+            }
+        )
+        documents.append(
+            Document(
+                page_content=build_embedding_string(section),
+                metadata=metadata,
+            )
+        )
+    return documents
+
+
+def load_email_knowledge_documents(
+    path: str | Path = EMAIL_KNOWLEDGE_JSONL_PATH,
+    *,
+    approved_only: bool = False,
+) -> list[Document]:
+    """
+    从邮件知识点 JSONL 文件加载可直接入向量库的 Document 列表。
+    缺失文件时返回空列表，便于在主检索链路中按需启用。
+    """
+    source_path = Path(path)
+    if not source_path.exists():
+        return []
+
+    documents: list[Document] = []
+    with source_path.open("r", encoding="utf-8") as fin:
+        for line_no, raw_line in enumerate(fin, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict):
+                continue
+            if approved_only and not bool(record.get("approved")):
+                continue
+            record_source_path = f"{source_path}#L{line_no}"
+            documents.extend(
+                fact_record_to_documents(
+                    record,
+                    source_path=record_source_path,
+                )
+            )
+    return documents
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +402,9 @@ def run_extraction(
                 facts = []
 
             if facts:
-                record = {"email_index": idx, "facts": facts}
+                record = annotate_fact_records_for_review(
+                    [{"email_index": idx, "facts": facts}]
+                )[0]
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
                 extracted_count += len(facts)
                 print(
@@ -311,3 +440,17 @@ if __name__ == "__main__":
         dry_run=args.dry_run,
         limit=args.limit,
     )
+
+
+__all__ = [
+    "EMAIL_KNOWLEDGE_JSONL_PATH",
+    "EXTRACTION_SYSTEM_PROMPT",
+    "EXTRACTION_USER_TEMPLATE",
+    "annotate_fact_records_for_review",
+    "call_llm",
+    "fact_record_to_documents",
+    "facts_to_ingestion_sections",
+    "load_email_knowledge_documents",
+    "parse_response_payload",
+    "run_extraction",
+]

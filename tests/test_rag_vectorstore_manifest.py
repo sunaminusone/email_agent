@@ -81,6 +81,29 @@ def test_manifest_match_requires_source_and_chunking_consistency() -> None:
     assert _manifests_match(changed_chunking, manifest) is False
 
 
+def test_source_documents_digest_changes_when_additional_source_documents_are_added() -> None:
+    service_only = [
+        Document(
+            page_content="service page content",
+            metadata={"source_path": "/tmp/service.txt", "document_type": "service_page"},
+        )
+    ]
+    with_email_knowledge = [
+        *service_only,
+        Document(
+            page_content="email knowledge content",
+            metadata={"source_path": "/tmp/facts.jsonl#L1", "document_type": "technical_text"},
+        ),
+    ]
+
+    digest_a, count_a = _source_documents_digest(service_only)
+    digest_b, count_b = _source_documents_digest(with_email_knowledge)
+
+    assert count_a == 1
+    assert count_b == 2
+    assert digest_a != digest_b
+
+
 def test_load_index_manifest_round_trip(tmp_path: Path) -> None:
     manifest_path = tmp_path / "index_manifest.json"
     manifest = {

@@ -8,6 +8,12 @@ from .ingestion_config import (
     build_embedding_string,
     normalize_tags,
 )
+from .email_knowledge_extraction import (
+    EMAIL_KNOWLEDGE_JSONL_PATH,
+    fact_record_to_documents,
+    facts_to_ingestion_sections,
+    load_email_knowledge_documents,
+)
 from .query_scope import (
     detect_intent_bucket,
     get_bucket_mode,
@@ -38,6 +44,7 @@ __all__ = [
     "DEFAULT_COMPANY",
     "DEFAULT_EMBEDDING_SEPARATOR",
     "DEFAULT_SECTION_CHUNK_POLICY",
+    "EMAIL_KNOWLEDGE_JSONL_PATH",
     "PROMAB_INGESTION_NOTES",
     "IngestionSection",
     "build_chunk_metadata",
@@ -54,6 +61,9 @@ __all__ = [
     "query_matches_non_technical_fallback_path",
     "rebuild_vectorstore",
     "normalize_tags",
+    "fact_record_to_documents",
+    "facts_to_ingestion_sections",
+    "load_email_knowledge_documents",
     "resolve_active_scope",
     "resolve_current_scope",
     "resolve_effective_scope",

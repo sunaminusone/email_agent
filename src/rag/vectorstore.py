@@ -14,6 +14,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
 from src.config import get_embeddings
+from src.rag.email_knowledge_extraction import load_email_knowledge_documents
 from src.rag.service_page_ingestion import load_service_page_documents
 
 CHROMA_DIR = Path("/Users/promab/anaconda_projects/email_agent/data/processed/chroma_rag_service_pages")
@@ -31,7 +32,10 @@ RECURSIVE_SPLITTER = RecursiveCharacterTextSplitter(
 
 
 def _load_source_documents() -> List[Document]:
-    return load_service_page_documents()
+    return [
+        *load_service_page_documents(),
+        *load_email_knowledge_documents(approved_only=True),
+    ]
 
 
 def _stable_chunk_key(chunk: Document) -> str:

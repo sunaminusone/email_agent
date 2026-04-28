@@ -137,7 +137,7 @@ def expand_record(record: dict, skip_empty: bool) -> list[dict]:
         sales_index = sum(1 for prior in messages[: idx + 1] if str(prior.get("role", "")) == "sales")
         attachments = message.get("attachment_ids") or []
         customer_message, customer_message_source = _resolve_customer_message_for_sales_message(
-            messages, idx, original_message
+            messages, idx, sales_index, original_message
         )
         rows.append(
             {
@@ -160,11 +160,13 @@ def expand_record(record: dict, skip_empty: bool) -> list[dict]:
 
 
 def _resolve_customer_message_for_sales_message(
-    messages: list[dict], sales_index: int, original_message: str
+    messages: list[dict], message_index: int, sales_ordinal: int, original_message: str
 ) -> tuple[str, str]:
-    if sales_index <= 0:
+    # The first sales reply should always pair with the original form
+    # submission, even if the contact sent more email before sales answered.
+    if sales_ordinal <= 1:
         return original_message, "form_submission"
-    previous_message = messages[sales_index - 1]
+    previous_message = messages[message_index - 1]
     if str(previous_message.get("role", "")) != "customer":
         return "", ""
     if str(previous_message.get("source", "")) == "form_submission":
