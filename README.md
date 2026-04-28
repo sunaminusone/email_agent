@@ -1,23 +1,37 @@
 # Email Agent
 
-A modular biotech support agent for product, technical, document, and operational inquiries.
+A decision-support agent for ProMab's customer-service reps and sales reps.
+The agent's consumer is a human expert (CSR / sales) — never the customer
+directly. It produces internal drafts, similar past inquiries, and
+relevant documentation that the rep reviews, edits, and decides whether
+to send.
 
-This project combines typed Python service layers, retrieval systems, LLM-based understanding, and persistent session memory to handle multi-turn support workflows. The current architecture is centered on a clear runtime sequence:
+This project combines typed Python service layers, retrieval systems, LLM-based understanding, and persistent session memory. The runtime sequence:
 
 `memory recall -> ingestion -> object resolution -> routing -> executor -> response -> memory reflect`
 
-For the full design set, start with [docs/ARCHITECTURE_READING_ORDER.md](/Users/promab/anaconda_projects/email_agent/docs/ARCHITECTURE_READING_ORDER.md).
+For the full design set, start with [docs/AGENT_ARCHITECTURE_V4.md](/Users/promab/anaconda_projects/email_agent/docs/AGENT_ARCHITECTURE_V4.md) (current source of truth) and the [reading order](/Users/promab/anaconda_projects/email_agent/docs/ARCHITECTURE_READING_ORDER.md).
 
 ## What This Project Does
 
-The agent is designed for biotech customer-support and internal-assistant scenarios such as:
+The agent serves CSRs and sales reps in two directions:
 
-- understanding free-form customer questions
-- resolving products, services, targets, and operational entities
-- deciding whether to answer, clarify, or hand off
-- retrieving grounded information from catalog data, technical RAG sources, local documents, and QuickBooks
-- composing customer-facing replies from tool results instead of free-form hallucinated generation
-- preserving session context across turns with typed memory
+- **Inbound** — A customer email or HubSpot form inquiry comes in. The rep
+  pastes it (or the system ingests it); the agent returns a drafted reply
+  alongside the most similar past customer/sales conversations and any
+  relevant KB documents.
+- **Outbound** *(planned, P2)* — A sales rep gives a scenario; the agent
+  drafts an outreach message in the sales voice.
+
+In both directions, the rep stays in control:
+
+- understands the inbound message (entities, intent, demand)
+- retrieves past similar inquiries from ~9k historical HubSpot threads,
+  plus relevant chunks from the technical RAG corpus
+- generates a 90%-ship-ready draft modeled on past sales replies
+- surfaces routing concerns ("ambiguous", "may need expert input") as
+  advisory metadata, never as gates
+- preserves multi-turn context across the rep's iterative refinement
 
 The main API entrypoint is [src/main.py](/Users/promab/anaconda_projects/email_agent/src/main.py), and the end-to-end runtime assembly lives in [src/app/service.py](/Users/promab/anaconda_projects/email_agent/src/app/service.py).
 

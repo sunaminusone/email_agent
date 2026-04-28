@@ -1,15 +1,43 @@
-# Executor Design v3
+# Executor Design v4
 
 ## Purpose
 
-The executor is the core "agent behavior" module of the customer support system. It receives a resolved customer query (ingestion done, entities resolved, route decided as "execute") and autonomously selects tools, dispatches calls, evaluates results, and iterates when results are insufficient.
+The executor is the core "agent behavior" module of the v4 CSR co-pilot.
+It receives a resolved inquiry (ingestion done, entities resolved, route
+classified — and in v4, always coerced to "execute") and autonomously
+selects tools, dispatches calls, evaluates results, and iterates when
+results are insufficient.
 
-In a customer support context, the executor answers questions like:
-- Which backend systems do I need to query to answer this customer?
+The executor answers questions like:
+- Which backend sources do I need to query to give the rep useful context?
 - Did I get enough information, or should I try another source?
-- The catalog returned nothing -- should I fall back to RAG for a fuzzy match?
+- The catalog returned nothing — should I fall back to RAG for a fuzzy match?
 
-The executor does **not** understand the user's message (ingestion), resolve entities (objects), decide the route (routing), or compose the final reply (responser). It executes.
+The executor does **not** understand the inquiry (ingestion), resolve
+entities (objects), classify the route (routing), or compose the final
+draft (responser). It executes.
+
+## v4 invariant — both retrieval tools always run
+
+Beyond the v3 self-describing tool framework documented below, v4 adds
+one CSR-mode invariant in `select_tools` (`src/executor/tool_selector.py`):
+
+```python
+CSR_ALWAYS_INCLUDE = ("historical_thread_tool", "technical_rag_tool")
+```
+
+Regardless of which tool the demand classifier picks as primary, both
+retrieval tools are added as **supporting** selections. Their values are
+**complementary, not substitutional**:
+
+- `historical_thread_tool` surfaces past similar inquiries with how sales
+  actually replied
+- `technical_rag_tool` surfaces relevant authoritative KB chunks (service
+  flyers, workflow docs)
+
+The CSR sees both and decides what to use in their reply. Letting the
+demand classifier pick only one would make the v4 product (a search engine
++ case library for the rep) artificially narrow.
 
 ## Why This Makes the System an Agent
 

@@ -1,14 +1,27 @@
-# Ingestion Design v3
+# Ingestion Design v4
 
 ## Purpose
 
-The ingestion layer is the structured entrypoint for every user turn. Its job is to emit one clean, trustworthy signal bundle that answers:
+The ingestion layer is the structured entrypoint for every incoming
+inquiry. Its job is to emit one clean, trustworthy signal bundle that
+answers:
 
 > What evidence do we have about this turn before object resolution begins?
 
-In v3, ingestion's core responsibility is unchanged: **flat extraction of entities, flags, and intent**. Multi-intent handling is achieved through a new **deterministic assembly** step that runs _after_ object resolution, not inside ingestion.
+**v4 framing**: ingestion is reused unchanged from v3. The agent's
+consumer changed (CSR / sales rep, not the customer), but the signal
+extraction problem is identical — we still need to understand what an
+incoming customer message says so the downstream retrieval / drafting
+modules can use that understanding. Parser intent / flags now drive
+retrieval scoping, not customer-facing routing decisions, but the
+extraction itself is the same.
 
-### What changes in v3
+In v3 (and still in v4), ingestion's core responsibility is **flat
+extraction of entities, flags, and intent**. Multi-intent handling is
+achieved through a **deterministic assembly** step that runs _after_
+object resolution, not inside ingestion.
+
+### What changed in v3 (still applies in v4)
 
 1. **`secondary_intents` removed** — dead field, never consumed downstream
 2. **`resolve_corrected_intent_values()` rewritten** — destructive if/elif chain replaced by non-destructive per-flag validation

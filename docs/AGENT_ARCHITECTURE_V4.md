@@ -1,14 +1,38 @@
-# Agent Architecture v3
+# Agent Architecture v4
 
-## Overview
+## Identity
 
-This document defines the target architecture for the biotech customer support agent. It supersedes the v2 pipeline design.
+> **This is an internal email co-pilot for ProMab's customer-service reps
+> and sales reps. It generates reviewable, high-quality email drafts based
+> on similar past replies, relevant documents, and customer context. It
+> is not an autonomous customer-facing reply bot.**
 
-The system serves two primary use cases:
-1. **Technical consultation** (~60%): domain-specific knowledge retrieval via RAG
-2. **Business queries** (~40%): product, order, invoice, and shipping lookups via PostgreSQL and QuickBooks API
+This document defines the v4 architecture, which supersedes v3 with the
+2026-04-27 product redefinition. The v3 mechanical pieces (typed contracts,
+agent loop, two-phase memory, tool framework) are largely unchanged — what
+changed is who consumes the output (the rep, not the customer), what the
+output is (a draft + reference bundle, not a polished reply), and how
+routing's clarify / handoff judgments are interpreted (advisory metadata,
+not gates).
 
-Mixed queries (technical + business in one message) must be handled naturally.
+## System Use
+
+The agent serves CSRs and sales reps in two directions:
+
+1. **Inbound** — A customer email or HubSpot form inquiry comes in. The
+   rep pastes (or the system ingests) the customer message; the agent
+   returns a drafted reply alongside the most similar past customer/sales
+   conversations and any relevant KB documents.
+2. **Outbound** *(planned, P2 of roadmap)* — A sales rep gives a scenario;
+   the agent drafts an outreach message in the sales voice.
+
+In both directions, the rep stays in the loop — they review, edit, and
+decide whether to send. The agent never speaks directly to a customer.
+
+The original two use-case categories (technical consultation ~60%,
+business queries ~40%) still describe the **content distribution** of
+incoming inquiries. What changed is that both categories now produce a
+draft + reference bundle for the rep, never a customer-facing reply.
 
 ## Design Principles
 
@@ -27,8 +51,9 @@ Mixed queries (technical + business in one message) must be handled naturally.
                          └──────┬──────────────────┬───────────┘
                                 │ read             │ write
                                 ▼                  │
-User Message ──▶ ┌──────────────────┐              │
-                 │    Ingestion      │              │
+Inbound inquiry  ┌──────────────────┐              │
+(or outbound  ──▶│    Ingestion      │              │
+ scenario)       │                   │              │
                  │                   │              │
                  │  parse + extract  │              │
                  │  signals          │              │
@@ -46,9 +71,10 @@ User Message ──▶ ┌──────────────────
                  ┌──────────────────┐              │
                  │    Routing        │              │
                  │                   │              │
-                 │  execute?         │              │
-                 │  clarify?         │              │
-                 │  handoff?         │              │
+                 │  classify         │              │
+                 │  (clarify /       │              │
+                 │   handoff are     │              │
+                 │   advisory only)  │              │
                  └────────┬─────────┘              │
                           │ RouteDecision           │
                           ▼                         │
@@ -66,12 +92,16 @@ User Message ──▶ ┌──────────────────
                           ▼
                  ┌──────────────────┐              │
                  │    Responser      │              │
-                 │                   │              │
-                 │  synthesize reply │──────────────┘
+                 │  (csr_draft       │              │
+                 │   renderer:       │              │
+                 │   draft +         │──────────────┘
+                 │   references +    │
+                 │   routing notes)  │
                  └────────┬─────────┘
                           │ AgentResponse
                           ▼
-                    Final Reply
+              CSR-facing draft bundle
+              (the rep reviews, edits, sends)
 ```
 
 ## Module Directory Structure
@@ -128,21 +158,27 @@ src/
 │   ├── base.py                  #   base tool interface
 │   ├── models.py                #   ToolCapability, ToolRequest, ToolResult
 │   ├── catalog/                 #   product catalog (PostgreSQL)
-│   ├── rag/                     #   technical knowledge (Chroma)
+│   ├── rag/                     #   technical knowledge + ★historical threads
+│   │   ├── technical_tool.py        # KB chunks (service flyers, workflows)
+│   │   ├── historical_thread_tool.py # ★ past HubSpot sales replies (8.8k threads)
+│   │   ├── capability.py            # technical_rag_tool capability
+│   │   └── historical_capability.py # historical_thread_tool capability
 │   ├── documents/               #   document lookup
 │   └── quickbooks/              #   order, invoice, shipping (QuickBooks API)
 │
 ├── responser/                   # Response synthesis layer
-│   ├── service.py               #   main orchestrator
+│   ├── service.py               #   main orchestrator (always dispatches csr_draft)
 │   ├── blocks.py                #   content block extraction
-│   ├── composer.py              #   LLM rewrite (LangChain)
-│   ├── renderers/               #   route-specific renderers
-│   │   ├── answer.py
-│   │   ├── clarification.py
-│   │   ├── handoff.py
-│   │   ├── acknowledgement.py
-│   │   └── termination.py
-│   ├── resolution.py            #   topic / style derivation
+│   ├── composer.py              #   LLM rewrite (skipped for csr_draft type)
+│   ├── renderers/               #   v4: only csr_draft is dispatched
+│   │   ├── csr_draft.py         #   ★ the only renderer used in v4
+│   │   ├── answer.py            #   dormant (kept for import safety)
+│   │   ├── clarification.py     #   dormant
+│   │   ├── handoff.py           #   dormant
+│   │   ├── knowledge.py         #   dormant
+│   │   ├── partial_answer.py    #   dormant
+│   │   ├── acknowledgement.py   #   dormant
+│   │   └── termination.py       #   dormant
 │   └── models.py                #   AgentResponse, ContentBlock
 │
 ├── memory/                      # Session state persistence
@@ -288,18 +324,31 @@ class MemorySnapshot:
 
 ### 3. Routing
 
-**Purpose**: decide the overall action route.
+**Purpose**: classify the inquiry's posture and emit a `RouteDecision`. In
+v4 the **classification still runs as designed**, but its `clarify` /
+`handoff` decisions no longer **gate** retrieval — they become advisory
+metadata for the rep.
 
-Three possible decisions:
-- `execute` — the query needs tool execution
-- `clarify` — information is missing, ask the user
-- `handoff` — escalate to a human agent
+Three classifications still emitted (for visibility / future use):
+- `execute` — straightforward inquiry, no warning
+- `clarify` — agent thinks the inquiry is ambiguous (would-have-asked-customer)
+- `handoff` — agent thinks this needs expert / AE input
+
+In v4, `_run_agent_loop` (`src/app/service.py`) coerces every group to
+`execute` regardless of original classification. The original judgment is
+preserved on `route_decision.reason` as an `AI_ROUTING_NOTE` string that
+the renderer surfaces in a ⚠️ section of the draft. Rationale: an
+ambiguity / handoff judgment is **valuable signal for the rep**; throwing
+it away or hiding it serves no one. Blocking retrieval based on it would
+mean the rep gets nothing useful exactly when the agent is uncertain.
 
 Also resolves:
 - `DialogueActResult` (INQUIRY, REQUEST, INFORM, ELABORATE, etc.)
 - `ModalityDecision` (text, structured, hybrid)
 
-**Key change from v2**: routing no longer selects tools. That responsibility moves to the executor.
+**Key change from v2**: routing no longer selects tools. That responsibility moved to the executor in v3.
+
+**Key change from v3**: `clarify` / `handoff` are advisory, not gating.
 
 **LangChain usage**: optional LLM classifier for dialogue act in ambiguous cases.
 
@@ -311,10 +360,19 @@ Also resolves:
 
 This is the core "agent" behavior module.
 
+**v4 invariant — both retrieval tools always run**: regardless of which
+tool the demand classifier picks as primary, `select_tools`
+(`src/executor/tool_selector.py`) always adds `historical_thread_tool` and
+`technical_rag_tool` as supporting selections. Their values are
+**complementary**, not substitutional — past sales replies tell the rep
+how we historically responded; KB chunks tell the rep what authoritative
+documentation says. The CSR sees both and decides.
+
 **Internal loop**:
 ```
 1. Read all tool capabilities from registry
 2. Given parsed input + objects + memory, reason about which tools to call
+   (CSR mode: historical_thread_tool + technical_rag_tool always included)
 3. Build ToolRequest for each selected tool
 4. Dispatch tool calls (parallel when safe)
 5. Observe results
@@ -349,9 +407,10 @@ Each tool:
 
 | Tool | Data Source | Object Types | Description |
 | --- | --- | --- | --- |
+| `historical_thread_tool` ★v4 | Chroma `historical_threads_v1` | product, service, scientific_target | Past HubSpot sales replies (8.8k threads); always-included in CSR mode |
+| `technical_rag_tool` | Chroma `email_agent_rag_v7_service_pages_only` | product, service | Service flyers, workflow docs; always-included in CSR mode |
 | `catalog_lookup_tool` | PostgreSQL | product | Product catalog search |
 | `pricing_lookup_tool` | PostgreSQL | product | Price lookup |
-| `technical_rag_tool` | Chroma vectorstore | product, service | Technical knowledge retrieval |
 | `document_lookup_tool` | local CSV + PDFs | document | Document metadata search |
 | `customer_lookup_tool` | QuickBooks API | customer | Customer record lookup |
 | `order_lookup_tool` | QuickBooks API | order | Order status lookup |
@@ -369,18 +428,34 @@ Each tool:
 
 ### 6. Responser
 
-**Purpose**: synthesize a coherent user-facing reply.
+**Purpose**: synthesize the CSR-facing draft bundle.
 
-**What it does**:
-- build content blocks from tool results (structured facts, snippets, artifacts)
-- select response mode based on route (answer, clarification, handoff, acknowledgement, termination)
-- render a deterministic draft using the appropriate renderer
-- optionally pass through LLM rewrite for natural language quality
-- emit final `AgentResponse`
+**v4 invariant — always csr_draft**: `_render_response`
+(`src/responser/service.py`) no longer dispatches by `response_mode`. It
+always calls `render_csr_draft_response` (`src/responser/renderers/csr_draft.py`),
+which produces the Slack-style structured output:
 
-**LangChain usage**: LLM-based response composition and rewrite.
+```
+📝 Draft reply              — LLM-synthesized, marked clearly as draft
+📚 Similar past inquiries   — Top historical threads (full conversation)
+📄 Relevant documents       — Top KB chunks
+⚠️ AI routing notes         — Only when routing flagged ambiguity / handoff
+```
 
-**Does not**: select tools, execute retrieval, invent facts.
+`compose_final_response` (`src/responser/composer.py`) skips its legacy
+LLM rewrite when `response_type == "csr_draft"` — the structured sections
+must not be collapsed back into a flowing reply.
+
+The seven legacy renderers (`acknowledgement`, `answer`, `clarification`,
+`handoff`, `knowledge`, `partial_answer`, `termination`) **are kept** but
+never dispatched. They assume customer-facing output, which v4 invalidates.
+Cleanup is deferred until we are confident nothing imports them.
+
+**LangChain usage**: LLM call inside `csr_draft.py` to produce the actual
+draft from retrieved context.
+
+**Does not**: select tools, execute retrieval, invent facts beyond what
+the retrieved threads / docs say.
 
 ### 7. Memory
 
@@ -419,41 +494,152 @@ Memory        (none)            Own typed contracts via Redis
 3. Do not collapse multiple modules into one LangChain agent prompt
 4. Do not replace typed memory with a plain chat buffer
 
-## Migration Path From v2
+## Quality bar (the 90% commitment)
 
-### Phase 1: Restructure (low risk)
+Drafts target **90% ship-readiness** — the rep should only need small
+edits before sending. This is a deliberate stretch from "70% useful
+starting point". It pushes design decisions in three directions:
 
-- [x] Split `src/execution/` into `src/executor/` (engine + dispatcher) — move files, update imports
-- [ ] Rename `src/response/` to `src/responser/` — move files, update imports
-- [ ] Remove tool selection from `routing/stages/tool_routing.py` — routing emits `RouteDecision` without selected tools
-- [ ] Update `src/app/service.py` to use new module paths
+- **Lean heavily on past sales replies as language source** rather than
+  generating from generic LLM voice. The historical corpus is what
+  ProMab actually sounds like.
+- **Cite specific facts (timelines, prices, technical specs) only when
+  present in the inputs.** Never invent.
+- **When a question is genuinely ambiguous**, draft a brief clarifying
+  question to the customer rather than guessing. The CSR can still send
+  this draft; it's a useful response by itself.
 
-Existing code reuse:
-- `execution/executor.py` → `executor/dispatcher.py`
-- `execution/merger.py` → `executor/merger.py`
-- `execution/planner.py` + `planner_rules.py` → `executor/tool_selector.py`
-- `execution/requests.py` → `executor/request_builder.py`
-- `response/*` → `responser/*` (rename only)
+## Trust calibration (mandatory)
 
-### Phase 2: Enhance executor (medium risk)
+90% is a target, not a guarantee. The rep needs to know when to trust the
+draft and when to lean harder on the references / write from scratch. The
+renderer must show:
 
-- [ ] Implement `executor/tool_selector.py` that reads `ToolCapability` from registry instead of hardcoded rules
-- [ ] Implement `executor/completeness.py` to evaluate result sufficiency
-- [ ] Add reasoning loop in `executor/engine.py` (LangGraph state graph)
-- [ ] Implement parallel dispatch via `asyncio.gather`
+- **"Based on N highly similar past replies"** when top historical hits
+  have strong similarity scores
+- **"⚠️ No highly similar past inquiries — use caution"** when scores are weak
+- **Per-reference scores** in human-friendly framing (very similar /
+  somewhat similar / loosely related)
+- **Routing notes** (already implemented via AI_ROUTING_NOTE) when the
+  agent flagged ambiguity
 
-### Phase 3: Enhance tools (low risk)
+The retrieval quality tier from `_compute_retrieval_confidence`
+(`src/rag/retriever.py`) — originally framed as a confidence "gate" — is
+repurposed in v4 as a **search result quality indicator** for the rep,
+not a routing override.
 
-- [ ] Enrich `ToolCapability` with `description`, `supported_intents`, `required_params`
-- [ ] Wrap tools as LangChain `StructuredTool` for tracing
-- [ ] Ensure each tool file declares its own capability (no central mapping tables)
+## Feedback loop
 
-### Phase 4: Clean up (low risk)
+**Phase 1 (along with webui)**:
+- **Edit-distance comparison** — diff the rep's sent reply against the
+  agent's draft. Large diffs signal the draft was unhelpful.
+- **Explicit 👍 / 👎** — one-click rating on the draft.
 
-- [ ] Remove `routing/stages/tool_routing.py` (tool selection now in executor)
-- [ ] Remove `execution/planner_rules.py` hardcoded mapping tables
-- [ ] Update design documents to reflect v3
-- [ ] Add tests for executor reasoning loop
+**Phase 2 (later)**:
+- **Outcome tracking** — did this thread convert? Did the customer reply
+  positively? Tie back to which historical examples / docs the agent cited.
+  Promote high-conversion examples in retrieval ranking.
+
+We explicitly **do not** ship without a feedback loop — silent quality
+decay is the failure mode that kills tools like this.
+
+## Data freshness
+
+Historical thread corpus is sourced from
+`data/processed/hubspot_form_inquiries_long.csv`, ingested via
+`scripts/ingest_historical_threads.py`.
+
+- **Phase 1**: daily re-ingest (cron)
+- **Phase 2**: hourly, then near-real-time (HubSpot webhook → ingestion
+  pipeline) once the daily-update window proves too stale
+
+Re-ingestion is **idempotent** — `_stable_id(metadata)` keys each chunk by
+`{submission_id}__{reply_index}`, so adding new rows or correcting
+existing ones upserts cleanly.
+
+## Roadmap
+
+Derived from prioritization in the 2026-04-27 alignment session.
+
+### P1 — Demo / now
+- Streamlit webui (inbound mode) wrapping `run_email_agent`
+- Trust calibration display
+- Daily re-ingest cron
+- 90% draft quality push: prompt tuning, possibly few-shot examples
+
+### P2 — 1-2 weeks
+- **Outbound drafting mode** — sales rep gives a scenario; agent drafts
+  outreach. Different input shape, same retrieval corpus.
+- **Customer history** — link by `contact_id` / email across past
+  threads. When CSR is replying to customer X, surface what X has asked
+  before.
+- **Multi-language** — locale detection on incoming message; Chinese
+  prompt for `_DRAFT_SYSTEM_PROMPT` when locale=zh.
+- **Sales style matching** — match current handling rep against historical
+  replies they have written; weight their voice in the draft.
+
+### P3 — 1-2 months
+- **Attachment parsing** — customer attaches a paper / spec / order PDF;
+  agent extracts relevant context.
+- **Edit-distance feedback** instrumentation
+- **Explicit 👍 / 👎 rating** UI
+
+### P4 — 3 months+
+- **Email plugin deployment** — Gmail / Outlook integration replacing the
+  standalone webui as the primary entry point.
+- **Hourly / near-real-time data sync** — HubSpot webhook listener.
+- **Auto-quote** — pricing model trained on historical quote patterns.
+- **Outcome tracking feedback loop** (Phase 2 of feedback)
+
+## Frozen / abandoned items
+
+The v4 pivot makes several pre-pivot backlog items moot. They are explicitly
+**closed**, not just deferred:
+
+- **Backlog #6 step B** ("flip the confidence gate to handoff") — there is
+  no handoff in v4. The tier survives as a quality indicator for the rep.
+- **Backlog #9** (`needs_human_contact` flag) — there is no AE handoff to
+  trigger. If the customer wants a call, the rep sees that in the draft
+  and acts on it.
+- **Backlog #10** (multi-intent schema expansion) — the rep sees all
+  retrieved content; multi-intent splitting was a customer-facing concern.
+- **Backlog #12** (product multi-match clarify routing) — same logic;
+  multi-match becomes "show all candidates to rep", which the existing
+  retrieval already does.
+
+The seven legacy renderers in `src/responser/renderers/` are dormant.
+Cleanup deferred until we are sure no other code imports them.
+
+## Pivot history (v3 → v4)
+
+On 2026-04-27 the project goal shifted. Boss's framing (verbatim):
+
+> *"它能不能把相关历史回复找出来 / 把相关文档找出来 /
+> 把这些东西整理成客服可参考的材料"*
+
+The v3 design (a customer-facing reply agent with execute / clarify /
+handoff routing) was not abandoned — its mechanical pieces were repurposed
+in place. The pivot was implemented through three surgical changes
+(documented in §4.1, §4.2, §4.3 above and in the per-module v4 docs):
+
+1. **Tool selection**: both retrieval tools always run as supporting
+2. **Routing dispatch**: clarify / handoff coerced to execute, original
+   judgment preserved as `AI_ROUTING_NOTE` metadata
+3. **Response rendering**: single `render_csr_draft_response` replaces
+   the seven mode-specific renderers
+
+`csr_pipeline.py` was briefly built as a parallel pipeline (commit `c7d88a1`)
+and then deleted (commit `ab9eeee`) in favor of the in-place pivot. There
+is no parallel customer-facing path in v4 — the existing `run_email_agent`
+is the only entry point, and it always produces a CSR draft.
+
+## v3 → v2 history (preserved for context)
+
+The original v3 migration from v2 added: typed Pydantic contracts at all
+module boundaries, the executor reasoning loop, two-phase memory
+(recall/reflect), tool self-description via `ToolCapability`. That work
+landed across many commits and is the substrate v4 builds on. Day-to-day
+work in v4 should not need to revisit it.
 
 ## Extensibility Examples
 

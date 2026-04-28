@@ -1,10 +1,22 @@
-# Memory Design v3
+# Memory Design v4
 
 ## Purpose
 
-The memory module preserves typed state across conversation turns and actively surfaces relevant context for each new turn. It is the only module that spans the entire pipeline — reading at turn start, writing at turn end.
+The memory module preserves typed state across conversation turns and
+actively surfaces relevant context for each new turn. It is the only
+module that spans the entire pipeline — reading at turn start, writing at
+turn end.
 
-In v3, memory evolves from a **passive data store** to an **active participant** in the agent loop. Instead of dumping a raw snapshot into the pipeline and collecting all outputs at the end, memory operates in two explicit phases:
+**v4 framing**: memory is reused unchanged from v3. Multi-turn state is
+just as important in v4 — the rep may iteratively refine a draft with the
+agent, ask follow-up questions about a specific past customer, or triage
+multiple inquiries in the same session. The two-phase recall/reflect
+design carries over wholesale.
+
+In v3 (and still in v4), memory evolves from a **passive data store** to
+an **active participant** in the agent loop. Instead of dumping a raw
+snapshot into the pipeline and collecting all outputs at the end, memory
+operates in two explicit phases:
 
 > **Recall**: At turn start, analyze the incoming query against stored state and produce a prioritized, enriched context for downstream modules.
 >

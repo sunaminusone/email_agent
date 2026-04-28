@@ -1,11 +1,16 @@
-# Tool Readiness & Three-Layer Execution Design
+# Tool Readiness & Three-Layer Execution Design (v4)
 
 ## 定位
 
-这是一个基于检索与业务查询、以就绪度判断驱动执行的智能客服 Agent。
+这是 v4 CSR 邮件副驾的工具契约设计文档。Tool capability framework 从 v3 沿用,**契约本身没变**。v4 的两个增量:
 
-- **60%** 技术咨询 → RAG 检索（永远就绪，无参数依赖）
-- **40%** 产品/订单咨询 → QuickBooks 查询（需要一个 identifier）
+1. **新工具** `historical_thread_tool` — 检索 ~9k 条 HubSpot 历史销售回复。注册方式跟 v3 的 `technical_rag_tool` 完全一样(用同一个 `register_tool` API + `ToolCapability` schema),不是契约变更
+2. **新执行规则**:`historical_thread_tool` + `technical_rag_tool` 在每个 group 永远 always-include 作 supporting,详见 `EXECUTOR_DESIGN_V4.md` 中"v4 invariant"章节。这是 executor 层的规则,不是 tool contract 层
+
+下面 v3 的就绪度判断 / 三层执行设计在 v4 仍然适用 —— retrieval tool 永远就绪(无参数依赖),catalog/QuickBooks 类工具仍然需要 identifier。
+
+- **60%** 技术咨询 → RAG 检索(永远就绪,无参数依赖)
+- **40%** 产品/订单咨询 → QuickBooks 查询(需要一个 identifier)
 
 不是开放世界的规划系统。所有复杂度必须与这个规模匹配。
 

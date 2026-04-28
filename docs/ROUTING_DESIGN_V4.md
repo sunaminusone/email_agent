@@ -1,14 +1,30 @@
-# Routing Design v3
+# Routing Design v4
 
 ## Purpose
 
-Routing is the decision layer of the customer support agent. It answers one question: **what kind of action does this customer's message require?**
+Routing is the **classification** layer of the v4 CSR co-pilot. It answers
+one question: **what kind of posture does this incoming inquiry have?**
 
-Four possible answers:
-- **execute** — the query needs tool execution (e.g., look up a product, check an order)
-- **respond** — no execution needed, just compose a reply (e.g., "thanks", "bye")
-- **clarify** — information is missing, ask the customer to specify (e.g., "which antibody do you mean?")
-- **handoff** — escalate to a human agent (e.g., high-risk or compliance-sensitive request)
+Four possible classifications:
+- **execute** — the inquiry is straightforward, retrieve & draft directly
+- **respond** — pure acknowledgement, no retrieval needed (e.g., "thanks", "bye")
+- **clarify** — the agent thinks the inquiry is ambiguous; the rep should
+  consider asking the customer for more detail
+- **handoff** — the agent thinks this needs expert / AE input; the rep
+  should consider escalating
+
+**v4 critical change**: `clarify` and `handoff` classifications are
+**advisory metadata**, not gates. The dispatch in
+`src/app/service.py::_run_agent_loop` coerces every group to the `execute`
+path regardless of original classification, and the original judgment is
+preserved on `route_decision.reason` as an `AI_ROUTING_NOTE` string that
+the CSR renderer surfaces in a ⚠️ section of the draft. The rep sees
+the agent's judgment without losing the retrieval value of running
+through to execute.
+
+The classification logic in this document is still correct (and is useful
+both as documentation of the agent's reasoning and as future-proofing if
+gating ever needs to come back). What changed is purely the dispatch.
 
 Routing also classifies one supporting signal:
 - **dialogue act** — what the customer is trying to do (inquiry, selection, closing)
