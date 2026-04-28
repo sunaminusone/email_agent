@@ -47,9 +47,9 @@ How to interpret the schema:
 
 Intent guidance:
 - product_inquiry: asks whether a product/service exists, is available, or requests general product details
-- technical_question: asks about scientific rationale, protocol, experimental design, validation, mechanism, or technical suitability (use when none of workflow_question / model_support_question / service_plan_question applies)
+- technical_question: asks about scientific rationale, mechanism, methodology choice, decision criteria, parameter interpretation, or how to evaluate / compare technical options (use when none of workflow_question / model_support_question / service_plan_question applies). Markers: "which parameter is more informative", "why is method X preferred over Y", "how should we interpret X", "what's the rationale behind Y". NOT for product/system fit questions — those are model_support_question.
 - workflow_question: asks specifically about the workflow, process steps, sequence, or what happens next in a service
-- model_support_question: asks about supported cell types, species models, platforms, or strains
+- model_support_question: asks whether a specific product / system / construct / kit / service is compatible with, validated in, suitable for, supported in, has been used successfully with, or cross-reacts with a particular cell type, species, tissue, host system, sample type, application, or experimental context. Markers: "compatible with [HEK293 / primary T cells / cynomolgus]", "cross-react with [species/material]", "validated for use on [FFPE mouse tissue / IHC / WB]", "suitable for [CHO-K1 host / stem cells]", "work in [your cell line / our setup]", "perform well in [flow cytometry / binding studies]", "have you tested [X] in [Y system]", "supported in [strain/host]". The product/system is already named — the user is asking whether it FITS their specific biological context.
 - service_plan_question: asks about the service plan, service phases, stages, or how the engagement is structured
 - pricing_question: asks about price, cost, discount, quotation, or budget-related matters
 - timeline_question: asks about turnaround time, lead time, ETA, or delivery timing
@@ -60,9 +60,76 @@ Intent guidance:
 - order_support: asks about an existing order, invoice, payment, PO, order changes, order status, or cancellation
 - complaint: expresses dissatisfaction, blame, refund demand, service failure, or escalation
 - follow_up: asks for an update on a previous quote, order, email thread, experiment, or prior request
-- partnership_request: asks about collaboration, distributorship, partnership, or business cooperation
 - general_info: broad or general company/service information request
 - unknown: the message is too ambiguous to classify reliably
+
+Primary intent decision rules:
+
+Rule 1 — Knowledge ASK present:
+- Set semantic_intent to the bucket whose chunks the customer service rep would reference most to answer the query.
+- Apply when the user asks for specific knowledge content (specs, methods, timelines, prices, etc.).
+
+Rule 2 — Pure disposition expressions do NOT count as knowledge ASK:
+- "we are interested in X", "looking for X", "please contact us", "would like to discuss", "exploring partnership" — these are commercial posture, not knowledge ASKs.
+- They affect routing flags (needs_customization / needs_quote / etc.) but do NOT decide semantic_intent alone.
+
+Rule 3 — Capability inquiries → Fallback:
+- "do you offer X / do you provide X / do you support X / can you make X / which X do you offer / what kinds of X / what types of X / is it possible to X"
+- Do NOT take the literal X as the topic — apply Fallback below.
+
+Rule 4 — Catalog product frame stays primary despite secondary commercial/document asks:
+- When the user states a purchase / order / evaluate / info-request action on a named catalog product (catalog identifier, named product, "this product"), keep semantic_intent = "product_inquiry" even when commercial flags (needs_quote / needs_price / needs_documentation / needs_sample) also fire.
+- Those flags describe the deliverable wanted; the bucket the CS rep would retrieve is product/catalog info first.
+- Use pricing_question / documentation_request only when the ASK targets the price/document itself with no catalog purchase action (e.g. "how much does custom mAb development cost?", "send me your service flyer for X").
+- Generic vs explicit document distinction:
+  * Generic product info ASK ("send me info about [catalog product]", "any details on [catalog product]") → product_inquiry (with needs_documentation flag).
+  * Explicit document deliverable name (datasheet / brochure / COA / SDS / service flyer) → documentation_request.
+
+Fallback (when no specific knowledge ASK exists):
+- Intent toward custom service / customer-specific spec → customization_request (NOT product_inquiry, NOT general_info)
+- Intent toward catalog item → product_inquiry
+- Intent toward shipping / order / complaint → corresponding operational intent
+- Pure posture (vendor exploration / partnership / company overview without specific service) → general_info
+- Truly unparseable / fragment / non-language → unknown
+
+ProMab business precedents (background knowledge — not user wording rules):
+
+Always-custom service lines (no catalog version exists):
+- Expression: E. coli, Baculovirus, Mammalian Expression, Stable Cell Line Development
+- Antibody dev: Antibody Production, Recombinant Antibody, Mouse/Rabbit/Human mAb Development, Hybridoma development
+- Cell engineering: Custom CAR-T / CAR-NK / CAR-Macrophage Cell Development
+- Delivery: mRNA-LNP Gene Delivery service
+- Cell-based assay: T Cell Activation/Proliferation/Specificity Assay, Cytokine Release Assay, Macrophage Polarization Assay, DC Migration Assay, Flow Cytometry Services
+
+Dual-track objects (catalog AND custom service both exist):
+- CAR-T / CAR-NK / CAR-M (catalog cells vs Custom Development service)
+- mRNA-LNP (catalog products vs Gene Delivery service)
+- Antibodies (catalog mAbs/SKUs vs Production / Recombinant / mAb Development services)
+- Hybridoma-derived mAb (catalog inventory vs Hybridoma development service)
+
+Frame detection (apply only for dual-track objects):
+- Product frame → does NOT trigger needs_customization. Markers: "off-the-shelf", "catalog", "standard", "ready-to-use", "SKU", "CAT#", "purchase X", "buy X", "order this product", "place an order for X", "is X in stock", "send me info about [catalog product]", "receive a sample [of catalog product]", "evaluate this product before placing larger order".
+- Service frame → triggers needs_customization. Markers: "custom", "develop", "generate", "build", "for my/our project", "provided by me", "workflow for this service", "quote for generation", "custom run".
+
+needs_customization triggering rule (silence resolver):
+- Trigger needs_customization when (A) the object is an always-custom service line, OR (B) a dual-track object in service frame; AND at least ONE engagement signal is present:
+  * 1st-person possessive on work scope ("for my X / our project / provided by me")
+  * Explicit launch / generation verb ("please generate", "we will start", "will be used by us")
+  * Specific quantity / scale / case ("one or two strains", "18-21 patients", "from this specific antigen")
+- DO NOT trigger needs_customization for abstract service RFI / capability survey:
+  * 3rd-person capability questions ("what kinds / how does it work / what types do you offer")
+  * General scope inquiry ("tell me about your service / I want to learn more")
+- DO NOT trigger needs_customization for catalog evaluation pathway:
+  * "evaluate this product before placing larger order" / "internal evaluation before bulk order" / "preliminary testing before bulk order" — these are catalog-purchase pathway, not custom build engagement.
+- "the X" / "this X" definite article alone is NOT an engagement signal.
+- User explicitly declaring catalog frame ("standard mAb production package") on an always-custom service overrides the silence resolver — DO NOT trigger needs_customization.
+
+Customization frame dominance rule (semantic_intent assignment):
+- When (a) the query targets an always-custom service line OR a dual-track object in service frame, AND (b) at least ONE engagement signal is present (per silence resolver triggers above), then semantic_intent MUST be customization_request — even when the query also contains surface markers that would otherwise pull toward model_support_question / technical_question / advice / comparison framing.
+- Surface lures like "validation strategy", "technical guidance", "from your experience", "which would generally be better: A or B", "what kinds of validation readouts you usually consider" do NOT change the primary semantic_intent when (a)+(b) both hold. They only color the aux flags (needs_recommendation / needs_comparison / needs_protocol per their own boundary rules) — they do NOT redirect the primary bucket.
+- Exception: when the dominant ASK is model-host compatibility / usage of an existing platform on a specific cell line / model ("is X compatible with Y", "how does X work for transfecting Y", "what reagents are needed for Y in platform X"), semantic_intent stays model_support_question even if (a)+(b) hold — this is a knowledge ASK on platform-model fit, not a service-scope ASK.
+- Reason: the customization frame (always-custom service + engagement) is the dominant retrieval context; surface ASK words are subordinate signals that influence routing flags only.
+- Counter-check: if condition (a) fails (catalog product, dual-track in product frame, or non-ProMab service mention) OR condition (b) fails (pure 3rd-person capability survey / abstract RFI / pricing-only / info-gathering with no engagement), then semantic_intent follows the surface ASK normally (model_support_question / technical_question / product_inquiry / etc.).
 
 Entity extraction guidance:
 Extract only entities that are mentioned in the message.
@@ -122,8 +189,31 @@ User: do you offer mRNA-LNP delivery?
 Key extraction:
 - entities.service_names = [{{"text": "mRNA-LNP delivery", "raw": "mRNA-LNP delivery", "start": 13, "end": 30}}]
 - entities.product_names = []
+- context.semantic_intent = "customization_request"
+- request_flags.needs_customization = true
+(Rule 3 capability inquiry on always-custom service → Fallback → customization_request)
+
+User: Do you develop stably transformed insect strains for recombinant protein production?
+Key extraction:
+- entities.service_names = [{{"text": "stably transformed insect strains", "raw": "stably transformed insect strains", "start": 14, "end": 47}}]
+- context.semantic_intent = "customization_request"
+- request_flags.needs_customization = true
+(Rule 3 capability inquiry + always-custom expression service → Fallback → customization_request)
+
+User: I want to purchase CD19 CAR-T cells. Can you send a quote?
+Key extraction:
+- entities.product_names = [{{"text": "CD19 CAR-T cells", "raw": "CD19 CAR-T cells", "start": 18, "end": 34}}]
 - context.semantic_intent = "product_inquiry"
-- request_flags.needs_availability = true
+- request_flags.needs_quote = true
+(Rule 4: catalog purchase verb "purchase" on dual-track CAR-T → product frame; primary stays product_inquiry even though needs_quote fires; frame detection does NOT trigger needs_customization)
+
+User: We are evaluating this product internally before placing a larger order. Would it be possible to receive a sample for preliminary testing?
+Key extraction:
+- entities.product_names = []
+- open_slots.referenced_prior_context = "this product"
+- context.semantic_intent = "product_inquiry"
+- request_flags.needs_sample = true
+(Rule 4: catalog evaluation pathway "before placing a larger order" → product frame stays product_inquiry; silence resolver does NOT fire needs_customization on "evaluate this product before bulk order")
 
 --- Technical / troubleshooting ---
 
@@ -194,8 +284,9 @@ Key extraction:
 User: Do you offer flow cytometry services for antibody validation?
 Key extraction:
 - entities.service_names = [{{"text": "flow cytometry services", "raw": "flow cytometry services", "start": 13, "end": 36}}]
-- context.semantic_intent = "product_inquiry"
-- request_flags.needs_availability = true
+- context.semantic_intent = "customization_request"
+- request_flags.needs_customization = true
+(Rule 3 capability inquiry on always-custom service → Fallback → customization_request)
 
 User: What readouts are included in the T cell activation assay?
 Key extraction:
@@ -213,8 +304,51 @@ Key extraction:
 User: Can you do macrophage polarization assays with our construct?
 Key extraction:
 - entities.service_names = [{{"text": "macrophage polarization assays", "raw": "macrophage polarization assays", "start": 11, "end": 41}}]
-- context.semantic_intent = "technical_question"
+- context.semantic_intent = "customization_request"
+- request_flags.needs_customization = true
+(Rule 3 capability inquiry + always-custom assay + engagement signal "with our construct" → customization_request)
+
+User: I'm interested in learning about your stable cell line generation services. What kinds can you generate? What is the engineering process? Can you provide a price range?
+Key extraction:
+- entities.service_names = [{{"text": "stable cell line generation services", "raw": "stable cell line generation services", "start": 33, "end": 69}}]
+- context.semantic_intent = "service_plan_question"
 - request_flags.needs_protocol = true
+- request_flags.needs_price = true
+(abstract service RFI / capability survey on always-custom service WITHOUT engagement signal → silence resolver does NOT trigger needs_customization; multi-section RFI → service_plan_question)
+
+User: We are exploring custom mAb development for our membrane target. Do you have any suggestions for alternative immunogen approaches besides peptide?
+Key extraction:
+- entities.service_names = [{{"text": "custom mAb development", "raw": "custom mAb development", "start": 19, "end": 41}}]
+- context.semantic_intent = "customization_request"
+- request_flags.needs_customization = true
+- request_flags.needs_recommendation = true
+(advice ASK "do you have any suggestions for alternative" → needs_recommendation, NOT needs_protocol; engagement signal + always-custom → needs_customization)
+
+--- Model support / application fit ---
+
+User: Does Anti-CD3 [UCHT1] show cross-reactivity with rat samples? We need it for downstream flow cytometry.
+Key extraction:
+- entities.product_names = [{{"text": "Anti-CD3 [UCHT1]", "raw": "Anti-CD3 [UCHT1]", "start": 6, "end": 22}}]
+- context.semantic_intent = "model_support_question"
+- request_flags = {{}} (no core flag)
+- auxiliary_flags: needs_recommendation = true
+(species cross-reactivity ASK on a named catalog product → model_support_question; "show cross-reactivity with X" is application fit, NOT a workflow/SOP request → do NOT fire needs_protocol)
+
+User: Has your recombinant ACE2 protein been validated for use in surface plasmon resonance assays?
+Key extraction:
+- entities.product_names = [{{"text": "recombinant ACE2 protein", "raw": "recombinant ACE2 protein", "start": 9, "end": 33}}]
+- entities.applications = [{{"text": "surface plasmon resonance", "raw": "surface plasmon resonance", "start": 56, "end": 81}}]
+- context.semantic_intent = "model_support_question"
+- request_flags = {{}} (no core flag)
+(validation-IN-CONTEXT — "validated for use in [SPR application]" — is application fit, NOT a documented procedure ASK → do NOT fire needs_protocol; product is named so it is model_support_question, not technical_question)
+
+User: Is your lentiviral packaging service suitable for HEK293T or do you typically use a different host?
+Key extraction:
+- entities.service_names = [{{"text": "lentiviral packaging service", "raw": "lentiviral packaging service", "start": 8, "end": 36}}]
+- context.semantic_intent = "model_support_question"
+- request_flags = {{}} (no core flag)
+- auxiliary_flags: needs_recommendation = true
+(host system fit ASK on a named service → model_support_question; "suitable for [host]" is application fit, NOT workflow → do NOT fire needs_protocol; "you typically use" → needs_recommendation; pure info-gathering on host fit, NOT engagement on always-custom → do NOT fire needs_customization, consistent with the budgeting/info-gathering precedent)
 
 --- Commercial (pricing / timeline / customization) ---
 
@@ -252,6 +386,32 @@ Key extraction:
 - context.semantic_intent = "customization_request"
 - request_flags.needs_customization = true
 
+User: Is there any lead time after ordering the off-the-shelf CAR-T?
+Key extraction:
+- entities.product_names = [{{"text": "off-the-shelf CAR-T", "raw": "off-the-shelf CAR-T", "start": 36, "end": 55}}]
+- context.semantic_intent = "timeline_question"
+- request_flags.needs_timeline = true
+(dual-track CAR-T + product frame "off-the-shelf" → does NOT trigger needs_customization)
+
+User: We are planning to generate monoclonal antibodies for our membrane target. What is the typical timeline?
+Key extraction:
+- entities.service_names = [{{"text": "monoclonal antibodies", "raw": "monoclonal antibodies", "start": 38, "end": 59}}]
+- context.semantic_intent = "customization_request"
+- request_flags.needs_customization = true
+- request_flags.needs_timeline = true
+(always-custom mAb + engagement signal "we are planning to generate" + "for our membrane target" → silence resolver triggers needs_customization)
+
+User: Request a quote for CAR-T manufacturing for 18-21 patients in Phase I clinical trial, plus CMC documentation for IND filing.
+Key extraction:
+- entities.service_names = [{{"text": "CAR-T manufacturing", "raw": "CAR-T manufacturing", "start": 18, "end": 37}}]
+- context.semantic_intent = "customization_request"
+- context.needs_human_review = true
+- request_flags.needs_customization = true
+- request_flags.needs_quote = true
+- request_flags.needs_documentation = true
+- request_flags.needs_regulatory_info = true
+(IND filing + Phase I clinical trial + GMP-scale → regulatory submission precedent → needs_human_review=true; CAR-T manufacturing + engagement "for 18-21 patients" + service frame → needs_customization)
+
 --- Operational (order / shipping / invoice / complaint) ---
 
 User: status of invoice 20001
@@ -279,6 +439,15 @@ Key extraction:
 - context.urgency = "high"
 - context.needs_human_review = true
 - request_flags.needs_refund_or_cancellation = true
+
+User: We have a customer complaint about cat# 30696. The product gave too many bands in WB. Any explanation or suggestions to improve?
+Key extraction:
+- entities.catalog_numbers = [{{"text": "30696", "raw": "30696", "start": 35, "end": 40}}]
+- context.semantic_intent = "troubleshooting"
+- context.needs_human_review = true
+- request_flags.needs_troubleshooting = true
+- request_flags.needs_recommendation = true
+(explicit "customer complaint" + product failure report ("too many bands") + 3rd-party relay → customer complaint precedent → needs_human_review=true; technical diagnosis ASK is dominant → primary=troubleshooting; "any explanation or suggestions" → needs_recommendation)
 
 --- Documentation ---
 
@@ -313,18 +482,13 @@ Key extraction:
 - context.semantic_intent = "follow_up"
 - request_flags.needs_price = true
 
-User: We'd like to explore a distribution partnership for your reagent portfolio in Southeast Asia
-Key extraction:
-- context.semantic_intent = "partnership_request"
-- context.needs_human_review = true
-- constraints.destination = "Southeast Asia"
-
 Request flag guidance:
 Turn user needs into boolean signals when clearly supported by the message.
 Most flags can be inferred from the field name. Pay special attention to:
-- needs_protocol: workflow, process, how does it work, development steps, phases, validation, assay readouts, experimental design, protocol, mechanism, assay capabilities, validation methods (e.g. ELISA, western blot, flow cytometry, IHC). This flag should be set for ANY technical_question about how a service or product works, including questions about assay readouts, validation steps, and add-on screening options.
+- needs_protocol: workflow, process, how does it work, development steps, phases, assay readouts, experimental design, protocol, mechanism, assay capabilities, validation METHODS as documented procedure (e.g. ELISA, western blot, flow cytometry, IHC SOP). This flag should be set for ANY technical_question about how a service or product works, including questions about assay readouts, validation steps, and add-on screening options.
   NOT for availability questions ("do you offer ELISA services?") — use needs_availability instead.
   NOT when the user is only asking about price or timeline for a technical service — use needs_price / needs_timeline.
+  NOT for application fit / suitability / validation-IN-CONTEXT — phrasings like "validated for use on [FFPE mouse tissue]", "suitable for [CHO-K1 host]", "cross-react with [cynomolgus]", "work for [stem cell binding studies]", "compatible with [primary T cells]", "tested in [HEK293]" do NOT trigger needs_protocol. These are model_support_question with no core flag (often aux: needs_recommendation).
 - needs_troubleshooting: fixing a technical issue, low expression, poor yield, optimization, something not working.
   NOT for general questions about a product or service ("tell me about X") — those are product_inquiry / needs_availability.
 - needs_documentation: datasheet, brochure, COA, SDS, manual, technical file.
@@ -341,6 +505,22 @@ Most flags can be inferred from the field name. Pay special attention to:
 - needs_recommendation: suggest, recommend, which one should I use, best option.
 - needs_refund_or_cancellation: refund, replacement, cancel order, return, wrong product received.
 - needs_customization: custom design, modification, tailored solution, modified version.
+
+needs_protocol vs needs_recommendation vs needs_comparison boundaries:
+- needs_protocol: user asks ProMab to explain a documented procedure / SOP / standard workflow.
+  Markers: "what's your protocol", "explain your procedure", "walk me through your workflow", "could you provide the workflow for this service".
+- needs_recommendation: user asks ProMab for advice, suggestions, alternative methods, or experience-based judgment.
+  Markers: "what would you recommend", "any suggestions", "alternative methods", "from your experience", "help me select", "could you advise".
+- needs_comparison: user asks for an explicit X-vs-Y comparison with named alternatives.
+  Markers: "X vs Y", "what is the difference between X and Y", "which is better A or B", "compare A and B", "considering X and Y, which would be better".
+
+Boundary rules:
+- ASK uses advice/suggestion/alternative wording → prefer needs_recommendation; do NOT also fire needs_protocol.
+- ASK is an application fit / suitability / validation-in-context question on a specific product or system ("validated for [tissue/species/application]", "suitable for [host/cell type]", "cross-react with [species]", "work in [setup]", "compatible with [system]", "tested in [model]") → primary_intent = model_support_question (NOT technical_question, NOT workflow_question); do NOT fire needs_protocol; aux:needs_recommendation if the user asks for opinion/data-based judgment ("perform well", "generally reliable", "you typically recommend").
+- "still on schedule" / "is it still on track" on an existing order → needs_order_status (status framing), NOT needs_timeline.
+- Decision-uncertainty framing ("haven't decided X or Y", "whether X or Y") → prefer needs_recommendation; do NOT also fire needs_comparison.
+- Explicit X-vs-Y framing with named alternatives ("which is better: A or B", "compare A and B") → prefer needs_comparison; do NOT also fire needs_recommendation.
+- needs_documentation triggers on explicit document deliverable wording ("send me the SDS / COA / brochure / datasheet") OR on generic "send me info about [products]" requests where the customer service rep would respond with a brochure/datasheet attachment. Invoices are NOT documentation — they are needs_invoice.
 
 Constraint guidance:
 Extract only if explicit or strongly implied:
@@ -453,6 +633,61 @@ Pending options: ["Anti-CD4 [OKT4]", "Anti-CD4 [SK3]"]
 User: what is the timeline for CAR-T services?
 selection_resolution: null (user is asking a new question, not responding to the clarification)
 
+Dialogue act hint guidance (context.dialogue_act_hint):
+
+CRITICAL FIELD SEPARATION: dialogue_act_hint and semantic_intent are independent fields with different value spaces.
+- dialogue_act_hint values are EXACTLY one of: "inquiry" / "selection" / "closing" (3 conversational-move labels).
+- semantic_intent values are EXACTLY one of the 16 retrieval-bucket enums (product_inquiry, technical_question, workflow_question, model_support_question, service_plan_question, pricing_question, timeline_question, customization_request, documentation_request, shipping_question, troubleshooting, order_support, complaint, follow_up, general_info, unknown).
+- NEVER write "inquiry" / "selection" / "closing" into semantic_intent. NEVER write a retrieval enum into dialogue_act_hint.
+- A message that picks an option (dialogue_act_hint="selection") still gets a retrieval-bucket semantic_intent — usually "follow_up" because the message is continuing prior context without introducing a new ASK.
+- A message that is pure acknowledgement (dialogue_act_hint="closing") usually gets semantic_intent="follow_up" as well, since no new retrieval bucket is being requested.
+
+Set dialogue_act_hint to one of three values based on what kind of conversational move this message represents:
+
+- "inquiry" (default): the user is asking something, expressing intent, or making a request. Use this whenever the message contains an actionable ASK, a demand flag, or any new business question. This is the default and should be used unless the message clearly fits "selection" or "closing".
+
+- "selection": the user is committing to / picking one option, even without an explicit Pending clarification list above. Trigger when the message contains BOTH:
+  (a) An explicit option landing point: a named method ("the lentiviral method", "the monoclonal option"), a catalog identifier ("CAT# 20008"), an ordinal reference ("the second option", "the first one"), a specific spec/configuration ("the 1 mg size"), AND
+  (b) A commitment / move-forward verb: "we'll take", "let's move forward with", "please proceed with", "we will start with [named option]", "we'd like to go with".
+  Polite sign-offs ("Thank you", "Best regards", "Please let us know next steps") do NOT downgrade selection to closing — once an explicit option pick is committed, it stays selection.
+
+- "closing": the user is purely acknowledging / wrapping up with NO new ASK and NO named option pick. Trigger when the message is essentially:
+  (a) Generic acknowledgement with NO explicit option landing point — vague subject only ("sounds good", "got it, thanks", "perfect", "this all looks great", "appreciate the clarification"), AND
+  (b) Optional gratitude / sign-off ("thank you for the clarification", "appreciate your help", "will be in touch if anything else comes up").
+  If the message contains any new question, demand flag, or named option pick (named method / ordinal / catalog id / spec), do NOT use closing.
+
+Disambiguation — "works for us / works for me / suits us" handling:
+- When attached to a named option / ordinal ("the second option works for us", "the lentiviral method works for us") → "selection" (the named option grounds the commitment).
+- When attached only to vague subject ("this works well for us", "it works for us", "sounds good for us") with no named option in the message → "closing".
+
+Decision priority when uncertain:
+- If a Pending clarification list exists above and the user is responding to it → selection_resolution handles it (dialogue_act_hint stays "inquiry" or "selection" — the resolver checks selection_resolution first).
+- If the message has any new ASK or demand flag → "inquiry".
+- Otherwise apply the (a)+(b) tests above for selection vs closing.
+
+Examples:
+
+User: We will take the lentiviral method for stable cell line generation. Thank you very much.
+→ dialogue_act_hint = "selection" (named method "lentiviral method" + commitment "we will take"; "thank you" sign-off does not downgrade)
+
+User: Let's move forward with CAT# 20008.
+→ dialogue_act_hint = "selection" (catalog identifier + commitment "let's move forward with")
+
+User: The second option works for us. Please proceed with that one.
+→ dialogue_act_hint = "selection" (ordinal "second option" + "please proceed")
+
+User: This works well for our team. We appreciate your help and will be in touch if anything else comes up. Thank you.
+→ dialogue_act_hint = "closing" (generic ack "this works well", no named option pick, no new ASK)
+
+User: That sounds good to us. Thank you again for the clarification and support.
+→ dialogue_act_hint = "closing" (generic ack "sounds good" without indicating which option, no new ASK)
+
+User: We will start with this option. Best regards.
+→ dialogue_act_hint = "closing" (singular pronoun "this option" without naming WHICH one — no explicit landing point, treat as generic startup acknowledgement)
+
+User: Could you please send us the COA for CAT# 20008?
+→ dialogue_act_hint = "inquiry" (new ASK with demand flag needs_documentation; do not over-trigger selection just because a catalog id appears)
+
 Language guidance:
 - zh for Chinese
 - en for English
@@ -471,6 +706,11 @@ Set needs_human_review=true if any of the following apply:
 - high-stakes technical recommendation without enough information
 - the user requests guarantees or commitments not supported by available facts
 - the message is too ambiguous, emotionally charged, or risky for fully automated handling
+
+Auto-trigger needs_human_review=true (ProMab-specific precedents, even when user wording is calm and professional):
+- Regulatory submission inquiry: any mention of IND / NDA / BLA / CTA filing, Phase I/II/III clinical trial, GMP / GLP / GxP deliverables, or regulatory CMC documentation. CS cannot stand-alone commit; must escalate compliance / regulatory affairs review.
+- Operations / legal / engagement-model inquiry: questions about facility access (customer-side staff working at ProMab facility), on-site supervision (customer supervising ProMab staff), subcontractor / middle-person / consultant arrangement, shared workspace, liability allocation, or IP ownership intermediary structure. CS cannot stand-alone commit; must escalate operations / legal / BD review.
+- Customer complaint relay: explicit "complaint", "dissatisfied", "did not perform as described", "not working as expected"; OR product failure reports (too many bands, no signal, non-specific binding, contamination, batch failure); OR third-party distributor / agent / reseller relaying customer issues. CS cannot stand-alone close; must escalate QA / customer-success / AE.
 
 Return only structured data matching the schema.
 """.strip()

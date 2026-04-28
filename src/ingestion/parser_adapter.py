@@ -280,6 +280,7 @@ def _map_parser_context(payload: Mapping[str, Any]) -> ParserContext:
         risk_level=str(context.get("risk_level", "low") or "low"),
         needs_human_review=bool(context.get("needs_human_review", False)),
         reasoning_note=str(context.get("reasoning_note", "") or ""),
+        dialogue_act_hint=str(context.get("dialogue_act_hint", "inquiry") or "inquiry"),
     )
 
 

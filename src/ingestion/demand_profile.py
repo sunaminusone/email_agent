@@ -17,7 +17,6 @@ INTENT_DEMAND: dict[str, DemandType] = {
     "complaint": "operational",
     "follow_up": "general",
     "general_info": "general",
-    "partnership_request": "general",
     "unknown": "general",
 }
 

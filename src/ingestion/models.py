@@ -30,7 +30,6 @@ SEMANTIC_INTENT_VALUES: tuple[str, ...] = (
     "order_support",
     "complaint",
     "follow_up",
-    "partnership_request",
     "general_info",
     "unknown",
 )
@@ -86,6 +85,7 @@ class ParserContext(_IngestionModel):
     risk_level: str = "low"
     needs_human_review: bool = False
     reasoning_note: str = ""
+    dialogue_act_hint: str = "inquiry"
 
 
 class ParserRequestFlags(_IngestionModel):

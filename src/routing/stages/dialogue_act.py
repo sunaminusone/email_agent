@@ -30,8 +30,9 @@ def resolve_dialogue_act(
     selection = parser_signals.selection_resolution
     context = parser_signals.context
     intent = context.semantic_intent
+    hint = context.dialogue_act_hint
 
-    # ---- selection --------------------------------------------------------
+    # ---- selection (parser-resolved from pending options) -----------------
     if selection is not None and selection.selection_confidence >= 0.5:
         return DialogueActResult(
             act="selection",
@@ -42,7 +43,26 @@ def resolve_dialogue_act(
             selection_value=selection.selected_value,
         )
 
-    # ---- closing ----------------------------------------------------------
+    # ---- selection (cold-start hint from query text) ----------------------
+    if hint == "selection":
+        return DialogueActResult(
+            act="selection",
+            confidence=max(context.intent_confidence, 0.70),
+            reason="Parser hint: cold-start selection commitment without pending options.",
+            matched_signals=["parser_dialogue_act_hint"],
+            requires_active_object=True,
+        )
+
+    # ---- closing (cold-start hint from query text) ------------------------
+    if hint == "closing":
+        return DialogueActResult(
+            act="closing",
+            confidence=max(context.intent_confidence, 0.70),
+            reason="Parser hint: pure acknowledgement / conversational closing.",
+            matched_signals=["parser_dialogue_act_hint"],
+        )
+
+    # ---- closing (intent=unknown fallback) --------------------------------
     if _is_closing(intent, context.intent_confidence, parser_signals.request_flags):
         return DialogueActResult(
             act="closing",
