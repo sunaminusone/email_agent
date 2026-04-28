@@ -108,6 +108,7 @@ Dual-track objects (catalog AND custom service both exist):
 - Hybridoma-derived mAb (catalog inventory vs Hybridoma development service)
 
 Frame detection (apply only for dual-track objects):
+- IMPORTANT: the markers below govern the needs_customization flag ONLY. They do NOT determine semantic_intent. semantic_intent always follows the Intent guidance + Primary intent decision rules above — a service-frame query asking about workflow stays workflow_question, asking about engagement structure stays service_plan_question, asking about price stays pricing_question, etc. Frame detection is orthogonal to intent classification.
 - Product frame → does NOT trigger needs_customization. Markers: "off-the-shelf", "catalog", "standard", "ready-to-use", "SKU", "CAT#", "purchase X", "buy X", "order this product", "place an order for X", "is X in stock", "send me info about [catalog product]", "receive a sample [of catalog product]", "evaluate this product before placing larger order".
 - Service frame → triggers needs_customization. Markers: "custom", "develop", "generate", "build", "for my/our project", "provided by me", "workflow for this service", "quote for generation", "custom run".
 
