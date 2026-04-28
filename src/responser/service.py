@@ -10,15 +10,6 @@ from src.responser.models import (
     ResponsePlan,
 )
 from src.responser.planner import build_response_plan
-from src.responser.renderers import (
-    render_acknowledgement_response,
-    render_answer_response,
-    render_clarification_response,
-    render_handoff_response,
-    render_knowledge_response,
-    render_partial_answer_response,
-    render_termination_response,
-)
 from src.responser.renderers.csr_draft import render_csr_draft_response
 
 
@@ -64,8 +55,4 @@ def _render_response(
     response_input: ResponseInput,
     response_plan: ResponsePlan,
 ) -> ComposedResponse:
-    # CSR mode: always use the draft renderer regardless of response_mode.
-    # The seven legacy renderers (clarification, handoff, knowledge, etc.)
-    # are kept for now as importable artefacts but no longer dispatched —
-    # they assume customer-facing output, which CSR mode invalidates.
     return render_csr_draft_response(response_input, response_plan)
