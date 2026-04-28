@@ -684,7 +684,7 @@ def select_tools_for_execution(
     return _dedupe_and_order(all_calls)
 ```
 
-Details are in EXECUTOR_DESIGN_V3.md.
+Details are in EXECUTOR_DESIGN_V4.md.
 
 ### Response (minor enhancement)
 

@@ -404,8 +404,15 @@ def determine_action(dialogue_act, clarification, handoff_required):
 Rules (evaluated in order):
 1. **Handoff** takes highest priority (safety concern)
 2. **Clarification** takes second priority (can't execute without information)
-3. **Closing** acts skip executor — no tools needed, responser composes farewell/acknowledgment directly
-4. Everything else **executes**
+3. **Closing** acts produce `respond` (no new tools required for the underlying topic)
+4. Everything else produces `execute`
+
+These four values are the *classifier output*. In v4 CSR mode they are not the
+final action: `service.py::_run_agent_loop` coerces every non-`execute` value
+to `execute` and preserves the original judgment as an `AI_ROUTING_NOTE` on
+`route.reason` (see "Flow through service.py (v4 CSR mode)" above). The CSR
+draft is always assembled from executed retrieval results plus the advisory
+note — handoff/clarify/respond never short-circuit the executor.
 
 **Clarification policy** — decides when to ask for more information:
 
@@ -646,7 +653,7 @@ RouteDecision:
     options: [Anti-CD3 (PM-AB0042), Anti-CD3 (PM-AB0051), Anti-CD3 (PM-AB0063)]
 ```
 
-### Scenario 4: Acknowledgment (no execution needed)
+### Scenario 4: Acknowledgment (closing classifier, still executes in CSR mode)
 
 ```
 Customer: "Thanks, got it"
@@ -654,12 +661,18 @@ Customer: "Thanks, got it"
 Object routing: no change
 Dialogue act:   Level 1 -> closing (0.81, acknowledgement pattern)
 Policies:       no clarification, no handoff
-Action:         respond (closing -> respond, skip executor entirely)
+Classifier:     respond (closing -> respond)
+CSR coercion:   action coerced to execute; original kept as AI_ROUTING_NOTE
 
-RouteDecision:
-  action: respond
+RouteDecision (after service.py coercion):
+  action: execute
   dialogue_act: closing (0.81)
+  reason: "AI_ROUTING_NOTE original_action=respond | ..."
 ```
+
+The executor still runs the always-include retrieval (historical threads +
+technical RAG); the renderer surfaces the `AI_ROUTING_NOTE` so the rep can
+see that the classifier judged this as a closing turn.
 
 ### Scenario 5: Post-clarification selection (stateful anchors)
 
