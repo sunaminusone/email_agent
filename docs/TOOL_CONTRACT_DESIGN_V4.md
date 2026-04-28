@@ -104,13 +104,16 @@ _CRITICAL_FIELDS = {
 → 看有没有别的 tool 能提供 customer_name
 → 有的话先跑 provider tool（provider 必须自身 full）
 → 再回到主工具
-→ 还是不行？→ clarify
+→ 还是不行？→ 标记缺信息提示给 CSR，retrieval 继续走
 ```
 
 约束：
 1. **只允许一层 resolution**（不递归）
 2. **Provider 自身必须 full**（不允许 degraded provider）
-3. **Resolution 失败 → 直接 clarify**，不再尝试其他路径
+3. **Resolution 失败 ≠ 终止**。v4 CSR 模式下，主工具跑不了是 advisory 信号
+   而不是 gate：retrieval 通道（historical_thread_tool + technical_rag_tool）
+   仍然 always-include 跑全，主工具的缺信息列表挂在 `AI_ROUTING_NOTE` 上交给
+   csr_draft renderer 写成 `⚠️ AI 看法` 给客服参考。是否补信息由客服判断。
 
 ### 完整流程
 
@@ -121,9 +124,15 @@ Primary tool selection
     → degraded? → execute (带说明)
     → insufficient?
         → find provider (one-step)
-            → provider found & full? → run provider → re-check primary → execute or clarify
-            → no provider?           → clarify
+            → provider found & full? → run provider → re-check primary
+                                       → execute or 标记缺信息 advisory
+            → no provider?           → 标记缺信息 advisory，retrieval 通道继续跑
 ```
+
+> **v4 vs v3 差异**：v3 中 "→ clarify" 是终点（直接出 clarification message
+> 给客户）。v4 中没有这个终点 —— `historical_thread_tool` 和 `technical_rag_tool`
+> 永远 always-include 作为 supporting selection，readiness 失败只影响主工具
+> 是否触发，不影响 retrieval 通道是否输出参考材料给客服。
 
 ---
 

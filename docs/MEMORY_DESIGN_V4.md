@@ -1098,7 +1098,13 @@ MemoryContribution(
 MemoryContribution(
     source="routing",
     active_route=route_decision.route_name,
-    route_phase="waiting_for_user" if route_decision.action == "clarify" else "active",
+    # v4: route_decision.action is always coerced to "execute" before this
+    # contribution is built, so a "waiting_for_user" phase can NOT be derived
+    # from the routing action. The phase is instead derived from what the
+    # responser actually rendered: a `clarification` or `partial_answer`
+    # response_type means we are waiting on the user, anything else (in
+    # particular `csr_draft`) is `active`.
+    route_phase="waiting_for_user" if final_response.response_type in ("clarification", "partial_answer") else "active",
     set_pending_clarification=clarification_payload,  # or clear_pending_clarification=True
 )
 ```

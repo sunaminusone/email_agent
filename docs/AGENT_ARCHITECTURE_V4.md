@@ -591,24 +591,47 @@ Derived from prioritization in the 2026-04-27 alignment session.
 - **Auto-quote** — pricing model trained on historical quote patterns.
 - **Outcome tracking feedback loop** (Phase 2 of feedback)
 
-## Frozen / abandoned items
+## Backlog state under v4
 
-The v4 pivot makes several pre-pivot backlog items moot. They are explicitly
-**closed**, not just deferred:
+The v4 pivot reframes — but does not delete — most of the pre-pivot backlog
+items. The **mechanism** they describe still has value; what changed is
+**who consumes the output** (rep, not customer) and **how it is surfaced**
+(advisory note in the draft, not a control-flow gate).
 
-- **Backlog #6 step B** ("flip the confidence gate to handoff") — there is
-  no handoff in v4. The tier survives as a quality indicator for the rep.
-- **Backlog #9** (`needs_human_contact` flag) — there is no AE handoff to
-  trigger. If the customer wants a call, the rep sees that in the draft
-  and acts on it.
-- **Backlog #10** (multi-intent schema expansion) — the rep sees all
-  retrieved content; multi-intent splitting was a customer-facing concern.
-- **Backlog #12** (product multi-match clarify routing) — same logic;
-  multi-match becomes "show all candidates to rep", which the existing
-  retrieval already does.
+### Truly closed under v4
 
-The seven legacy renderers in `src/responser/renderers/` are dormant.
-Cleanup deferred until we are sure no other code imports them.
+- **Backlog #6 step B** ("flip the confidence gate to handoff"). There is
+  no handoff action in v4. The tiered confidence still gets computed by the
+  RAG tool and surfaces to the rep as a trust indicator (📈 high / 📊
+  medium / ⚠️ low), but it never gates the pipeline.
+
+### Repurposed under v4 (not closed)
+
+- **Backlog #9** (`needs_human_contact` signal). No more AE handoff, but
+  the *signal itself* is now more valuable: when the parser detects "wants
+  a call / wants to talk to an expert / wants pricing approval", the
+  csr_draft renderer should call this out as `⚠️ AI 看法: customer asks
+  for a call — consider scheduling`. The rep makes the call decision; the
+  signal is advisory, not a routing override.
+
+- **Backlog #10** (multi-intent schema expansion). **More important** under
+  v4, not less. When a customer asks "quote + protocol + delivery",
+  surfacing all three intents to the rep (rather than collapsing to one)
+  directly improves draft quality. The schema work to track multiple
+  semantic intents per turn carries over from v3 — what changed is that
+  v4 has no reason to ever pick one and drop the others.
+
+- **Backlog #12** (product multi-match clarify routing). Reframed from
+  "block and ask the customer to disambiguate" to "list all candidates in
+  the draft for the rep to pick". The existing object resolver already
+  surfaces secondary candidates; v4 just needs the renderer to render them
+  alongside the primary, with parser-derived disambiguation hints.
+
+### Renderer cleanup
+
+The seven legacy renderers in `src/responser/renderers/` are dormant —
+`render_csr_draft_response` is the only one dispatched. Cleanup deferred
+until we are confident no other code path imports them.
 
 ## Pivot history (v3 → v4)
 

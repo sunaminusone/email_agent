@@ -31,12 +31,6 @@ from src.routing import route
 
 logger = logging.getLogger(__name__)
 
-# RAG confidence levels are now tiered (low/medium/high) using thresholds
-# derived from synthetic corpora. The gate stays disabled until real traffic
-# validates those cutoffs and the action target ("handoff" vs "clarify")
-# is reconciled with the backlog.
-_RAG_CONFIDENCE_HANDOFF_ENABLED = False
-
 
 def _extract_rag_confidence(execution_result: ExecutionResult) -> dict[str, Any] | None:
     """Pull retrieval_confidence off the first technical_rag_tool call, if any."""
@@ -150,13 +144,11 @@ def _serialize_content_blocks(content_blocks) -> list[dict[str, Any]]:
     return serialized
 
 
-def _build_reply_preview(query: str, overall_action: str, execution_run_payload: dict[str, Any], final_response: FinalResponsePayload, *, locale: str = "zh") -> str:
+def _build_reply_preview(query: str, execution_run_payload: dict[str, Any], final_response: FinalResponsePayload, *, locale: str = "zh") -> str:
     if final_response.message:
         return final_response.message
-    if overall_action == "clarify":
-        return get_message("reply_preview_clarify", locale, query=query)
-    if overall_action == "handoff":
-        return get_message("reply_preview_handoff", locale, query=query)
+    # CSR mode always renders a draft (csr_draft renderer never returns
+    # an empty message), so this fallback is a safety net only.
     action_count = len(execution_run_payload.get("executed_actions", []))
     return get_message("reply_preview_done", locale, query=query, action_count=action_count)
 
@@ -336,23 +328,14 @@ def _build_agent_input_payload(
     }
 
 
-def _build_suggested_workflow(overall_action: str, execution_plan_payload: dict[str, Any], *, locale: str = "zh") -> list[str]:
+def _build_suggested_workflow(execution_plan_payload: dict[str, Any], *, locale: str = "zh") -> list[str]:
+    """v4 CSR pipeline workflow: always parse → extract → route → execute → draft."""
     m = lambda key, **kw: get_message(key, locale, **kw)
     workflow = [
         m("workflow_parse_input"),
         m("workflow_extract_objects"),
         m("workflow_route"),
     ]
-    if overall_action == "clarify":
-        workflow.append(m("workflow_clarify"))
-        return workflow
-    if overall_action == "handoff":
-        workflow.append(m("workflow_handoff"))
-        return workflow
-    if overall_action == "respond":
-        workflow.append(m("workflow_respond"))
-        return workflow
-
     planned_actions = execution_plan_payload.get("planned_actions", [])
     if planned_actions:
         workflow.extend([m("workflow_execute_tool", action_type=action["action_type"]) for action in planned_actions])
@@ -373,6 +356,9 @@ def _load_session_context(request: AgentRequest):
 
 def _build_final_response_payload(agent_state: AgentState, execution_result: ExecutionResult, response_bundle) -> FinalResponsePayload:
     clarification = agent_state.primary_clarification
+    # v4: every turn produces a csr_draft; there is no auto handoff. The
+    # FinalResponsePayload field is kept on the API contract for backwards
+    # compatibility but is always False under v4.
     return FinalResponsePayload(
         message=response_bundle.composed_response.message,
         response_type=response_bundle.composed_response.response_type,
@@ -381,7 +367,7 @@ def _build_final_response_payload(agent_state: AgentState, execution_result: Exe
             for call in execution_result.executed_calls
             if call.status != "error"
         ],
-        needs_human_handoff=response_bundle.composed_response.response_type == "handoff",
+        needs_human_handoff=False,
         missing_information_requested=(
             list(clarification.missing_information)
             if clarification is not None
@@ -502,7 +488,7 @@ def _assemble_agent_response(
             demand_profile,
         ),
         route=primary_route.model_dump(mode="json"),
-        suggested_workflow=_build_suggested_workflow(agent_state.overall_action, execution_plan_payload, locale=locale),
+        suggested_workflow=_build_suggested_workflow(execution_plan_payload, locale=locale),
         reply_preview=reply_preview,
         execution_plan=execution_plan_payload,
         execution_run=execution_run_payload,
@@ -673,8 +659,9 @@ def _run_agent_loop(
             )
             status = "resolved"
 
-        # Post-execution RAG confidence override (per-group).
-        # Phase 1: log only; override stays dark behind _RAG_CONFIDENCE_HANDOFF_ENABLED.
+        # CSR mode: retrieval confidence is a trust indicator surfaced to the
+        # rep through the renderer (📈 high / 📊 medium / ⚠️ low), never a
+        # gate. Log it for telemetry; the renderer reads it off the tool result.
         if route_decision.action == "execute":
             rag_confidence = _extract_rag_confidence(execution_result)
             if rag_confidence is not None:
@@ -683,19 +670,6 @@ def _run_agent_loop(
                     ingestion_bundle.turn_core.thread_id,
                     rag_confidence,
                 )
-                if (
-                    _RAG_CONFIDENCE_HANDOFF_ENABLED
-                    and rag_confidence.get("level") == "low"
-                ):
-                    route_decision = route_decision.model_copy(update={"action": "handoff"})
-                    execution_result = empty_execution_result(
-                        reason=(
-                            "rag confidence too low: "
-                            f"top_final={rag_confidence.get('top_final_score', 0.0):.3f} "
-                            f"margin={rag_confidence.get('top_margin', 0.0):.3f}"
-                        ),
-                    )
-                    status = "needs_handoff"
 
         agent_state.record(
             group, route_decision, execution_result,
@@ -779,7 +753,7 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
     response_content_blocks = _serialize_content_blocks(response_bundle.composed_response.content_blocks)
     final_response = _build_final_response_payload(agent_state, execution_result, response_bundle)
     reply_preview = _build_reply_preview(
-        query, agent_state.overall_action, execution_run_payload, final_response,
+        query, execution_run_payload, final_response,
         locale=request.locale,
     )
 

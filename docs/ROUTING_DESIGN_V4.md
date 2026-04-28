@@ -123,29 +123,41 @@ def _derive_retrieval_needs(request_flags, primary_object) -> set[str]:
     return needs or {"structured_lookup"}
 ```
 
-### Flow through service.py
+### Flow through service.py (v4 CSR mode)
+
+In v4 the routing decision never short-circuits the executor. Whatever the
+classifier returns (`execute` / `clarify` / `handoff` / `respond`) is coerced
+to `execute`; the original judgment is preserved on `route_decision.reason`
+as an `AI_ROUTING_NOTE` so the renderer can surface it to the rep.
 
 ```python
-# In app/service.py — the agent loop
+# In app/service.py::_run_agent_loop
 
 route = routing.route(ingestion_bundle, resolved_object_state)
 
-execution_result = None
-if route.action == "execute":
-    execution_result = executor.run(
-        ingestion_bundle, resolved_object_state, route, memory_snapshot
-    )
-# action == "respond": skip executor, go straight to responser
-# action == "clarify": skip executor, responser composes clarification
-# action == "handoff": skip executor, responser composes handoff message
+# CSR-mode invariant: every route runs the executor; original judgment
+# becomes advisory metadata, not a gate.
+if route.action != "execute":
+    route = route.model_copy(update={
+        "action": "execute",
+        "reason": f"AI_ROUTING_NOTE original_action={route.action} | {route.reason or ''}",
+    })
 
+execution_result = executor.run(
+    ingestion_bundle, resolved_object_state, route, memory_snapshot
+)
+
+# csr_draft renderer reads execution results AND the AI_ROUTING_NOTE on
+# route.reason; it shows historical threads + KB chunks + ⚠️ routing notes.
 response = responser.respond(ingestion_bundle, route, execution_result)
 ```
 
 Three modules read the RouteDecision:
-1. **service.py** reads `route.action` to decide whether to call executor or skip to responser
-2. **executor** reads `route.dialogue_act` to build execution context
-3. **responser** reads `route.action` and `route.clarification` to select response mode
+1. **service.py** coerces `route.action` to `execute` and preserves the
+   original action as an `AI_ROUTING_NOTE` on `route.reason`.
+2. **executor** reads `route.dialogue_act` to build execution context.
+3. **csr_draft renderer** reads `route.reason` for `AI_ROUTING_NOTE`
+   entries and surfaces them as advisory notes in the rep-facing draft.
 
 ## Current State Analysis
 

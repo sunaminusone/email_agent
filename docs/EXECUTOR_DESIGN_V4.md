@@ -1207,7 +1207,7 @@ The responser's `ResponseInput` changes from `execution_run: ExecutionRun` to `e
 
 6. **Tools that decide what other tools to call.** Each tool returns data, not instructions. The executor alone decides the next action based on tool results. This applies to both Level 1 and Level 2.
 
-7. **Leaking LLM reasoning to the customer.** Level 2's Thought traces are for internal observability. The customer never sees "I decided to try RAG because catalog was empty." The responser composes the customer-facing reply from tool results only.
+7. **Leaking LLM reasoning into the rep-facing draft body.** Level 2's Thought traces are for internal observability and the AI 看法 advisory section, not the body of the email draft. The csr_draft renderer composes the draft body from tool results only; reasoning traces and routing notes belong in the separate ⚠️ AI 看法 block where the rep can scan them but they don't end up pasted into a customer reply.
 
 ## Dependencies
 
