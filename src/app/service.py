@@ -608,9 +608,18 @@ def _run_agent_loop(
                     tool_call_cache=cache,
                     active_demand=scoped_demand,
                 )
+                # CSR mode: a primary-tool error doesn't invalidate the
+                # always-include retrievals. As long as at least one call
+                # produced grounded output, treat the group as resolved so
+                # historical_thread_tool / technical_rag_tool results survive
+                # the merge into agent_state.merged_execution_result.
+                any_successful_call = any(
+                    call.status in ("ok", "partial")
+                    for call in execution_result.executed_calls
+                )
                 status = (
                     "resolved"
-                    if execution_result.final_status in ("ok", "partial")
+                    if execution_result.final_status in ("ok", "partial") or any_successful_call
                     else "needs_clarification"
                 )
             else:
