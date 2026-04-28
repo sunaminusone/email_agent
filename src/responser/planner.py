@@ -148,7 +148,7 @@ def _has_informational_blocks(content_blocks: list[ContentBlock]) -> bool:
     )
 
 
-_INFORMATIONAL_TOPICS = frozenset({
+INFORMATIONAL_TOPICS = frozenset({
     "knowledge_lookup",
     "document_lookup",
     "commercial_or_operational_lookup",
@@ -164,7 +164,7 @@ def _is_topic_continuing(response_memory: ResponseMemory | None, current_focus: 
     """
     if response_memory is None or not response_memory.last_response_topics:
         return False
-    if current_focus not in _INFORMATIONAL_TOPICS:
+    if current_focus not in INFORMATIONAL_TOPICS:
         return False
     return response_memory.last_response_topics[-1] == current_focus
 

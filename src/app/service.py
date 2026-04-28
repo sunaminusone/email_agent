@@ -26,6 +26,7 @@ from src.memory.models import ClarificationMemory, MemoryContext
 from src.objects.models import ObjectCandidate
 from src.objects.resolution import resolve_objects
 from src.responser import ResponseInput, build_response_bundle
+from src.responser.planner import INFORMATIONAL_TOPICS
 from src.routing import route
 
 
@@ -406,12 +407,23 @@ def _persist_session_state(
         _build_response_contribution(response_bundle.response_plan),
     ]
 
+    # v4 CSR mode renders every turn as csr_draft, but recall._compute_trajectory
+    # still keys on the pre-pivot vocabulary ("answer" / "clarification_answer")
+    # to detect a follow_up turn. Map informational answer_focus values back to
+    # "answer" so the follow_up branch keeps firing — otherwise post-answer
+    # turns silently fall through to topic_switch and lose context-reuse +
+    # candidate-confidence in objects.resolution.
+    last_turn_type_for_memory = (
+        "answer"
+        if response_bundle.response_plan.answer_focus in INFORMATIONAL_TOPICS
+        else final_response.response_type
+    )
     updated_snapshot = reflect(
         current_snapshot=memory_context.snapshot,
         contributions=contributions,
         thread_id=thread_id,
         normalized_query=ingestion_bundle.turn_core.normalized_query or ingestion_bundle.turn_core.raw_query,
-        last_turn_type=final_response.response_type,
+        last_turn_type=last_turn_type_for_memory,
     )
     # v4 CSR mode: every turn produces a csr_draft, so no response_type can
     # signal that we are blocked waiting for the user — route_phase is always
