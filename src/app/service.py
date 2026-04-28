@@ -356,9 +356,6 @@ def _load_session_context(request: AgentRequest):
 
 def _build_final_response_payload(agent_state: AgentState, execution_result: ExecutionResult, response_bundle) -> FinalResponsePayload:
     clarification = agent_state.primary_clarification
-    # v4: every turn produces a csr_draft; there is no auto handoff. The
-    # FinalResponsePayload field is kept on the API contract for backwards
-    # compatibility but is always False under v4.
     return FinalResponsePayload(
         message=response_bundle.composed_response.message,
         response_type=response_bundle.composed_response.response_type,
@@ -367,7 +364,6 @@ def _build_final_response_payload(agent_state: AgentState, execution_result: Exe
             for call in execution_result.executed_calls
             if call.status != "error"
         ],
-        needs_human_handoff=False,
         missing_information_requested=(
             list(clarification.missing_information)
             if clarification is not None
@@ -432,7 +428,6 @@ def _persist_session_state(
             "response_path": response_bundle.response_path,
             "grounded_action_types": list(final_response.grounded_action_types),
             "content_blocks": list(response_content_blocks),
-            "needs_human_handoff": final_response.needs_human_handoff,
             "response_debug": response_bundle.composed_response.debug_info,
             "agent_debug": agent_state.debug_summary(),
             "semantic_debug": demand_profile.model_dump(mode="json"),

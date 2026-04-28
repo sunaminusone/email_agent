@@ -36,7 +36,6 @@ class FinalResponsePayload(_ApiModel):
     message: str = ""
     response_type: str = "answer"
     grounded_action_types: list[str] = Field(default_factory=list)
-    needs_human_handoff: bool = False
     missing_information_requested: list[str] = Field(default_factory=list)
 
 
