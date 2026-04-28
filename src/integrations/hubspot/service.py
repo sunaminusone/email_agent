@@ -239,6 +239,24 @@ class HubSpotClient:
             "missing": [] if self.is_configured() else ["HUBSPOT_ACCESS_TOKEN"],
         }
 
+    def get_file_metadata(self, file_id: str) -> dict[str, Any] | None:
+        """Resolve a HubSpot file_id to its metadata (name, url, type).
+
+        Returns None when the file is not found (404) so callers can record
+        the gap and continue. Other HTTP errors propagate so transient
+        failures are visible.
+        """
+        self._ensure_configured()
+        if not file_id:
+            return None
+        try:
+            return self._request("GET", f"/files/v3/files/{file_id}")
+        except requests.HTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+            if status == 404:
+                return None
+            raise
+
     def export_training_queries(
         self,
         *,

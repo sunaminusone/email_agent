@@ -425,11 +425,27 @@ function renderHistoricalThreads(executionRunPayload) {
       .filter(Boolean)
       .join("\n\n")
       .slice(0, 600);
+    const allAttachments = units.flatMap((u) => u.attachments || []);
+    const attachmentsHTML = allAttachments.length ? `
+        <div class="thread-attachments">
+          <span class="thread-attachments-label">📎 Attachments (${allAttachments.length}):</span>
+          ${allAttachments.map((att) => {
+            const name = att.name || att.id || "file";
+            const ext = att.extension || "";
+            const label = ext && !String(name).toLowerCase().endsWith("." + String(ext).toLowerCase())
+              ? `${name}.${ext}` : name;
+            return att.url
+              ? `<a class="document-link" href="${escapeHtml(att.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`
+              : `<span class="document-link document-link-disabled">${escapeHtml(label)}</span>`;
+          }).join(" · ")}
+        </div>
+      ` : "";
     return `
       <div class="thread-card">
         <p class="thread-title">[${index + 1}] ${escapeHtml(sender)} — ${escapeHtml(inst)}</p>
         <p class="thread-meta">${escapeHtml(date)} · service: ${escapeHtml(service)} · score ${score} · ${units.length} reply unit(s)</p>
         <pre class="thread-snippet">${escapeHtml(replies)}</pre>
+        ${attachmentsHTML}
       </div>
     `;
   }).join("");

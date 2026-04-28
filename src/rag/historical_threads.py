@@ -6,6 +6,7 @@ full thread context (sorted by reply_index).
 """
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -15,6 +16,21 @@ from chromadb.api.shared_system_client import SharedSystemClient
 from langchain_chroma import Chroma
 
 from src.config import get_embeddings
+
+
+def _decode_attachments(raw: Any) -> list[dict[str, Any]]:
+    """Parse the JSON-encoded attachments_json metadata field."""
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [dict(entry) for entry in raw if isinstance(entry, dict)]
+    try:
+        decoded = json.loads(str(raw))
+    except json.JSONDecodeError:
+        return []
+    if isinstance(decoded, list):
+        return [dict(entry) for entry in decoded if isinstance(entry, dict)]
+    return []
 
 CHROMA_DIR = Path("/Users/promab/anaconda_projects/email_agent/data/processed/chroma_historical_threads")
 COLLECTION_NAME = "historical_threads_v1"
@@ -45,6 +61,7 @@ def _format_match(doc, score: float) -> dict[str, Any]:
         "service_of_interest": md.get("service_of_interest", ""),
         "products_of_interest": md.get("products_of_interest", ""),
         "has_customer_message": md.get("has_customer_message", False),
+        "attachments": _decode_attachments(md.get("attachments_json")),
         "score": float(score),
         "page_content": doc.page_content,
     }
@@ -73,6 +90,7 @@ def _load_full_thread(store: Chroma, submission_id: str) -> list[dict[str, Any]]
                 "service_of_interest": md.get("service_of_interest", ""),
                 "products_of_interest": md.get("products_of_interest", ""),
                 "has_customer_message": md.get("has_customer_message", False),
+                "attachments": _decode_attachments(md.get("attachments_json")),
                 "page_content": content,
             }
         )

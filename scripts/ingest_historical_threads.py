@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
@@ -26,6 +28,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.config import get_embeddings  # noqa: E402
 
 CSV_PATH = PROJECT_ROOT / "data" / "processed" / "hubspot_form_inquiries_long.csv"
+ATTACHMENTS_CACHE_PATH = PROJECT_ROOT / "data" / "processed" / "hubspot_attachments_cache.json"
 CHROMA_DIR = PROJECT_ROOT / "data" / "processed" / "chroma_historical_threads"
 COLLECTION_NAME = "historical_threads_v1"
 
@@ -50,6 +53,46 @@ METADATA_KEYS = (
     "reply_direction",
     "reply_message_id",
 )
+
+
+@lru_cache(maxsize=1)
+def _load_attachments_cache() -> dict[str, dict]:
+    if not ATTACHMENTS_CACHE_PATH.exists():
+        return {}
+    try:
+        return json.loads(ATTACHMENTS_CACHE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _split_attachment_ids(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    ids: list[str] = []
+    for chunk in text.replace("\n", ",").split(","):
+        token = chunk.strip()
+        if token:
+            ids.append(token)
+    return ids
+
+
+def _resolve_attachments(raw: str) -> list[dict[str, str | int]]:
+    """Look up file_ids in the resolver cache and return display-ready records."""
+    cache = _load_attachments_cache()
+    out: list[dict[str, str | int]] = []
+    for fid in _split_attachment_ids(raw):
+        entry = cache.get(fid) or {}
+        out.append({
+            "id": fid,
+            "name": entry.get("name") or "",
+            "extension": entry.get("extension") or "",
+            "type": entry.get("type") or "",
+            "url": entry.get("url") or "",
+            "size": entry.get("size") or 0,
+            "status": entry.get("status") or "unresolved",
+        })
+    return out
 
 
 def _row_to_document(row: dict[str, str]) -> Document | None:
@@ -84,6 +127,12 @@ def _row_to_document(row: dict[str, str]) -> Document | None:
             metadata[int_key] = int(metadata[int_key]) if metadata[int_key] != "" else 0
         except (ValueError, TypeError):
             metadata[int_key] = 0
+
+    # Resolve attachment file_ids → display records and JSON-encode for
+    # chromadb (it accepts str/int/float/bool scalars only).
+    attachments = _resolve_attachments(row.get("reply_attachments", ""))
+    metadata["attachments_json"] = json.dumps(attachments, ensure_ascii=False) if attachments else ""
+    metadata["attachment_count"] = len(attachments)
 
     return Document(page_content=page_content, metadata=metadata)
 

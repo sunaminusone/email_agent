@@ -618,6 +618,28 @@ button {
   overflow: auto;
 }
 
+.thread-attachments {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(200, 29, 37, 0.04);
+  border: 1px solid rgba(200, 29, 37, 0.12);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.thread-attachments-label {
+  font-weight: 600;
+  color: var(--accent-strong);
+  margin-right: 6px;
+}
+
+.document-link-disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
 .chat-message-user {
   margin-left: auto;
   background: linear-gradient(135deg, var(--accent) 0%, #dc3942 100%);
