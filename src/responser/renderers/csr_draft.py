@@ -96,7 +96,6 @@ def render_csr_draft_response(
             )
         ],
         debug_info={
-            "response_mode": response_plan.response_mode,
             "csr_mode": True,
             "historical_threads_returned": len(historical_threads),
             "document_matches_returned": len(document_matches),

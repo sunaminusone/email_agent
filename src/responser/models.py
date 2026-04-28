@@ -15,17 +15,6 @@ if TYPE_CHECKING:
     from src.agent.state import GroupOutcome
 
 
-ResponseMode = Literal[
-    "clarification",
-    "direct_answer",
-    "knowledge_answer",
-    "acknowledgement",
-    "termination",
-    "handoff",
-    "partial_answer",
-]
-
-
 class _ResponseModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,11 +45,9 @@ class ResponseInput(_ResponseModel):
 
 
 class ResponsePlan(_ResponseModel):
-    response_mode: ResponseMode = "direct_answer"
     answer_focus: str = ""
     primary_content_blocks: list[ContentBlock] = Field(default_factory=list)
     supporting_content_blocks: list[ContentBlock] = Field(default_factory=list)
-    should_use_llm_rewrite: bool = False
     should_acknowledge_object: bool = False
     memory_update: MemoryUpdate | None = None
     reason: str = ""
@@ -79,4 +66,4 @@ class ResponseBundle(_ResponseModel):
     response_plan: ResponsePlan
     response_topic: str = ""
     response_content_summary: str = ""
-    response_path: str = "deterministic"
+    response_path: str = "csr_renderer_direct"

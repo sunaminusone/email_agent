@@ -51,6 +51,6 @@ class AgentPrototypeResponse(_ApiModel):
     response_topic: str = ""
     response_content_blocks: list[dict[str, Any]] = Field(default_factory=list)
     response_content_summary: str = ""
-    response_path: str = "deterministic"
+    response_path: str = "csr_renderer_direct"
     final_response: FinalResponsePayload = Field(default_factory=FinalResponsePayload)
     assistant_message: dict[str, Any] = Field(default_factory=dict)

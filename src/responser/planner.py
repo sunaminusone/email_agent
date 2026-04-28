@@ -10,85 +10,35 @@ def build_response_plan(
     response_input: ResponseInput,
     content_blocks: list[ContentBlock],
 ) -> ResponsePlan:
-    response_mode = _select_response_mode(response_input, content_blocks)
-    answer_focus = _infer_answer_focus(response_mode, content_blocks)
+    answer_focus = _infer_answer_focus(response_input, content_blocks)
     topic_continuing = _is_topic_continuing(response_input.response_memory, answer_focus)
     primary_blocks, supporting_blocks = _split_blocks(
-        response_mode, content_blocks, topic_continuing=topic_continuing,
+        content_blocks, topic_continuing=topic_continuing,
     )
 
     memory_update = _build_memory_update(
-        response_mode=response_mode,
         answer_focus=answer_focus,
         response_input=response_input,
         content_blocks=content_blocks,
     )
 
     return ResponsePlan(
-        response_mode=response_mode,
         answer_focus=answer_focus,
         primary_content_blocks=primary_blocks,
         supporting_content_blocks=supporting_blocks,
-        should_use_llm_rewrite=_should_use_llm_rewrite(
-            response_mode, primary_blocks, supporting_blocks,
-            topic_continuing=topic_continuing,
-        ),
         should_acknowledge_object=_should_acknowledge_object(
             response_input, content_blocks, topic_continuing=topic_continuing,
         ),
         memory_update=memory_update,
-        reason=_build_reason(response_mode, response_input, content_blocks),
+        reason="",
     )
 
 
-def _select_response_mode(
-    response_input: ResponseInput,
-    content_blocks: list[ContentBlock],
-) -> str:
-    # Multi-group: some resolved + some need clarification → partial_answer
-    if response_input.group_outcomes:
-        resolved = [o for o in response_input.group_outcomes if o.status == "resolved"]
-        clarifying = [o for o in response_input.group_outcomes if o.status == "needs_clarification"]
-        handoffs = [o for o in response_input.group_outcomes if o.status == "needs_handoff"]
-
-        if handoffs:
-            return "handoff"
-        if resolved and clarifying:
-            return "partial_answer"
-        if not resolved and clarifying:
-            return "clarification"
-
-    if response_input.action == "clarify":
-        return "clarification"
-
-    if response_input.action == "handoff":
-        return "handoff"
-
-    dialogue_act = response_input.dialogue_act.act
-
-    # No tool results and not a closing act → LLM knowledge answer
-    if not response_input.execution_result.executed_calls and dialogue_act != "closing":
-        return "knowledge_answer"
-
-    # v3 closing act: distinguish termination vs acknowledgement via matched_signals
-    if dialogue_act == "closing":
-        if "terminate_pattern" in response_input.dialogue_act.matched_signals:
-            return "termination"
-        if not _has_informational_blocks(content_blocks):
-            return "acknowledgement"
-
-    return "direct_answer"
-
-
 def _split_blocks(
-    response_mode: str,
     content_blocks: list[ContentBlock],
     *,
     topic_continuing: bool = False,
 ) -> tuple[list[ContentBlock], list[ContentBlock]]:
-    if response_mode in {"clarification", "handoff", "acknowledgement", "termination"}:
-        return list(content_blocks[:1]), list(content_blocks[1:])
-
     priority_order = {
         "object_summary": 0,
         "structured_facts": 1,
@@ -123,7 +73,6 @@ def _should_acknowledge_object(
 
 def _build_memory_update(
     *,
-    response_mode: str,
     answer_focus: str,
     response_input: ResponseInput,
     content_blocks: list[ContentBlock],
@@ -146,11 +95,8 @@ def _build_memory_update(
         if block_type not in revealed_attributes:
             revealed_attributes.append(block_type)
 
-    # Use answer_focus instead of response_mode — more semantically useful
-    # for recall to judge conversation trajectory ("knowledge_lookup" vs "direct_answer")
-    topic = answer_focus or response_mode
-    if topic and topic not in last_topics:
-        last_topics.append(topic)
+    if answer_focus and answer_focus not in last_topics:
+        last_topics.append(answer_focus)
     last_topics = last_topics[-5:]
 
     # Extract demand for memory — only store primary demand's flags
@@ -164,26 +110,14 @@ def _build_memory_update(
         last_demand_flags=demand_flags,
     )
 
+    soft_reset = (
+        response_input.dialogue_act.act == "closing"
+        and "terminate_pattern" in response_input.dialogue_act.matched_signals
+    )
     return MemoryUpdate(
         response_memory=response_memory,
-        soft_reset_current_topic=response_mode == "termination",
+        soft_reset_current_topic=soft_reset,
     )
-
-
-def _build_reason(response_mode: str, response_input: ResponseInput, content_blocks: list[ContentBlock]) -> str:
-    if response_mode == "clarification":
-        return "Execution remains blocked until missing information is resolved."
-    if response_mode == "handoff":
-        return "The request requires human review or a manual workflow."
-    if response_mode == "termination":
-        return "The user asked to stop the current topic."
-    if response_mode == "acknowledgement":
-        return "The turn is a short acknowledgement without a new informational ask."
-    if response_mode == "partial_answer":
-        return "Some intent groups resolved while others still need clarification."
-    if response_mode == "knowledge_answer":
-        return "No tool results available; answering from LLM knowledge."
-    return "Single-focus demand; one grounded answer path is sufficient."
 
 
 def _extract_primary_demand(response_input: ResponseInput) -> tuple[str, list[str]]:
@@ -206,30 +140,12 @@ def _extract_primary_demand(response_input: ResponseInput) -> tuple[str, list[st
     return primary, primary_flags
 
 
-
 def _has_informational_blocks(content_blocks: list[ContentBlock]) -> bool:
     return any(
         block.block_type
         in {"structured_facts", "technical_snippets", "document_artifacts", "supporting_records"}
         for block in content_blocks
     )
-
-
-def _should_use_llm_rewrite(
-    response_mode: str,
-    primary_blocks: list[ContentBlock],
-    supporting_blocks: list[ContentBlock],
-    *,
-    topic_continuing: bool = False,
-) -> bool:
-    if response_mode != "direct_answer":
-        return False
-    all_blocks = [*primary_blocks, *supporting_blocks]
-    # Consecutive same-topic: template messages start sounding repetitive,
-    # prefer LLM rewrite even with fewer blocks to vary the phrasing.
-    if topic_continuing and all_blocks:
-        return True
-    return _has_informational_blocks(all_blocks)
 
 
 _INFORMATIONAL_TOPICS = frozenset({
@@ -253,15 +169,27 @@ def _is_topic_continuing(response_memory: ResponseMemory | None, current_focus: 
     return response_memory.last_response_topics[-1] == current_focus
 
 
-def _infer_answer_focus(response_mode: str, content_blocks: list[ContentBlock]) -> str:
-    if response_mode == "clarification":
+def _infer_answer_focus(response_input: ResponseInput, content_blocks: list[ContentBlock]) -> str:
+    # Multi-group routing outcomes take precedence — they reflect what the
+    # agent loop actually decided per intent group, before service.py coerces
+    # the top-level action to "execute" under the v4 CSR invariant.
+    if response_input.group_outcomes:
+        statuses = {o.status for o in response_input.group_outcomes}
+        if "needs_handoff" in statuses:
+            return "human_review"
+        if "needs_clarification" in statuses:
+            return "missing_information"
+
+    if response_input.action == "clarify":
         return "missing_information"
-    if response_mode == "handoff":
+    if response_input.action == "handoff":
         return "human_review"
-    if response_mode == "acknowledgement":
-        return "conversation_control"
-    if response_mode == "termination":
-        return "conversation_close"
+
+    if response_input.dialogue_act.act == "closing":
+        if "terminate_pattern" in response_input.dialogue_act.matched_signals:
+            return "conversation_close"
+        if not _has_informational_blocks(content_blocks):
+            return "conversation_control"
 
     block_types = {block.block_type for block in content_blocks}
     if "technical_snippets" in block_types:

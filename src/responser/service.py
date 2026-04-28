@@ -29,13 +29,14 @@ def build_response_bundle(response_input: ResponseInput) -> ResponseBundle:
     response_plan, content_blocks = plan_response(response_input)
     draft = _render_response(response_input, response_plan)
     composed_response = compose_final_response(draft, response_plan, locale=response_input.locale)
-    response_path = str(composed_response.debug_info.get("response_path", "deterministic"))
+    response_path = str(composed_response.debug_info.get("response_path", "csr_renderer_direct"))
 
-    # Topic derivation — inlined from former resolution.py
-    if response_plan.response_mode in {"clarification", "handoff"}:
-        response_topic = response_plan.response_mode
-    else:
-        response_topic = response_plan.answer_focus or response_plan.response_mode
+    # Topic derivation: answer_focus already encodes both control topics
+    # (missing_information / human_review / conversation_close /
+    # conversation_control) and informational topics (knowledge_lookup /
+    # commercial_or_operational_lookup / etc.), so it is the authoritative
+    # source for memory continuity and downstream routing context.
+    response_topic = response_plan.answer_focus
 
     # Content summary — inlined from former resolution.py
     response_content_summary = " ".join(
