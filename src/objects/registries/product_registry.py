@@ -32,6 +32,7 @@ class ProductRegistryEntry:
     synonyms: tuple[str, ...] = ()
     target_antigen: str = ""
     application_text: str = ""
+    applications: tuple[str, ...] = ()
     species_reactivity_text: str = ""
     format_or_size: str = ""
     clone: str = ""
@@ -119,10 +120,11 @@ class ExcelProductRegistrySource:
                         synonyms=tuple(synonyms),
                         target_antigen=target_aliases[0] if target_aliases else "",
                         application_text=application_text,
+                        applications=_normalize_application_tokens(application_text),
                         species_reactivity_text=species_reactivity_text,
                         clone=_safe_text(raw.get("clone")),
                         clonality=clonality,
-                        isotype=_safe_text(raw.get("Isotype")),
+                        isotype=_normalize_isotype(raw.get("Isotype")),
                         ig_class=_safe_text(raw.get("Ig class")),
                         gene_id=_safe_text(raw.get("Gene ID")),
                         gene_accession=_safe_text(raw.get("Gene Accession")),
@@ -400,6 +402,7 @@ def _postgres_dsn() -> str:
 def _entry_payload(entry: ProductRegistryEntry) -> dict[str, Any]:
     payload = asdict(entry)
     payload["aliases"] = list(entry.aliases)
+    payload["applications"] = list(entry.applications)
     payload["alias_records"] = [asdict(record) for record in _alias_records_for_entry(entry)]
     return payload
 
@@ -415,6 +418,7 @@ def _entry_from_record(record: dict[str, Any]) -> ProductRegistryEntry:
         synonyms = _split_aliases(synonyms)
     elif isinstance(synonyms, list):
         synonyms = [clean_text(syn) for syn in synonyms if clean_text(syn)]
+    application_text = _safe_text(record.get("application_text"))
     return ProductRegistryEntry(
         catalog_no=_safe_text(record.get("catalog_no")),
         canonical_name=_safe_text(record.get("canonical_name")),
@@ -422,12 +426,13 @@ def _entry_from_record(record: dict[str, Any]) -> ProductRegistryEntry:
         aliases=tuple(dedupe_preserve_order(list(aliases))),
         synonyms=tuple(dedupe_preserve_order(list(synonyms))),
         target_antigen=_safe_text(record.get("target_antigen")),
-        application_text=_safe_text(record.get("application_text")),
+        application_text=application_text,
+        applications=_normalize_application_tokens(application_text),
         species_reactivity_text=_safe_text(record.get("species_reactivity_text")),
         format_or_size=_safe_text(record.get("format_or_size")),
         clone=_safe_text(record.get("clone")),
         clonality=_safe_text(record.get("clonality")),
-        isotype=_safe_text(record.get("isotype")),
+        isotype=_normalize_isotype(record.get("isotype")),
         ig_class=_safe_text(record.get("ig_class")),
         gene_id=_safe_text(record.get("gene_id")),
         gene_accession=_safe_text(record.get("gene_accession")),
@@ -469,6 +474,111 @@ def _split_aliases(value: Any) -> list[str]:
         if alias:
             aliases.append(alias)
     return dedupe_preserve_order(aliases)
+
+
+_ISOTYPE_HEAVY_RE = re.compile(
+    r"\big\s*(g[1-4][a-c]?|g|m|a|d|e)\b",
+    re.IGNORECASE,
+)
+_ISOTYPE_LIGHT_RE = re.compile(r"(kappa|κ|lambda|λ)", re.IGNORECASE)
+
+
+def _normalize_isotype(raw: Any) -> str:
+    """Collapse the dirty Excel ``Isotype`` column into canonical heavy-chain form.
+
+    Examples::
+
+        'Mouse  IgG1' / 'mouse IgG1' / 'Mouse IGg1' -> 'IgG1'
+        'Mouse Ig M' -> 'IgM'
+        'Mouse IgG1,kappa' / 'Mouse IgG1.kappa' -> 'IgG1/kappa'
+        'Mouse IgG2b/Mouse IgG2a' -> 'IgG_mixed'
+        'Rat Mab' / '' / NaN -> ''
+    """
+    text = _safe_text(raw).lower()
+    if not text:
+        return ""
+
+    heavy_matches = _ISOTYPE_HEAVY_RE.findall(text)
+    if not heavy_matches:
+        return ""
+
+    canonical_seen: list[str] = []
+    for suffix in heavy_matches:
+        compact = re.sub(r"\s+", "", suffix).lower()
+        if compact.startswith("g"):
+            canonical = "IgG" + compact[1:].lower()
+        else:
+            canonical = "Ig" + compact.upper()
+        if canonical not in canonical_seen:
+            canonical_seen.append(canonical)
+
+    if len(canonical_seen) > 1:
+        return "IgG_mixed"
+
+    primary = canonical_seen[0]
+    light_match = _ISOTYPE_LIGHT_RE.search(text)
+    if light_match:
+        light = light_match.group(1).lower().replace("κ", "kappa").replace("λ", "lambda")
+        return f"{primary}/{light}"
+    return primary
+
+
+_APPLICATION_CANONICAL = {
+    "elisa": "ELISA",
+    "western blot": "WB",
+    "wb": "WB",
+    "ihc-p": "IHC",
+    "ihc-f": "IHC",
+    "ihc": "IHC",
+    "icc": "ICC",
+    "immunofluorescence": "IF",
+    "if": "IF",
+    "flow cytometry": "FCM",
+    "facs": "FCM",
+    "flow": "FCM",
+    "fcm": "FCM",
+    "fc": "FCM",
+    "co-ip": "IP",
+    "immunoprecipitation": "IP",
+    "ip": "IP",
+}
+
+
+def _normalize_application_tokens(raw: Any) -> tuple[str, ...]:
+    """Pick canonical application codes out of noisy free text.
+
+    Handles delimiter slop (commas, plusses, slashes, full-width punctuation)
+    and adjoined tokens such as ``ELISAFCM`` by greedy left-to-right matching
+    against the canonical vocabulary. Anything not in the vocabulary is dropped.
+    """
+    text = _safe_text(raw).lower()
+    if not text:
+        return ()
+
+    text = re.sub(r"[+?/、,，。.\s]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ()
+
+    keys_by_len = sorted(_APPLICATION_CANONICAL.keys(), key=len, reverse=True)
+    found: list[str] = []
+    cursor = 0
+    while cursor < len(text):
+        if text[cursor] == " ":
+            cursor += 1
+            continue
+        matched = False
+        for key in keys_by_len:
+            if text.startswith(key, cursor):
+                canonical = _APPLICATION_CANONICAL[key]
+                if canonical not in found:
+                    found.append(canonical)
+                cursor += len(key)
+                matched = True
+                break
+        if not matched:
+            cursor += 1
+    return tuple(found)
 
 
 def _expand_mrna_lnp_aliases(values: list[str]) -> list[str]:
