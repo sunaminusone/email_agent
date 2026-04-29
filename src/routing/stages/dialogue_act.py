@@ -175,8 +175,33 @@ def resolve_dialogue_act(
             selection_value=query.strip(),
         )
 
+    # ---- LLM fallback for ambiguous / low-confidence queries --------------
+    # Runs before lexical close/sel/ack and _is_closing so weak lexical
+    # patterns ("这个", short non-English) can't pre-empt a richer LLM read.
+    fallback_attempted = False
+    if _should_use_llm_fallback(text, parser_signals):
+        fallback_attempted = True
+        fallback = _llm_classify_dialogue_act(
+            query=query,
+            object_routing=object_routing,
+            memory_context=memory_context,
+        )
+        if fallback is not None:
+            return fallback
+
+    # ---- closing (intent=unknown, no flags) -------------------------------
+    # Above the lexical TERMINATION block so "bye" + parser unknown is
+    # attributed to the parser decision rather than the surface pattern.
+    if not fallback_attempted and _is_closing(intent, context.intent_confidence, parser_signals.request_flags):
+        return DialogueActResult(
+            act="closing",
+            confidence=max(0.80, 1.0 - context.intent_confidence),
+            reason="No active customer intent detected; treating as conversational closing.",
+            matched_signals=["parser_no_active_intent"],
+        )
+
     # ---- closing / selection lexical fallbacks ----------------------------
-    if _matches_any(text, _TERMINATION_PATTERNS):
+    if not fallback_attempted and _matches_any(text, _TERMINATION_PATTERNS):
         return DialogueActResult(
             act="closing",
             confidence=max(context.intent_confidence, 0.85),
@@ -184,7 +209,7 @@ def resolve_dialogue_act(
             matched_signals=["terminate_pattern"],
         )
 
-    if _looks_like_selection_reply(text):
+    if not fallback_attempted and _looks_like_selection_reply(text):
         return DialogueActResult(
             act="selection",
             confidence=max(context.intent_confidence, 0.75),
@@ -194,21 +219,12 @@ def resolve_dialogue_act(
             selection_value=query.strip(),
         )
 
-    if _matches_any(text, _ACKNOWLEDGEMENT_PATTERNS):
+    if not fallback_attempted and _matches_any(text, _ACKNOWLEDGEMENT_PATTERNS):
         return DialogueActResult(
             act="closing",
             confidence=max(context.intent_confidence, 0.75),
             reason="Acknowledgement or conversational closing signal detected.",
             matched_signals=["acknowledgement_pattern"],
-        )
-
-    # ---- closing (intent=unknown fallback) --------------------------------
-    if _is_closing(intent, context.intent_confidence, parser_signals.request_flags):
-        return DialogueActResult(
-            act="closing",
-            confidence=max(0.80, 1.0 - context.intent_confidence),
-            reason="No active customer intent detected; treating as conversational closing.",
-            matched_signals=["parser_no_active_intent"],
         )
 
     # ---- inquiry (strong deterministic inquiry markers) -------------------
@@ -225,16 +241,6 @@ def resolve_dialogue_act(
             ),
             matched_signals=["parser_follow_up"] if is_continuation else ["inquiry_pattern"],
         )
-
-    # ---- Level 2 fallback -------------------------------------------------
-    if _should_use_llm_fallback(text, parser_signals):
-        fallback = _llm_classify_dialogue_act(
-            query=query,
-            object_routing=object_routing,
-            memory_context=memory_context,
-        )
-        if fallback is not None:
-            return fallback
 
     # ---- inquiry (default) ------------------------------------------------
     is_continuation = intent in _CONTINUATION_INTENTS or _matches_any(text, _ELABORATION_PATTERNS)
@@ -310,6 +316,11 @@ def _should_use_llm_fallback(text: str, parser_signals: ParserSignals) -> bool:
     token_count = len(text.split())
     contains_non_ascii = any(ord(ch) > 127 for ch in text)
     has_inquiry_markers = any(marker in text for marker in _INQUIRY_MARKERS)
+    if not has_inquiry_markers and (
+        _matches_any(text, _TERMINATION_PATTERNS)
+        or _matches_any(text, _ACKNOWLEDGEMENT_PATTERNS)
+    ):
+        return False
     mixed_posture = (
         _matches_any(text, _ACKNOWLEDGEMENT_PATTERNS)
         and any(marker in text for marker in ("?", "what", "how", "price", "pricing", "why", "多少钱"))
