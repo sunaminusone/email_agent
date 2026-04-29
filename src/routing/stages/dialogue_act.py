@@ -37,20 +37,24 @@ _TERMINATION_PATTERNS: tuple[str, ...] = (
     "不用了",
     "先这样",
 )
-_ACKNOWLEDGEMENT_PATTERNS: tuple[str, ...] = (
-    "thanks",
-    "thank you",
-    "got it",
-    "sounds good",
-    "perfect",
-    "sure",
-    "ok",
-    "okay",
-    "明白了",
-    "好的",
-    "收到",
-    "谢谢",
+_ACKNOWLEDGEMENT_EN_RE = re.compile(
+    r"\b(?:thanks|thank you|got it|sounds good|perfect|sure|ok|okay)\b",
+    re.IGNORECASE,
 )
+_ACKNOWLEDGEMENT_ZH: tuple[str, ...] = ("明白了", "好的", "收到", "谢谢")
+_ACK_SHORT_MAX_TOKENS = 6
+
+
+def _looks_like_acknowledgement(text: str) -> bool:
+    """ACK only fires on short messages — long emails that politely end
+    with 'Thank you' must not be mis-classified as closing."""
+    if not text:
+        return False
+    if len(text.split()) > _ACK_SHORT_MAX_TOKENS:
+        return False
+    if _ACKNOWLEDGEMENT_EN_RE.search(text):
+        return True
+    return _matches_any(text, _ACKNOWLEDGEMENT_ZH)
 _SELECTION_PATTERNS: tuple[str, ...] = (
     "the first one",
     "first one",
@@ -85,7 +89,7 @@ _ELABORATION_PATTERNS: tuple[str, ...] = (
     "再说说",
     "多说一点",
 )
-_ORDINAL_SELECTION_RE = re.compile(r"\b(?:1|2|3|first|second|third)\b", re.IGNORECASE)
+_SELECTION_SHORT_MAX_TOKENS = 8
 _INQUIRY_MARKERS: tuple[str, ...] = (
     "?",
     "what",
@@ -219,7 +223,7 @@ def resolve_dialogue_act(
             selection_value=query.strip(),
         )
 
-    if not fallback_attempted and _matches_any(text, _ACKNOWLEDGEMENT_PATTERNS):
+    if not fallback_attempted and _looks_like_acknowledgement(text):
         return DialogueActResult(
             act="closing",
             confidence=max(context.intent_confidence, 0.75),
@@ -286,13 +290,15 @@ def _matches_any(text: str, patterns: tuple[str, ...]) -> bool:
 
 
 def _looks_like_selection_reply(text: str) -> bool:
+    """Selection only fires on short replies — long emails containing
+    'the other one' as part of a question must not be mis-classified."""
     if not text:
         return False
-    if _matches_any(text, _SELECTION_PATTERNS):
+    if text in {"sure", "yes", "yep", "okay", "ok", "好的", "行", "可以"}:
         return True
-    if _ORDINAL_SELECTION_RE.search(text) and "one" in text:
-        return True
-    return text in {"sure", "yes", "yep", "okay", "ok", "好的", "行", "可以"}
+    if len(text.split()) > _SELECTION_SHORT_MAX_TOKENS:
+        return False
+    return _matches_any(text, _SELECTION_PATTERNS)
 
 
 def _looks_like_inquiry(text: str, parser_signals: ParserSignals) -> bool:
@@ -318,11 +324,11 @@ def _should_use_llm_fallback(text: str, parser_signals: ParserSignals) -> bool:
     has_inquiry_markers = any(marker in text for marker in _INQUIRY_MARKERS)
     if not has_inquiry_markers and (
         _matches_any(text, _TERMINATION_PATTERNS)
-        or _matches_any(text, _ACKNOWLEDGEMENT_PATTERNS)
+        or _looks_like_acknowledgement(text)
     ):
         return False
     mixed_posture = (
-        _matches_any(text, _ACKNOWLEDGEMENT_PATTERNS)
+        _looks_like_acknowledgement(text)
         and any(marker in text for marker in ("?", "what", "how", "price", "pricing", "why", "多少钱"))
     )
     short_ambiguous = (
