@@ -147,6 +147,9 @@ Possible entity types include:
 - targets
 - species
 - applications
+- isotypes
+- costim_domains
+- car_t_groups
 - order_numbers
 - document_names
 - company_names
@@ -158,6 +161,10 @@ Entity resolution guidance:
 - Plural offering names such as "Mouse Monoclonal Antibodies", "Rabbit Monoclonal Antibodies", or "Rabbit Polyclonal Antibody Production" often refer to service lines, not individual products.
 - If the user only gives an alias, extract the alias as mentioned; do not invent a catalog number or canonical title.
 - For short product alias questions like "Tell me about NPM1" or "Tell me about 6 His epitope tag", prefer context.semantic_intent = "product_inquiry" unless the user explicitly asks for a document, quote, or order action.
+- Use isotypes only when the user names an antibody isotype/subclass as a filter or attribute: "IgG", "IgG1", "IgG2a", "IgG2b", "IgG3", "IgG4", "IgM", "IgA", "IgD", "IgE". Optionally include the light chain when stated ("IgG1 kappa", "IgG1/kappa"). Drop species prefixes like "Mouse" or "Rabbit" — extract just the isotype text. Do NOT extract isotypes when the phrase is part of a service name ("Mouse Monoclonal Antibodies").
+- Use costim_domains only when the user names a CAR-T costimulatory domain as a filter: "CD28", "4-1BB", "CD28+4-1BB" (also "CD28/4-1BB" or "CD28-4-1BB"), "GITR".
+- Use car_t_groups only when the user names a CAR-T product family group as a filter: "CAR-T Cells", "Engineered CAR-T Target Cells" (or "target cells"), "Non-Transduced T Cells", "CAR Detection Probes" (or "detection probes"), "Cell Media and Activation Beads" (or "activation beads"), "Non-Transduced Macrophages".
+- The isotype / costim_domain / car_t_group entities are *attribute filters*, not products themselves — extract the underlying product or service alongside them when one is mentioned.
 
 Short-query handling guidance:
 - Very short product-like queries often still contain a usable catalog identifier.
@@ -215,6 +222,22 @@ Key extraction:
 - context.semantic_intent = "product_inquiry"
 - request_flags.needs_sample = true
 (Rule 4: catalog evaluation pathway "before placing a larger order" → product frame stays product_inquiry; silence resolver does NOT fire needs_customization on "evaluate this product before bulk order")
+
+User: do you have an anti-CD19 antibody in IgG2a?
+Key extraction:
+- entities.product_names = [{{"text": "anti-CD19 antibody", "raw": "anti-CD19 antibody", "start": 15, "end": 33}}]
+- entities.isotypes = [{{"text": "IgG2a", "raw": "IgG2a", "start": 37, "end": 42}}]
+- context.semantic_intent = "product_inquiry"
+- request_flags.needs_availability = true
+(isotype is an attribute filter narrowing the antibody choice — extract the product name AND the isotype filter)
+
+User: looking for CD19 CAR-T cells with 4-1BB costimulatory domain
+Key extraction:
+- entities.product_names = [{{"text": "CD19 CAR-T cells", "raw": "CD19 CAR-T cells", "start": 12, "end": 28}}]
+- entities.costim_domains = [{{"text": "4-1BB", "raw": "4-1BB", "start": 34, "end": 39}}]
+- context.semantic_intent = "product_inquiry"
+- request_flags.needs_availability = true
+(costim_domain is a CAR-T attribute filter — extract the product name AND the costim filter)
 
 --- Technical / troubleshooting ---
 

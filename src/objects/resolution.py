@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.ingestion.models import IngestionBundle, SelectionResolution
@@ -15,6 +16,50 @@ from src.objects.models import AmbiguousObjectSet, ObjectBundle, ObjectCandidate
 
 if TYPE_CHECKING:
     from src.memory.models import ScoredObjectRef
+
+
+@dataclass(frozen=True)
+class _ContextEngagement:
+    """Aggregated reference + clarification signals for the current turn.
+
+    Stop-gap layer: replaces three near-duplicate predicates that all read
+    the same fields off ingestion_bundle.  See
+    `project_objects_architecture_backlog.md` — the proper fix is to fold
+    these three predicates into a single classifier.
+    """
+
+    has_reference_intent: bool
+    has_pending_clarification: bool
+    has_constraints: bool
+    blocks_context_reuse: bool
+
+    @property
+    def can_reuse_context(self) -> bool:
+        return self.has_reference_intent and not self.blocks_context_reuse
+
+    @property
+    def should_apply_constraints(self) -> bool:
+        return self.has_constraints and (
+            self.has_reference_intent or self.has_pending_clarification
+        )
+
+
+def _build_engagement(
+    ingestion_bundle: IngestionBundle,
+    trajectory_phase: str | None,
+) -> _ContextEngagement:
+    reference_signals = ingestion_bundle.turn_signals.reference_signals
+    clarification_memory = ingestion_bundle.clarification_memory
+    return _ContextEngagement(
+        has_reference_intent=(
+            reference_signals.is_context_dependent
+            or reference_signals.reference_mode != "none"
+            or reference_signals.requires_active_context_for_safe_resolution
+        ),
+        has_pending_clarification=bool(clarification_memory.pending_clarification_type),
+        has_constraints=bool(reference_signals.attribute_constraints),
+        blocks_context_reuse=trajectory_phase in ("fresh_start", "topic_switch"),
+    )
 
 
 def resolve_objects(
@@ -43,12 +88,14 @@ def resolve_object_state(
     context_candidates = [candidate for candidate in bundle.context_candidates if not candidate.is_ambiguous]
     ambiguous_sets = bundle.ambiguous_sets
 
-    pending_clarification = bool(ingestion_bundle.stateful_anchors.pending_clarification_field)
-    can_reuse_context = _can_reuse_context(ingestion_bundle, trajectory_phase)
+    engagement = _build_engagement(ingestion_bundle, trajectory_phase)
+    clarification_memory = ingestion_bundle.clarification_memory
+    pending_clarification = engagement.has_pending_clarification
+    can_reuse_context = engagement.can_reuse_context
     constraints_applied = False
     pending_resolved_candidate: ObjectCandidate | None = None
     constraint_target_mode = _constraint_target_mode(
-        ingestion_bundle,
+        engagement,
         current_candidates,
         context_candidates,
         ambiguous_sets,
@@ -92,7 +139,7 @@ def resolve_object_state(
         selected = _resolve_selection_from_ambiguous(
             selection,
             ambiguous_sets,
-            ingestion_bundle.stateful_anchors.pending_candidate_options,
+            clarification_memory.pending_candidate_options,
         )
         if selected is not None:
             pending_resolved_candidate = selected
@@ -111,7 +158,7 @@ def resolve_object_state(
 
     # --- Select primary object ---
     primary_object: ObjectCandidate | None = None
-    used_stateful_anchor = False
+    used_memory_context = False
     resolution_reason = ""
     resolution_phase = ""
 
@@ -121,12 +168,12 @@ def resolve_object_state(
         resolution_phase = "current_turn"
     elif pending_resolved_candidate is not None:
         primary_object = pending_resolved_candidate
-        used_stateful_anchor = True
+        used_memory_context = True
         resolution_reason = "Resolved the pending clarification to a single object candidate."
         resolution_phase = "pending_resolved"
     elif not pending_clarification and can_reuse_context and context_candidates:
         primary_object = max(context_candidates, key=_candidate_score)
-        used_stateful_anchor = True
+        used_memory_context = True
         resolution_reason = "Reused contextual object state because the turn depends on prior context."
         resolution_phase = "context_reuse"
     elif ambiguous_sets:
@@ -167,8 +214,8 @@ def resolve_object_state(
         secondary_objects=secondary_objects,
         ambiguous_sets=ambiguous_sets,
         active_object=active_object,
-        used_stateful_anchor=used_stateful_anchor or (
-            primary_object.used_stateful_anchor if primary_object is not None else False
+        used_memory_context=used_memory_context or (
+            primary_object.used_memory_context if primary_object is not None else False
         ),
         resolution_confidence=resolution_confidence,
         resolution_reason=resolution_reason,
@@ -213,8 +260,13 @@ def _candidate_score(candidate: ObjectCandidate) -> float:
         score += 0.1
     elif candidate.source_type == "parser":
         score += 0.05
-    elif candidate.source_type == "stateful_anchor":
+    elif candidate.source_type == "recent_object":
         score -= 0.05
+    elif candidate.source_type == "pending_option":
+        # Pending options should never compete for primary against
+        # current-turn or recent-object candidates.  They are only
+        # promotable through selection_resolution or constraint filter.
+        score -= 1.0
     if candidate.identifier:
         score += 0.05
     if candidate.is_ambiguous:
@@ -232,58 +284,27 @@ def _secondary_key(candidate: ObjectCandidate) -> tuple[str, str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Context reuse (phase-aware)
+# Constraint targeting (engagement-driven)
 # ---------------------------------------------------------------------------
 
-def _can_reuse_context(ingestion_bundle: IngestionBundle, trajectory_phase: str | None = None) -> bool:
-    # Phase-aware override: fresh_start and topic_switch block context reuse
-    if trajectory_phase == "fresh_start":
-        return False
-    if trajectory_phase == "topic_switch":
-        return False
-
-    reference_signals = ingestion_bundle.turn_signals.reference_signals
-    return (
-        reference_signals.is_context_dependent
-        or reference_signals.reference_mode != "none"
-        or reference_signals.requires_active_context_for_safe_resolution
-    )
-
-
-def _should_apply_reference_constraints(ingestion_bundle: IngestionBundle) -> bool:
-    reference_signals = ingestion_bundle.turn_signals.reference_signals
-    return bool(
-        reference_signals.attribute_constraints
-        and (
-            reference_signals.is_context_dependent
-            or reference_signals.reference_mode != "none"
-            or reference_signals.requires_active_context_for_safe_resolution
-            or ingestion_bundle.stateful_anchors.pending_clarification_field
-        )
-    )
-
-
 def _constraint_target_mode(
-    ingestion_bundle: IngestionBundle,
+    engagement: _ContextEngagement,
     current_candidates: list[ObjectCandidate],
     context_candidates: list[ObjectCandidate],
     ambiguous_sets: list[AmbiguousObjectSet],
 ) -> str:
-    if not _should_apply_reference_constraints(ingestion_bundle):
+    if not engagement.should_apply_constraints:
         return "none"
-
-    anchors = ingestion_bundle.stateful_anchors
-    reference_signals = ingestion_bundle.turn_signals.reference_signals
-
-    if anchors.pending_clarification_field and ambiguous_sets:
+    if engagement.has_pending_clarification and ambiguous_sets:
         return "pending_only"
-    if context_candidates and (
-        reference_signals.is_context_dependent
-        or reference_signals.reference_mode != "none"
-        or reference_signals.requires_active_context_for_safe_resolution
-    ):
+    if context_candidates and engagement.has_reference_intent:
         return "context_only"
-    if not context_candidates and not ambiguous_sets and current_candidates and not _has_strong_explicit_object(current_candidates):
+    if (
+        not context_candidates
+        and not ambiguous_sets
+        and current_candidates
+        and not _has_strong_explicit_object(current_candidates)
+    ):
         return "current_only"
     return "none"
 

@@ -32,7 +32,7 @@ def extract_object_bundle(
     for output in extractor_outputs:
         deduped_candidates = _dedupe_candidates(output.candidates)
         for candidate in deduped_candidates:
-            if candidate.recency == "CONTEXTUAL" or candidate.source_type == "stateful_anchor":
+            if candidate.recency == "CONTEXTUAL" or candidate.source_type in ("recent_object", "pending_option"):
                 context_candidates.append(candidate)
             else:
                 current_candidates.append(candidate)
@@ -100,7 +100,7 @@ def _merge_candidates(left: ObjectCandidate, right: ObjectCandidate) -> ObjectCa
             "evidence_spans": merged_spans,
             "attribute_constraints": merged_constraints,
             "metadata": merged_metadata,
-            "used_stateful_anchor": left.used_stateful_anchor or right.used_stateful_anchor,
+            "used_memory_context": left.used_memory_context or right.used_memory_context,
             "is_ambiguous": left.is_ambiguous or right.is_ambiguous,
         }
     )

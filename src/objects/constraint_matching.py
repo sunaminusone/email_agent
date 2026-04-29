@@ -121,6 +121,12 @@ def candidate_matches_constraint(candidate: ObjectCandidate, constraint: Attribu
         return _matches_any(value, haystacks["clonality"])
     if attribute == "business line":
         return _matches_any(value, haystacks["business_line"])
+    if attribute == "isotype":
+        return _matches_any(value, haystacks["isotype"], exact_only=True)
+    if attribute == "costim domain":
+        return _matches_any(value, haystacks["costim_domain"], exact_only=True)
+    if attribute == "car t group":
+        return _matches_any(value, haystacks["car_t_group"], exact_only=True)
     if attribute == "descriptive filter":
         return _matches_any(value, haystacks["descriptive_filter"])
 
@@ -194,12 +200,28 @@ def _product_attribute_haystacks(candidate: ObjectCandidate) -> dict[str, list[s
         *alias_values,
     ]
 
+    isotype_values = [
+        metadata.get("isotype", ""),
+        metadata.get("ig_class", ""),
+    ]
+    costim_values = [
+        metadata.get("costimulatory_domain", ""),
+    ]
+    car_t_group_values = [
+        metadata.get("group_name", ""),
+        metadata.get("group_type", ""),
+        metadata.get("group_subtype", ""),
+    ]
+
     return {
         "species": _normalize_values(species_values),
         "application_or_validation": _normalize_values(application_values),
         "format_or_size": _normalize_values(format_values),
         "clonality": _normalize_values(clonality_values),
         "business_line": _normalize_values(business_line_values),
+        "isotype": _normalize_values(isotype_values),
+        "costim_domain": _normalize_values(costim_values),
+        "car_t_group": _normalize_values(car_t_group_values),
         "descriptive_filter": _normalize_values(descriptive_values),
     }
 
@@ -243,6 +265,9 @@ def _service_attribute_haystacks(candidate: ObjectCandidate) -> dict[str, list[s
         "format_or_size": [],
         "clonality": [],
         "business_line": _normalize_values(business_line_values),
+        "isotype": [],
+        "costim_domain": [],
+        "car_t_group": [],
         "descriptive_filter": _normalize_values(descriptive_values),
     }
 
@@ -267,15 +292,18 @@ def _generic_attribute_haystacks(candidate: ObjectCandidate) -> dict[str, list[s
         "format_or_size": _normalize_values([candidate.display_name, candidate.canonical_value, candidate.raw_value, *alias_values]),
         "clonality": _normalize_values([candidate.display_name, candidate.canonical_value, *alias_values]),
         "business_line": _normalize_values([candidate.business_line, candidate.object_type, candidate.display_name]),
+        "isotype": [],
+        "costim_domain": [],
+        "car_t_group": [],
         "descriptive_filter": _normalize_values(descriptive_values),
     }
 
 
-def _matches_any(value: str, haystacks: Iterable[str]) -> bool:
+def _matches_any(value: str, haystacks: Iterable[str], *, exact_only: bool = False) -> bool:
     for haystack in haystacks:
         if value == haystack:
             return True
-        if value in haystack:
+        if not exact_only and value in haystack:
             return True
     return False
 

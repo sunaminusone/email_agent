@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from src.ingestion.deterministic_signals import extract_deterministic_signals
+from src.ingestion.entity_to_constraint import entities_to_attribute_constraints
 from src.ingestion.models import IngestionBundle, TurnSignals
 from src.ingestion.normalizers import normalize_turn_inputs
 from src.ingestion.parser_adapter import build_parser_signals
 from src.ingestion.reference_signals import extract_reference_signals
 from src.ingestion.signal_refinement import refine_parser_signals
-from src.ingestion.stateful_anchors import extract_stateful_anchors
-from src.memory.models import StatefulAnchors
+from src.memory import recall
+from src.memory.models import MemoryContext
 
 
 def build_ingestion_bundle(
@@ -18,9 +19,8 @@ def build_ingestion_bundle(
     user_query: str,
     conversation_history: list[dict[str, Any]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    memory_context: MemoryContext | None = None,
     prior_state: Any | None = None,
-    stateful_anchors: StatefulAnchors | None = None,
-    has_recent_objects: bool = False,
 ) -> IngestionBundle:
     turn_core, normalized_history, attachment_signals = normalize_turn_inputs(
         thread_id=thread_id,
@@ -29,16 +29,18 @@ def build_ingestion_bundle(
         attachments=attachments,
     )
 
-    # Extract stateful_anchors BEFORE parser so pending clarification
-    # options can be included in the parser prompt.
-    if stateful_anchors is None:
-        stateful_anchors = extract_stateful_anchors(prior_state)
+    if memory_context is None:
+        memory_context = recall(
+            thread_id=thread_id or "",
+            user_query=turn_core.normalized_query or user_query,
+            prior_state=prior_state,
+        )
 
     parser_signals, llm_normalized = build_parser_signals(
         user_query=turn_core.normalized_query,
         conversation_history=normalized_history,
         attachments=attachments,
-        stateful_anchors=stateful_anchors,
+        memory_context=memory_context,
     )
     deterministic_signals = extract_deterministic_signals(
         turn_core.normalized_query,
@@ -60,9 +62,20 @@ def build_ingestion_bundle(
     reference_signals = extract_reference_signals(
         turn_core.normalized_query,
         parser_signals=parser_signals,
-        stateful_anchors=stateful_anchors,
-        has_recent_objects=has_recent_objects,
+        memory_context=memory_context,
     )
+
+    bridged_constraints = entities_to_attribute_constraints(parser_signals.entities)
+    if bridged_constraints:
+        existing = list(reference_signals.attribute_constraints)
+        seen = {(c.attribute, c.value) for c in existing}
+        for constraint in bridged_constraints:
+            key = (constraint.attribute, constraint.value)
+            if key in seen:
+                continue
+            existing.append(constraint)
+            seen.add(key)
+        reference_signals = reference_signals.model_copy(update={"attribute_constraints": existing})
 
     return IngestionBundle(
         turn_core=turn_core,
@@ -72,5 +85,5 @@ def build_ingestion_bundle(
             reference_signals=reference_signals,
             attachment_signals=attachment_signals,
         ),
-        stateful_anchors=stateful_anchors,
+        memory_context=memory_context,
     )

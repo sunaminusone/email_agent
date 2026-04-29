@@ -21,21 +21,21 @@ from src.ingestion.models import (
     SourceAttribution,
 )
 from src.ingestion.parser_prompt import get_parser_prompt
-from src.memory.models import StatefulAnchors
+from src.memory.models import ClarificationMemory, MemoryContext
 
 
-def _format_pending_clarification(stateful_anchors: StatefulAnchors | None) -> str:
+def _format_pending_clarification(clarification_memory: ClarificationMemory | None) -> str:
     """Format pending clarification context for the parser prompt."""
-    if stateful_anchors is None or not stateful_anchors.pending_clarification_field:
+    if clarification_memory is None or not clarification_memory.pending_clarification_type:
         return "None"
-    options = stateful_anchors.pending_candidate_options
+    options = clarification_memory.pending_candidate_options
     if not options:
         return "None"
     # 1-based labels match the user's mental model (assistant turns
     # typically present options as "1) X 2) Y 3) Z").  The schema's
     # selected_index remains 0-based; the parser_prompt rule + the
     # 第二个 / "the first one" few-shots cover the 1→0 translation.
-    lines = [f"Type: {stateful_anchors.pending_clarification_field}", "Options:"]
+    lines = [f"Type: {clarification_memory.pending_clarification_type}", "Options:"]
     for idx, option in enumerate(options, start=1):
         lines.append(f"  {idx}: {option}")
     return "\n".join(lines)
@@ -46,11 +46,14 @@ def preprocess_for_parser(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
-    stateful_anchors: StatefulAnchors | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> dict[str, Any]:
     normalized_query = str(user_query or "").strip()
     normalized_history = conversation_history or []
     normalized_attachments = attachments or []
+    clarification_memory = (
+        memory_context.snapshot.clarification_memory if memory_context is not None else None
+    )
     return {
         "user_query": normalized_query,
         "conversation_history": json.dumps(
@@ -63,7 +66,7 @@ def preprocess_for_parser(
             ensure_ascii=False,
             indent=2,
         ),
-        "pending_clarification": _format_pending_clarification(stateful_anchors),
+        "pending_clarification": _format_pending_clarification(clarification_memory),
         "_meta": {
             "raw_user_query": normalized_query,
             "conversation_history_raw": normalized_history,
@@ -83,7 +86,7 @@ def get_parser_pipeline():
             user_query=payload.get("user_query", ""),
             conversation_history=payload.get("conversation_history", []),
             attachments=payload.get("attachments", []),
-            stateful_anchors=payload.get("stateful_anchors"),
+            memory_context=payload.get("memory_context"),
         )
     )
     parse_step = RunnablePassthrough.assign(parsed=parser_chain)
@@ -96,7 +99,7 @@ def invoke_parser_pipeline(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
-    stateful_anchors: StatefulAnchors | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> dict[str, Any]:
     pipeline = get_parser_pipeline()
     parsed = pipeline.invoke(
@@ -104,7 +107,7 @@ def invoke_parser_pipeline(
             "user_query": user_query,
             "conversation_history": conversation_history or [],
             "attachments": attachments or [],
-            "stateful_anchors": stateful_anchors,
+            "memory_context": memory_context,
         }
     )
     return parser_result_to_payload(parsed)
@@ -115,13 +118,13 @@ def invoke_parser_service(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
-    stateful_anchors: StatefulAnchors | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> dict[str, Any]:
     return invoke_parser_pipeline(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
-        stateful_anchors=stateful_anchors,
+        memory_context=memory_context,
     )
 
 
@@ -130,13 +133,13 @@ def invoke_parser(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
-    stateful_anchors: StatefulAnchors | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> dict[str, Any]:
     return invoke_parser_pipeline(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
-        stateful_anchors=stateful_anchors,
+        memory_context=memory_context,
     )
 
 
@@ -383,6 +386,9 @@ def adapt_parsed_result_to_parser_signals(
             targets=_to_entity_spans(list(entities.get("targets", []) or []), source_query=source_query),
             species=_to_entity_spans(list(entities.get("species", []) or []), source_query=source_query),
             applications=_to_entity_spans(list(entities.get("applications", []) or []), source_query=source_query),
+            isotypes=_to_entity_spans(list(entities.get("isotypes", []) or []), source_query=source_query),
+            costim_domains=_to_entity_spans(list(entities.get("costim_domains", []) or []), source_query=source_query),
+            car_t_groups=_to_entity_spans(list(entities.get("car_t_groups", []) or []), source_query=source_query),
             order_numbers=_to_entity_spans(list(entities.get("order_numbers", []) or []), source_query=source_query),
             invoice_numbers=_to_entity_spans(list(entities.get("invoice_numbers", []) or []), source_query=source_query),
             document_names=_to_entity_spans(list(entities.get("document_names", []) or []), source_query=source_query),
@@ -404,7 +410,7 @@ def build_parser_signals(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
-    stateful_anchors: StatefulAnchors | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> tuple[ParserSignals, str]:
     """Return (parser_signals, llm_normalized_query).
 
@@ -412,15 +418,15 @@ def build_parser_signals(
     richer than simple whitespace normalization.  The caller should use
     it to upgrade TurnCore.normalized_query.
 
-    When *stateful_anchors* carries pending clarification options, the
-    parser is given those options as context so it can resolve the
-    user's selection via selection_resolution.
+    When memory carries pending clarification options, the parser is
+    given those options as context so it can resolve the user's
+    selection via selection_resolution.
     """
     parser_payload = invoke_parser(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
-        stateful_anchors=stateful_anchors,
+        memory_context=memory_context,
     )
     signals = adapt_parsed_result_to_parser_signals(parser_payload, source_query=user_query)
     llm_normalized = str(parser_payload.get("normalized_query", "") or "").strip()

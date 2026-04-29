@@ -3,8 +3,12 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from src.common.models import SourceAttribution as CommonSourceAttribution, ValueSignal as CommonValueSignal
-from src.memory.models import StatefulAnchors
+from src.common.models import (
+    IntentGroup,
+    SourceAttribution as CommonSourceAttribution,
+    ValueSignal as CommonValueSignal,
+)
+from src.memory.models import ClarificationMemory, MemoryContext, MemoryContribution, ThreadMemory
 
 
 class _IngestionModel(BaseModel):
@@ -12,7 +16,7 @@ class _IngestionModel(BaseModel):
 
 
 RecencyType = Literal["CURRENT_TURN", "CONTEXTUAL"]
-SourceType = Literal["deterministic", "parser", "attachment", "stateful_anchor"]
+SourceType = Literal["deterministic", "parser", "attachment", "recent_object", "pending_option"]
 
 
 SEMANTIC_INTENT_VALUES: tuple[str, ...] = (
@@ -143,6 +147,9 @@ class ParserEntitySignals(_IngestionModel):
     targets: list[EntitySpan] = Field(default_factory=list)
     species: list[EntitySpan] = Field(default_factory=list)
     applications: list[EntitySpan] = Field(default_factory=list)
+    isotypes: list[EntitySpan] = Field(default_factory=list)
+    costim_domains: list[EntitySpan] = Field(default_factory=list)
+    car_t_groups: list[EntitySpan] = Field(default_factory=list)
     order_numbers: list[EntitySpan] = Field(default_factory=list)
     invoice_numbers: list[EntitySpan] = Field(default_factory=list)
     document_names: list[EntitySpan] = Field(default_factory=list)
@@ -157,6 +164,9 @@ class ParserOutputEntities(_IngestionModel):
     targets: list[ParserEntityOutputSpan] = Field(default_factory=list)
     species: list[ParserEntityOutputSpan] = Field(default_factory=list)
     applications: list[ParserEntityOutputSpan] = Field(default_factory=list)
+    isotypes: list[ParserEntityOutputSpan] = Field(default_factory=list)
+    costim_domains: list[ParserEntityOutputSpan] = Field(default_factory=list)
+    car_t_groups: list[ParserEntityOutputSpan] = Field(default_factory=list)
     order_numbers: list[ParserEntityOutputSpan] = Field(default_factory=list)
     invoice_numbers: list[ParserEntityOutputSpan] = Field(default_factory=list)
     document_names: list[ParserEntityOutputSpan] = Field(default_factory=list)
@@ -246,4 +256,26 @@ class TurnSignals(_IngestionModel):
 class IngestionBundle(_IngestionModel):
     turn_core: TurnCore = Field(default_factory=TurnCore)
     turn_signals: TurnSignals = Field(default_factory=TurnSignals)
-    stateful_anchors: StatefulAnchors = Field(default_factory=StatefulAnchors)
+    memory_context: MemoryContext = Field(default_factory=MemoryContext)
+
+    @property
+    def thread_memory(self) -> ThreadMemory:
+        return self.memory_context.snapshot.thread_memory
+
+    @property
+    def clarification_memory(self) -> ClarificationMemory:
+        return self.memory_context.snapshot.clarification_memory
+
+    @property
+    def has_recent_memory_context(self) -> bool:
+        return bool(self.memory_context.recent_objects_by_relevance)
+
+
+def build_ingestion_memory_contribution(
+    intent_groups: list[IntentGroup],
+) -> MemoryContribution:
+    return MemoryContribution(
+        source="ingestion",
+        intent_groups=list(intent_groups),
+        reason=f"ingestion: assembled {len(intent_groups)} intent group(s)",
+    )
