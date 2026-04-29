@@ -8,10 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.common.models import ObjectRef
 from src.ingestion.models import (
     AttributeConstraint,
-    EntitySpan,
     IngestionBundle,
-    ParserEntitySignals,
-    ParserSignals,
     ReferenceSignals,
     SourceAttribution,
     TurnSignals,
@@ -24,9 +21,8 @@ from src.memory.models import (
 )
 from src.objects.models import ObjectCandidate
 from src.objects.resolution import (
-    _build_engagement,
     _candidate_score,
-    _constraint_target_mode,
+    _classify_engagement,
     _ContextEngagement,
     resolve_objects,
 )
@@ -51,85 +47,93 @@ def _scored_ref(display_name: str, identifier: str, salience: float = 0.8) -> Sc
     )
 
 
+def _candidate(source_type: str, confidence: float = 0.5) -> ObjectCandidate:
+    return ObjectCandidate(
+        object_type="product",
+        display_name="X",
+        canonical_value="X",
+        confidence=confidence,
+        recency="CONTEXTUAL",
+        source_type=source_type,
+    )
+
+
+def _classify(
+    bundle: IngestionBundle,
+    *,
+    current=None,
+    context=None,
+    ambiguous=None,
+    trajectory_phase: str | None = None,
+) -> _ContextEngagement:
+    return _classify_engagement(
+        bundle,
+        current_candidates=current or [],
+        context_candidates=context or [],
+        ambiguous_sets=ambiguous or [],
+        trajectory_phase=trajectory_phase,
+    )
+
+
 # ---------------------------------------------------------------------------
-# _ContextEngagement aggregation
+# context_reuse decision
 # ---------------------------------------------------------------------------
 
-def test_engagement_no_signals():
-    bundle = IngestionBundle()
-    e = _build_engagement(bundle, trajectory_phase=None)
-    assert not e.has_reference_intent
-    assert not e.has_pending_clarification
-    assert not e.has_constraints
-    assert not e.blocks_context_reuse
-    assert not e.can_reuse_context
-    assert not e.should_apply_constraints
+def test_no_signals_decides_inert():
+    e = _classify(IngestionBundle())
+    assert e.can_reuse_context is False
+    assert e.has_pending_clarification is False
+    assert e.constraint_target_mode == "none"
 
 
-def test_engagement_reference_intent_from_context_dependence():
+def test_reference_intent_unlocks_context_reuse():
     bundle = IngestionBundle(
         turn_signals=TurnSignals(
             reference_signals=ReferenceSignals(is_context_dependent=True),
         ),
     )
-    e = _build_engagement(bundle, trajectory_phase=None)
-    assert e.has_reference_intent
-    assert e.can_reuse_context
+    e = _classify(bundle)
+    assert e.can_reuse_context is True
 
 
-def test_engagement_blocks_reuse_on_topic_switch():
+def test_topic_switch_blocks_context_reuse():
     bundle = IngestionBundle(
         turn_signals=TurnSignals(
             reference_signals=ReferenceSignals(is_context_dependent=True),
         ),
     )
-    e = _build_engagement(bundle, trajectory_phase="topic_switch")
-    assert e.has_reference_intent
-    assert e.blocks_context_reuse
-    assert not e.can_reuse_context
+    e = _classify(bundle, trajectory_phase="topic_switch")
+    assert e.can_reuse_context is False
 
 
-def test_engagement_blocks_reuse_on_fresh_start():
+def test_fresh_start_blocks_context_reuse():
     bundle = IngestionBundle(
         turn_signals=TurnSignals(
             reference_signals=ReferenceSignals(is_context_dependent=True),
         ),
     )
-    e = _build_engagement(bundle, trajectory_phase="fresh_start")
-    assert e.blocks_context_reuse
-    assert not e.can_reuse_context
+    e = _classify(bundle, trajectory_phase="fresh_start")
+    assert e.can_reuse_context is False
 
 
-def test_engagement_should_apply_constraints_requires_constraints_and_intent():
+# ---------------------------------------------------------------------------
+# constraint_target_mode decision
+# ---------------------------------------------------------------------------
+
+def test_constraints_alone_do_not_apply():
+    """Constraints without reference intent or pending clarification → mode=none."""
     bundle = IngestionBundle(
         turn_signals=TurnSignals(
             reference_signals=ReferenceSignals(
-                is_context_dependent=True,
                 attribute_constraints=[_constraint("species", "human")],
             ),
         ),
     )
-    e = _build_engagement(bundle, trajectory_phase=None)
-    assert e.should_apply_constraints
+    e = _classify(bundle)
+    assert e.constraint_target_mode == "none"
 
 
-def test_engagement_constraints_alone_do_not_trigger_apply():
-    """Constraints without reference intent or pending clarification → don't apply."""
-    bundle = IngestionBundle(
-        turn_signals=TurnSignals(
-            reference_signals=ReferenceSignals(
-                attribute_constraints=[_constraint("species", "human")],
-            ),
-        ),
-    )
-    e = _build_engagement(bundle, trajectory_phase=None)
-    assert e.has_constraints
-    assert not e.has_reference_intent
-    assert not e.has_pending_clarification
-    assert not e.should_apply_constraints
-
-
-def test_engagement_pending_clarification_unlocks_constraint_apply():
+def test_pending_clarification_with_ambiguous_sets_targets_pending_only():
     bundle = IngestionBundle(
         turn_signals=TurnSignals(
             reference_signals=ReferenceSignals(
@@ -144,56 +148,44 @@ def test_engagement_pending_clarification_unlocks_constraint_apply():
             ),
         ),
     )
-    e = _build_engagement(bundle, trajectory_phase=None)
-    assert e.has_pending_clarification
-    assert e.should_apply_constraints
+    fake_set = object()  # classifier doesn't inspect shape, only truthiness
+    e = _classify(bundle, ambiguous=[fake_set])
+    assert e.has_pending_clarification is True
+    assert e.constraint_target_mode == "pending_only"
 
 
-# ---------------------------------------------------------------------------
-# _constraint_target_mode (engagement-driven)
-# ---------------------------------------------------------------------------
-
-def test_constraint_target_mode_none_when_no_apply():
-    e = _ContextEngagement(False, False, False, False)
-    assert _constraint_target_mode(e, [], [], []) == "none"
-
-
-def test_constraint_target_mode_pending_only_when_clarification_and_ambiguous():
-    e = _ContextEngagement(
-        has_reference_intent=False,
-        has_pending_clarification=True,
-        has_constraints=True,
-        blocks_context_reuse=False,
-    )
-    fake_set = object()
-    assert _constraint_target_mode(e, [], [], [fake_set]) == "pending_only"
-
-
-def test_constraint_target_mode_context_only_with_context_and_intent():
-    e = _ContextEngagement(
-        has_reference_intent=True,
-        has_pending_clarification=False,
-        has_constraints=True,
-        blocks_context_reuse=False,
+def test_reference_intent_with_context_targets_context_only():
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(
+            reference_signals=ReferenceSignals(
+                is_context_dependent=True,
+                attribute_constraints=[_constraint("species", "human")],
+            ),
+        ),
     )
     fake_ctx = object()
-    assert _constraint_target_mode(e, [], [fake_ctx], []) == "context_only"
+    e = _classify(bundle, context=[fake_ctx])
+    assert e.constraint_target_mode == "context_only"
+
+
+def test_reference_intent_no_context_no_ambiguous_targets_current_only():
+    """Constraints + reference intent + only current weak candidates → current_only."""
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(
+            reference_signals=ReferenceSignals(
+                is_context_dependent=True,
+                attribute_constraints=[_constraint("species", "human")],
+            ),
+        ),
+    )
+    weak_current = _candidate("parser", confidence=0.3)
+    e = _classify(bundle, current=[weak_current])
+    assert e.constraint_target_mode == "current_only"
 
 
 # ---------------------------------------------------------------------------
 # _candidate_score: pending_option must not compete for primary
 # ---------------------------------------------------------------------------
-
-def _candidate(source_type: str, confidence: float = 0.5) -> ObjectCandidate:
-    return ObjectCandidate(
-        object_type="product",
-        display_name="X",
-        canonical_value="X",
-        confidence=confidence,
-        recency="CONTEXTUAL",
-        source_type=source_type,
-    )
-
 
 def test_score_recent_object_lightly_penalized():
     score = _candidate_score(_candidate("recent_object", confidence=0.5))
@@ -232,6 +224,5 @@ def test_pending_option_does_not_bubble_up_as_primary_via_context_reuse():
     recent = [_scored_ref("Some Recent Product", "P00099", salience=0.9)]
     resolved = resolve_objects(bundle, recent_objects=recent)
 
-    # primary should come from recent_object (not from a pending_option)
     if resolved.primary_object is not None:
         assert resolved.primary_object.source_type != "pending_option"
