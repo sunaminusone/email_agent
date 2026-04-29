@@ -20,7 +20,7 @@ PRODUCT_DATA_FILES = {
     "mrna_lnp": BASE_DIR / "data" / "processed" / "mRNA_LNP_products.xlsx",
 }
 PRODUCT_REGISTRY_BACKEND = (os.getenv("OBJECTS_PRODUCT_REGISTRY_BACKEND") or "excel").strip().lower()
-PRODUCT_REGISTRY_TABLE = os.getenv("OBJECTS_PRODUCT_REGISTRY_TABLE", "product_registry")
+PRODUCT_REGISTRY_TABLE = os.getenv("OBJECTS_PRODUCT_REGISTRY_TABLE", "product_catalog")
 
 
 @dataclass(frozen=True)
