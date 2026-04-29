@@ -1,0 +1,43 @@
+idx,category,query,intent_bucket,top_final,top_base,top_margin,matches,synth,top_section,parser_xq_count,parser_kw_count
+1,high,What is the service plan for CAR-T cell therapy?,service_plan,3.617,3.397,0.376,5,False,service_plan,3,3
+2,high,What is the workflow for antibody production?,workflow,1.117,0.897,0.616,5,False,workflow_overview,3,2
+3,high,What models do you support for mRNA LNP development?,model_support,4.357,4.137,3.676,5,False,model_support,3,4
+4,high,How long does CAR-T cell therapy development take?,general_technical,1.717,1.577,0.589,5,False,pricing_overview,5,4
+5,high,What are the phases in antibody discovery?,service_plan,1.317,1.097,1.755,5,False,plan_summary,3,3
+6,medium,How does it work?,general_technical,3.52,3.31,0.62,5,False,workflow_overview,0,0
+7,medium,I need antibody purification for 1 liter,general_technical,4.896,4.556,2.184,5,False,add_on_service_pricing,3,2
+8,medium,Quote for antibody production service,general_technical,3.21,2.97,0.691,5,False,service_component,3,3
+9,medium,What's the timeline for this service?,service_plan,5.162,4.832,0.653,5,False,timeline_overview,3,2
+10,low,What's your contact phone number?,general_technical,-7.872,-7.912,0.19,5,False,technical_advantage,3,2
+11,low,Do you ship to Europe?,general_technical,-8.332,-8.332,1.322,5,False,product_catalog,3,3
+12,low,When will I receive the invoice?,general_technical,-10.023,-10.023,0.134,5,False,timeline_overview,3,3
+13,low,Who is your sales rep for antibody products?,general_technical,-4.145,-4.205,0.31,5,False,why_us,3,3
+14,irrelevant,What's the weather today in Boston?,general_technical,-10.193,-10.193,0.0,5,False,development_capabilities,0,0
+15,irrelevant,Can you recommend a good restaurant?,general_technical,-10.193,-10.193,0.0,5,False,service_overview,0,0
+16,irrelevant,Tell me about COVID vaccines,general_technical,-1.912,-1.952,5.819,5,False,product_catalog,3,3
+17,high,How should I validate it for specificity?,general_technical,-1.039,-1.299,1.213,5,False,validation_models,3,3
+18,high,We need FDA-compliant antibody production with full audit tr,general_technical,-4.472,-4.572,0.727,5,False,package_inclusions,3,3
+19,high,Which of these antibodies works best for flow cytometry?,general_technical,1.632,1.332,1.34,5,False,validation_models,3,3
+20,high,Tell me about the workflow,workflow,0.192,0.052,0.569,5,False,workflow_overview,0,0
+21,medium,What about the validation data?,general_technical,0.817,0.677,0.445,5,False,package_inclusions,3,2
+22,medium,Which cell lines does this platform use?,general_technical,5.851,5.711,0.959,5,False,service_phase,3,3
+23,high,We are interested in sequencing the VH and VL of a murine hy,general_technical,3.386,3.246,0.469,5,False,service_overview,3,5
+24,high,"For research purposes only, we are interested in a 'split' C",general_technical,-0.639,-0.779,1.014,5,False,validation_models,5,5
+25,high,I have two peptide sequences I would love for the company to,general_technical,1.429,1.289,0.789,5,False,scientific_rationale,5,5
+26,high,I am an investigator interested in making a Dendritic Cell B,general_technical,0.615,0.515,0.431,5,False,model_support,3,5
+27,high,I'd like to get a quote for a polyclonal antibody production,general_technical,2.59,2.45,0.649,5,False,workflow_overview,3,3
+28,medium,"We developed CAR T cells in our startup company, and we alre",general_technical,0.233,0.173,0.398,5,False,service_plan,4,5
+29,medium,"I am writing from cancer vaccine science, Poland, Europe. I ",general_technical,-4.629,-4.709,1.615,5,False,add_on_service_pricing,3,4
+30,high,We want rabbit monoclonal antibodies that recognize the N-te,general_technical,-1.789,-1.889,0.326,5,False,service_phase,5,5
+31,high,When producing the mRNA/LNPs are they in aqueous form? Is it,general_technical,-2.88,-3.02,0.229,5,False,product_catalog,5,5
+32,high,I would like to produce human monoclonal antibodies to a few,general_technical,0.278,0.178,0.892,5,False,service_phase,3,2
+33,high,I am looking to get a quote for synthesizing mRNA. How much ,general_technical,-0.961,-1.101,0.706,5,False,workflow_step,5,7
+34,high,How long does your LNP production service usually take from ,general_technical,-2.536,-2.596,0.624,5,False,brochure_overview,5,5
+35,high,We are interested in testing our drug product with a macroph,general_technical,-0.831,-0.931,1.366,5,False,scientific_rationale,3,4
+36,high,I'm wondering if you could help us prepare lipid nanoparticl,general_technical,-2.057,-2.197,0.243,5,False,workflow_step,4,8
+37,high,In my laboratory we are interested in a polyclonal antibody ,general_technical,-4.168,-4.268,0.146,5,False,validation_models,3,3
+38,irrelevant,I am contacting you on behalf of Al-Trust Investment KSC. I ,service_plan,-6.463,-6.543,1.551,5,False,service_plan,5,5
+39,low,I'm the Director of a biomedical and life sciences sales and,general_technical,-7.526,-7.526,0.106,5,False,why_us,3,5
+40,low,I would be delighted to reinitiate conversations around apta,general_technical,-5.478,-5.518,0.212,5,False,service_plan,3,3
+41,high,I would like to set up a CAR mRNA-LNP delivery system for an,workflow,-0.124,-0.224,0.898,5,False,product_catalog,5,5
+42,medium,One of our multinational clients has expressed strong intere,general_technical,0.097,-0.003,0.561,5,False,platform_assets,5,5

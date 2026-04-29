@@ -3,15 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 _MESSAGES: dict[str, dict[str, str]] = {
-    # --- pipeline / workflow labels ---
-    "reply_preview_clarify": {
-        "zh": "已收到你的请求：{query}。当前仍需要补充信息后才能继续。",
-        "en": "Request received: {query}. Additional information is needed before we can proceed.",
-    },
-    "reply_preview_handoff": {
-        "zh": "已收到你的请求：{query}。当前需要人工复核。",
-        "en": "Request received: {query}. This requires human review.",
-    },
+    # --- pipeline / workflow labels (v4 CSR mode: only the unified "done" /
+    # execute / draft path is reachable; clarify/handoff/respond keys were
+    # dropped along with the pre-pivot routing branches that referenced them) ---
     "reply_preview_done": {
         "zh": "已围绕\u201c{query}\u201d完成初步检索，本轮共执行 {action_count} 个工具。",
         "en": "Completed initial retrieval for \u201c{query}\u201d, {action_count} tool(s) executed.",
@@ -27,18 +21,6 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "workflow_route": {
         "zh": "执行路由决策",
         "en": "Route decision",
-    },
-    "workflow_clarify": {
-        "zh": "生成补充信息请求",
-        "en": "Generate clarification request",
-    },
-    "workflow_handoff": {
-        "zh": "升级到人工复核",
-        "en": "Escalate to human review",
-    },
-    "workflow_respond": {
-        "zh": "生成直接回复",
-        "en": "Generate direct response",
     },
     "workflow_execute_tool": {
         "zh": "执行 {action_type}",

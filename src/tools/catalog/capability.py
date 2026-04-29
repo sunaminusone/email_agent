@@ -12,6 +12,7 @@ CATALOG_LOOKUP_CAPABILITY = ToolCapability(
     supported_modalities=["structured_lookup", "hybrid"],
     supported_request_flags=["needs_availability", "needs_comparison", "needs_sample"],
     required_params=["object_type"],
+    provides_params=["catalog_number", "product_name", "business_line"],
     returns_structured_facts=True,
 )
 

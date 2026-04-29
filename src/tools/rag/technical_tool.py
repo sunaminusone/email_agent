@@ -26,8 +26,12 @@ def execute_technical_rag_lookup(request: ToolRequest) -> ToolResult:
         "retrieval_mode": output.get("retrieval_mode", ""),
         "documents_found": output.get("documents_found", len(matches)),
         "matches": matches,
+        "retrieval_confidence": output.get("confidence", {}),
         "retrieval_debug": output.get("retrieval_debug", {}),
         "query_variants": output.get("query_variants", []),
+        "variant_observability": (
+            (output.get("retrieval_debug", {}) or {}).get("variant_observability", {})
+        ),
     }
 
     if matches:

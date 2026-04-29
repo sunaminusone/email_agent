@@ -11,7 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.common.execution_models import ExecutionResult
-from src.common.models import IntentGroup
+from src.common.models import GroupDemand, IntentGroup
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 
 
@@ -24,6 +24,7 @@ class GroupOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     group: IntentGroup
+    scoped_demand: GroupDemand | None = None
     action: str = "execute"
     route_decision: RouteDecision = Field(default_factory=RouteDecision)
     execution_result: ExecutionResult = Field(default_factory=ExecutionResult)
@@ -147,9 +148,11 @@ class AgentState(BaseModel):
         route_decision: RouteDecision,
         execution_result: ExecutionResult,
         status: GroupStatus = "resolved",
+        scoped_demand: GroupDemand | None = None,
     ) -> None:
         self.outcomes.append(GroupOutcome(
             group=group,
+            scoped_demand=scoped_demand,
             action=route_decision.action,
             route_decision=route_decision,
             execution_result=execution_result,

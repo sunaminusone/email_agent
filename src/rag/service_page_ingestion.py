@@ -65,6 +65,10 @@ _METADATA_FIELDS: Set[str] = {
     "stage_type",
 }
 EXPLICIT_SUBCHUNK_SECTION_TYPES = {"plan_summary", "service_phase", "workflow_step"}
+# SKU tables served by the structured catalog pipeline (catalog_lookup_tool,
+# Excel-backed product_registry). Strip them from the RAG parent section body
+# so long SKU listings don't dilute the service-level embedding.
+_RAW_STRUCTURED_FIELDS: Set[str] = {"products"}
 
 
 def _stringify(value: Any) -> str:
@@ -222,7 +226,7 @@ def _render_section_body(fields: Dict[str, str]) -> str:
         rendered.append(f"{key.replace('_', ' ').title()}: {value}")
 
     for key, value in fields.items():
-        if key in seen or key in _METADATA_FIELDS:
+        if key in seen or key in _METADATA_FIELDS or key in _RAW_STRUCTURED_FIELDS:
             continue
         cleaned = value.strip()
         if not cleaned:
@@ -582,6 +586,16 @@ def parse_service_page_file(path: Path) -> List[Document]:
             extra_metadata=_base_section_metadata(document_fields, section_fields, title, section_order, path),
         )
         documents.append(section_doc)
+
+        subchunks = _build_subchunks(
+            path=path,
+            document_fields=document_fields,
+            section_fields=section_fields,
+            section_title=title,
+            section_order=section_order,
+            next_index=len(documents),
+        )
+        documents.extend(subchunks)
 
     return documents
 

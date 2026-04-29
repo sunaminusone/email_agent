@@ -17,13 +17,11 @@ from .models import (
     ParserSignals,
     ReferenceSignals,
     SourceAttribution,
-    StatefulAnchors,
     TurnCore,
     TurnSignals,
     ValueSignal,
 )
 from .deterministic_signals import (
-    classify_identifier_candidates,
     detect_document_types,
     strip_identifier_missing_information,
 )
@@ -35,7 +33,6 @@ from .demand_profile import (
     FLAG_DEMAND,
     INTENT_DEMAND,
 )
-from .intent_assembly import IntentGroup, assemble_intent_groups
 from .pipeline import build_ingestion_bundle
 
 __all__ = [
@@ -49,7 +46,6 @@ __all__ = [
     "DeterministicSignals",
     "EntitySpan",
     "IngestionBundle",
-    "IntentGroup",
     "build_group_demand",
     "narrow_demand_profile",
     "ParserConstraints",
@@ -64,13 +60,10 @@ __all__ = [
     "ParserSignals",
     "ReferenceSignals",
     "SourceAttribution",
-    "StatefulAnchors",
     "TurnCore",
     "TurnSignals",
     "ValueSignal",
-    "assemble_intent_groups",
     "build_ingestion_bundle",
-    "classify_identifier_candidates",
     "detect_document_types",
     "strip_identifier_missing_information",
 ]

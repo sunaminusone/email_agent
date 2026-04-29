@@ -21,6 +21,10 @@ QB_ENVIRONMENT = (os.getenv("QB_ENVIRONMENT") or os.getenv("environment") or "sa
 QB_SCOPE = os.getenv("QB_SCOPE", "com.intuit.quickbooks.accounting")
 QB_TOKEN_STORE = os.getenv("QB_TOKEN_STORE", str(BASE_DIR / "data" / "quickbooks_tokens.json"))
 
+# HubSpot
+HUBSPOT_ACCESS_TOKEN = os.getenv("HUBSPOT_ACCESS_TOKEN", "").strip()
+HUBSPOT_BASE_URL = os.getenv("HUBSPOT_BASE_URL", "https://api.hubapi.com").strip().rstrip("/")
+
 # Redis session memory
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
@@ -80,6 +84,14 @@ def get_quickbooks_settings() -> dict:
         "scope": QB_SCOPE,
         "token_store": QB_TOKEN_STORE,
         "is_configured": all([QB_CLIENT_ID, QB_CLIENT_SECRET, QB_REDIRECT_URI]),
+    }
+
+
+def get_hubspot_settings() -> dict:
+    return {
+        "access_token": HUBSPOT_ACCESS_TOKEN,
+        "base_url": HUBSPOT_BASE_URL,
+        "is_configured": bool(HUBSPOT_ACCESS_TOKEN),
     }
 
 

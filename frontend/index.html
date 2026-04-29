@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Biotech Chatbot Workspace</title>
+  <title>CSR Co-Pilot Workspace</title>
   <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__" />
 </head>
 <body>
@@ -11,29 +11,14 @@
     <aside class="sidebar">
       <div class="sidebar-top">
         <div class="brand-block">
-          <div class="brand-mark">B</div>
+          <div class="brand-mark">P</div>
           <div>
-            <p class="brand-kicker">Biotech AI</p>
-            <h1>Assistant Hub</h1>
+            <p class="brand-kicker">ProMab Internal</p>
+            <h1>CSR Co-Pilot</h1>
           </div>
         </div>
 
         <button type="button" id="new-chat-btn" class="primary-btn full-width">New Chat</button>
-
-        <nav class="nav-groups">
-          <button type="button" class="nav-item nav-item-active">
-            <span>Workspace</span>
-            <small>Current session</small>
-          </button>
-          <button type="button" class="nav-item">
-            <span>Search</span>
-            <small>Find docs and threads</small>
-          </button>
-          <button type="button" class="nav-item">
-            <span>Knowledge Base</span>
-            <small>RAG sources</small>
-          </button>
-        </nav>
       </div>
 
       <section class="sidebar-section">
@@ -48,25 +33,11 @@
 
       <section class="sidebar-section">
         <div class="section-heading">
-          <span>Suggested Actions</span>
+          <span>Sample Inquiries</span>
+          <button type="button" id="refresh-samples-btn" class="ghost-btn">Shuffle</button>
         </div>
-        <div class="quick-actions">
-          <button type="button" class="quick-card">
-            <strong>Product Lookup</strong>
-            <span>Search catalog and specs</span>
-          </button>
-          <button type="button" class="quick-card">
-            <strong>Pricing Request</strong>
-            <span>Prepare quote-ready reply</span>
-          </button>
-          <button type="button" class="quick-card">
-            <strong>Tech Docs</strong>
-            <span>Retrieve protocols and data</span>
-          </button>
-          <button type="button" class="quick-card">
-            <strong>Email Drafting</strong>
-            <span>Generate a polished response</span>
-          </button>
+        <div id="question_samples" class="question-sample-list">
+          <p class="history-empty">Loading sample questions...</p>
         </div>
       </section>
     </aside>
@@ -74,11 +45,11 @@
     <section class="main-column">
       <header class="hero-panel">
         <div class="hero-copy">
-          <p class="eyebrow">Enterprise Biotech Chatbot</p>
-          <h2>Your AI Sales Assistant</h2>
+          <p class="eyebrow">Internal CSR Tool · Drafts Only</p>
+          <h2>Draft inbound replies with grounded context</h2>
           <p class="hero-subtitle">
-            A trusted workspace for internal teams and future customers to explore products,
-            retrieve technical evidence, and generate grounded replies with full visibility.
+            Paste an incoming customer inquiry — the agent retrieves similar past sales replies and
+            relevant documentation, then drafts a reply for you to review and edit before sending.
           </p>
         </div>
         <div class="hero-orbit" aria-hidden="true">
@@ -90,46 +61,22 @@
         </div>
       </header>
 
-      <section class="feature-grid">
-        <article class="feature-tile">
-          <span class="feature-label">Intent Ready</span>
-          <h3>Understand product, pricing, and technical requests</h3>
-          <p>Structured intent routing improves trust and speeds up triage across internal and external use cases.</p>
-        </article>
-        <article class="feature-tile">
-          <span class="feature-label">Traceable Answers</span>
-          <h3>Ground every response with retrievable evidence</h3>
-          <p>Surface catalog entries, technical snippets, and source paths directly in the workflow.</p>
-        </article>
-        <article class="feature-tile">
-          <span class="feature-label">Enterprise UX</span>
-          <h3>Designed for efficient, confident decision-making</h3>
-          <p>Focused conversation space, clear actions, and transparent reasoning for high-stakes biotech tasks.</p>
-        </article>
-      </section>
-
       <section class="chat-workspace">
         <div class="chat-stage">
           <div class="chat-stage-header">
             <div>
               <p class="chat-stage-label">Conversation</p>
-              <h3>Biotech Assistant Workspace</h3>
+              <h3>CSR Drafting Workspace</h3>
               <p id="session_hint" class="session-hint">Session ready</p>
             </div>
-            <div class="status-pill">Secure session</div>
+            <div class="status-pill">Internal · drafts only</div>
           </div>
 
           <div id="chat_history" class="chat-history">
             <div class="chat-empty-state">
               <p class="chat-empty-title">Start a new conversation</p>
-              <p class="chat-empty">Ask about a product, request a quote, or retrieve technical documentation.</p>
+              <p class="chat-empty">Paste a customer inquiry to draft a reply with similar past threads and relevant docs.</p>
             </div>
-          </div>
-
-          <div class="intent-row" id="intent_tags">
-            <span class="intent-tag">Product Inquiry</span>
-            <span class="intent-tag">Pricing</span>
-            <span class="intent-tag">Technical Question</span>
           </div>
 
           <form id="agent-form" class="composer-panel">
@@ -139,7 +86,7 @@
                 id="user_query"
                 name="user_query"
                 rows="4"
-                placeholder="Ask about a catalog item, lead time, technical protocol, or draft a customer-ready reply..."
+                placeholder="Paste the customer email here..."
                 required
               ></textarea>
 
@@ -155,59 +102,45 @@
     <aside class="inspector">
       <section class="inspector-card">
         <div class="section-heading">
-          <span>Agent Overview</span>
+          <span>Retrieval Trust</span>
         </div>
-        <div class="overview-grid">
-          <div>
-            <p class="metric-label">Current Intent</p>
-            <p id="current_intent" class="metric-value">Awaiting input</p>
-          </div>
-          <div>
-            <p class="metric-label">Confidence</p>
-            <p id="current_confidence" class="metric-value">-</p>
-          </div>
-          <div>
-            <p class="metric-label">Route</p>
-            <p id="current_route" class="metric-value">-</p>
-          </div>
-          <div>
-            <p class="metric-label">Status</p>
-            <p id="current_status" class="metric-value">Idle</p>
-          </div>
+        <div id="trust_summary" class="signal-summary">
+          <p class="signal-state">Submit a query to see retrieval confidence.</p>
         </div>
       </section>
 
       <section class="inspector-card">
         <div class="section-heading">
-          <span>Reasoning & Context</span>
+          <span>AI Routing Note</span>
         </div>
-        <div id="routing_summary" class="signal-summary">
-          <p class="signal-state">Waiting for routing evidence.</p>
-        </div>
-        <div id="secondary_routes_summary" class="signal-summary compact-summary">
-          <p class="signal-state">No secondary routes detected.</p>
+        <div id="routing_note_summary" class="signal-summary compact-summary">
+          <p class="signal-state">No routing flag yet.</p>
         </div>
       </section>
 
       <section class="inspector-card">
         <div class="section-heading">
-          <span>Workflow Suggestions</span>
+          <span>Similar Past Inquiries</span>
         </div>
-        <ul id="workflow" class="workflow-list"></ul>
+        <div id="historical_results" class="signal-summary">
+          <p class="signal-state">等待输入...</p>
+        </div>
       </section>
 
       <section class="inspector-card">
         <div class="section-heading">
-          <span>Reply Preview</span>
+          <span>Relevant Documents</span>
         </div>
-        <pre id="reply_preview">等待输入...</pre>
+        <div id="document_results" class="signal-summary">
+          <p class="signal-state">等待输入...</p>
+        </div>
       </section>
 
       <section class="inspector-card">
         <div class="section-heading">
-          <span>Response Topic</span>
+          <span>Technical Retrieval Detail</span>
         </div>
-        <div id="response_topic_summary" class="signal-summary">
+        <div id="technical_results" class="signal-summary">
           <p class="signal-state">等待输入...</p>
         </div>
       </section>
@@ -223,32 +156,23 @@
 
       <section class="inspector-card">
         <div class="section-heading">
-          <span>Document Results</span>
+          <span>Workflow Steps</span>
         </div>
-        <div id="document_results" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
-      </section>
-
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Technical Retrieval</span>
-        </div>
-        <div id="technical_results" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
+        <ul id="workflow" class="workflow-list"></ul>
       </section>
 
       <details class="inspector-card debug-card">
         <summary>Debug Payloads</summary>
         <div class="debug-stack">
           <div class="debug-block">
-            <h4>Route Result</h4>
-            <pre id="route_result">{}</pre>
+            <h4>Response Topic / Focus</h4>
+            <div id="response_topic_summary" class="signal-summary">
+              <p class="signal-state">等待输入...</p>
+            </div>
           </div>
           <div class="debug-block">
-            <h4>Routing Signals</h4>
-            <pre id="routing_signals">{}</pre>
+            <h4>Route Result</h4>
+            <pre id="route_result">{}</pre>
           </div>
           <div class="debug-block">
             <h4>Parsed Result</h4>
@@ -267,8 +191,8 @@
             <pre id="execution_run">{}</pre>
           </div>
           <div class="debug-block">
-            <h4>Response Resolution</h4>
-            <pre id="response_resolution">{}</pre>
+            <h4>Answer Focus</h4>
+            <pre id="answer_focus"></pre>
           </div>
         </div>
       </details>

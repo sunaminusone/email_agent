@@ -17,9 +17,28 @@ from src.ingestion.models import (
     ParserRetrievalHints,
     ParserRequestFlags,
     ParserSignals,
+    SelectionResolution,
     SourceAttribution,
 )
 from src.ingestion.parser_prompt import get_parser_prompt
+from src.memory.models import ClarificationMemory, MemoryContext
+
+
+def _format_pending_clarification(clarification_memory: ClarificationMemory | None) -> str:
+    """Format pending clarification context for the parser prompt."""
+    if clarification_memory is None or not clarification_memory.pending_clarification_type:
+        return "None"
+    options = clarification_memory.pending_candidate_options
+    if not options:
+        return "None"
+    # 1-based labels match the user's mental model (assistant turns
+    # typically present options as "1) X 2) Y 3) Z").  The schema's
+    # selected_index remains 0-based; the parser_prompt rule + the
+    # 第二个 / "the first one" few-shots cover the 1→0 translation.
+    lines = [f"Type: {clarification_memory.pending_clarification_type}", "Options:"]
+    for idx, option in enumerate(options, start=1):
+        lines.append(f"  {idx}: {option}")
+    return "\n".join(lines)
 
 
 def preprocess_for_parser(
@@ -27,10 +46,14 @@ def preprocess_for_parser(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> dict[str, Any]:
     normalized_query = str(user_query or "").strip()
     normalized_history = conversation_history or []
     normalized_attachments = attachments or []
+    clarification_memory = (
+        memory_context.snapshot.clarification_memory if memory_context is not None else None
+    )
     return {
         "user_query": normalized_query,
         "conversation_history": json.dumps(
@@ -43,6 +66,7 @@ def preprocess_for_parser(
             ensure_ascii=False,
             indent=2,
         ),
+        "pending_clarification": _format_pending_clarification(clarification_memory),
         "_meta": {
             "raw_user_query": normalized_query,
             "conversation_history_raw": normalized_history,
@@ -62,6 +86,7 @@ def get_parser_pipeline():
             user_query=payload.get("user_query", ""),
             conversation_history=payload.get("conversation_history", []),
             attachments=payload.get("attachments", []),
+            memory_context=payload.get("memory_context"),
         )
     )
     parse_step = RunnablePassthrough.assign(parsed=parser_chain)
@@ -74,6 +99,7 @@ def invoke_parser_pipeline(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> dict[str, Any]:
     pipeline = get_parser_pipeline()
     parsed = pipeline.invoke(
@@ -81,6 +107,7 @@ def invoke_parser_pipeline(
             "user_query": user_query,
             "conversation_history": conversation_history or [],
             "attachments": attachments or [],
+            "memory_context": memory_context,
         }
     )
     return parser_result_to_payload(parsed)
@@ -91,11 +118,13 @@ def invoke_parser_service(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> dict[str, Any]:
     return invoke_parser_pipeline(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
+        memory_context=memory_context,
     )
 
 
@@ -104,11 +133,13 @@ def invoke_parser(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> dict[str, Any]:
     return invoke_parser_pipeline(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
+        memory_context=memory_context,
     )
 
 
@@ -245,13 +276,14 @@ def _map_parser_context(payload: Mapping[str, Any]) -> ParserContext:
     return ParserContext(
         language=str(context.get("language", "other") or "other"),
         channel=str(context.get("channel", "internal_qa") or "internal_qa"),
-        primary_intent=str(context.get("primary_intent", "unknown") or "unknown"),
+        semantic_intent=str(context.get("semantic_intent", "unknown") or "unknown"),
         intent_confidence=float(context.get("intent_confidence", 0.0) or 0.0),
         query_type=str(context.get("query_type", "question") or "question"),
         urgency=str(context.get("urgency", "low") or "low"),
         risk_level=str(context.get("risk_level", "low") or "low"),
         needs_human_review=bool(context.get("needs_human_review", False)),
         reasoning_note=str(context.get("reasoning_note", "") or ""),
+        dialogue_act_hint=str(context.get("dialogue_act_hint", "inquiry") or "inquiry"),
     )
 
 
@@ -315,6 +347,30 @@ def _map_parser_retrieval_hints(payload: Mapping[str, Any]) -> ParserRetrievalHi
     )
 
 
+def _map_selection_resolution(payload: Mapping[str, Any]) -> SelectionResolution | None:
+    raw = payload.get("selection_resolution")
+    if raw is None:
+        return None
+    if isinstance(raw, SelectionResolution):
+        return raw
+    if isinstance(raw, Mapping):
+        selected_value = str(raw.get("selected_value", "") or "").strip()
+        selected_index = raw.get("selected_index")
+        confidence = float(raw.get("selection_confidence", 0.0) or 0.0)
+        if not selected_value and selected_index is None:
+            return None
+        if confidence < 0.1:
+            return None
+        return SelectionResolution(
+            selected_index=selected_index,
+            selected_value=selected_value,
+            selection_confidence=confidence,
+            carries_new_intent=bool(raw.get("carries_new_intent", False)),
+            reason=str(raw.get("reason", "") or ""),
+        )
+    return None
+
+
 def adapt_parsed_result_to_parser_signals(
     payload: Mapping[str, Any],
     *,
@@ -330,6 +386,9 @@ def adapt_parsed_result_to_parser_signals(
             targets=_to_entity_spans(list(entities.get("targets", []) or []), source_query=source_query),
             species=_to_entity_spans(list(entities.get("species", []) or []), source_query=source_query),
             applications=_to_entity_spans(list(entities.get("applications", []) or []), source_query=source_query),
+            isotypes=_to_entity_spans(list(entities.get("isotypes", []) or []), source_query=source_query),
+            costim_domains=_to_entity_spans(list(entities.get("costim_domains", []) or []), source_query=source_query),
+            car_t_groups=_to_entity_spans(list(entities.get("car_t_groups", []) or []), source_query=source_query),
             order_numbers=_to_entity_spans(list(entities.get("order_numbers", []) or []), source_query=source_query),
             invoice_numbers=_to_entity_spans(list(entities.get("invoice_numbers", []) or []), source_query=source_query),
             document_names=_to_entity_spans(list(entities.get("document_names", []) or []), source_query=source_query),
@@ -342,6 +401,7 @@ def adapt_parsed_result_to_parser_signals(
         retrieval_hints=_map_parser_retrieval_hints(payload),
         missing_information=list(payload.get("missing_information", []) or []),
         extra_instructions=payload.get("extra_instructions"),
+        selection_resolution=_map_selection_resolution(payload),
     )
 
 
@@ -350,10 +410,24 @@ def build_parser_signals(
     user_query: str,
     conversation_history: list[dict[str, str]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
-) -> ParserSignals:
+    memory_context: MemoryContext | None = None,
+) -> tuple[ParserSignals, str]:
+    """Return (parser_signals, llm_normalized_query).
+
+    The LLM produces a semantically cleaned normalized_query that is
+    richer than simple whitespace normalization.  The caller should use
+    it to upgrade TurnCore.normalized_query.
+
+    When memory carries pending clarification options, the parser is
+    given those options as context so it can resolve the user's
+    selection via selection_resolution.
+    """
     parser_payload = invoke_parser(
         user_query=user_query,
         conversation_history=conversation_history,
         attachments=attachments,
+        memory_context=memory_context,
     )
-    return adapt_parsed_result_to_parser_signals(parser_payload, source_query=user_query)
+    signals = adapt_parsed_result_to_parser_signals(parser_payload, source_query=user_query)
+    llm_normalized = str(parser_payload.get("normalized_query", "") or "").strip()
+    return signals, llm_normalized

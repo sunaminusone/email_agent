@@ -123,6 +123,28 @@ def select_tools(
                     )
                     uncovered_flags -= tool_flags
 
+    # 3. CSR mode invariant: both retrieval tools always run, regardless of
+    #    whether the primary classification "matched" them. Their value is
+    #    complementary: historical_thread_tool surfaces past similar
+    #    inquiries with how sales actually replied; technical_rag_tool
+    #    surfaces relevant KB chunks (service flyers, workflow docs).
+    #    The CSR sees both and decides what to use.
+    CSR_ALWAYS_INCLUDE = ("historical_thread_tool", "technical_rag_tool")
+    for tool_name in CSR_ALWAYS_INCLUDE:
+        if tool_name in selected or tool_name in already_called:
+            continue
+        for cap, score, reasons in scored:
+            if cap.tool_name != tool_name:
+                continue
+            selected[tool_name] = ToolSelection(
+                tool_name=tool_name,
+                match_score=round(max(score, 0.3), 4),
+                match_reasons=[*reasons, "csr_mode_always_include"],
+                role="supporting",
+                can_run_in_parallel=cap.can_run_in_parallel,
+            )
+            break
+
     result = list(selected.values())
     result.sort(key=lambda s: (-s.match_score, s.role != "primary"))
     return result
@@ -136,7 +158,7 @@ def _classify_demand(context: ExecutionContext) -> DemandType:
     """Classify the user's information demand from the pre-computed GroupDemand.
 
     GroupDemand (via active_demand) is the single source of truth.
-    No fallback to raw flags or primary_intent — if active_demand is
+    No fallback to raw flags or semantic_intent — if active_demand is
     absent the executor treats the demand as general (conservative).
 
     Low demand_confidence (< 0.5) suppresses mixed classification —

@@ -3,12 +3,10 @@ from __future__ import annotations
 from src.routing.models import ClarificationOption, ClarificationPayload, DialogueActResult, RoutedObjectState
 
 
-# Information without which the primary tool cannot execute.
-# Products and services have no critical fields — the executor can always attempt a fuzzy search.
 _CRITICAL_FIELDS: dict[str, set[str]] = {
-    "order":    {"order_number", "customer_identifier"},
-    "invoice":  {"invoice_number", "customer_identifier"},
-    "shipment": {"order_number", "tracking_number"},
+    "order": {"order_number", "customer_identifier", "customer_name"},
+    "invoice": {"invoice_number", "customer_identifier", "customer_name"},
+    "shipment": {"order_number", "tracking_number", "customer_identifier", "customer_name"},
 }
 
 
@@ -17,8 +15,13 @@ def decide_clarification(
     dialogue_act: DialogueActResult,
     *,
     missing_information: list[str] | None = None,
+    missing_object_type: str = "",
 ) -> ClarificationPayload | None:
-    # 1. Object disambiguation (highest priority)
+    """Routing-layer clarification: object ambiguity and selection context only.
+
+    Parameter-missing clarification has moved to path evaluation (tool readiness).
+    """
+    # 1. Object disambiguation
     if object_routing.ambiguous_objects:
         ambiguous = object_routing.ambiguous_objects[0]
         options = [
@@ -38,7 +41,11 @@ def decide_clarification(
         )
 
     # 2. Selection without context
-    if dialogue_act.act == "selection" and object_routing.primary_object is None:
+    if (
+        dialogue_act.act == "selection"
+        and object_routing.primary_object is None
+        and object_routing.active_object is None
+    ):
         return ClarificationPayload(
             kind="selection_context_missing",
             reason="Clarification is required because the selection turn has no active object state to resolve against.",
@@ -46,33 +53,32 @@ def decide_clarification(
             missing_information=["selection target"],
         )
 
-    # 3. Ingestion flagged missing critical info
-    if missing_information:
-        critical = _filter_critical_missing(missing_information, object_routing)
-        if critical:
-            return ClarificationPayload(
-                kind="missing_information",
-                reason=f"Clarification is required because critical information is missing: {', '.join(critical)}.",
-                prompt=f"Could you please provide the following: {', '.join(critical)}?",
-                missing_information=critical,
-            )
+    critical_missing = _filter_critical_missing(
+        missing_information or [],
+        object_routing=object_routing,
+        missing_object_type=missing_object_type,
+    )
+    if critical_missing:
+        return ClarificationPayload(
+            kind="missing_information",
+            reason="Clarification is required because critical operational identifiers are missing.",
+            prompt="Please provide the missing identifiers so the request can be looked up safely.",
+            missing_information=critical_missing,
+        )
 
     return None
 
 
 def _filter_critical_missing(
-    missing_info: list[str],
+    missing_information: list[str],
+    *,
     object_routing: RoutedObjectState,
+    missing_object_type: str = "",
 ) -> list[str]:
-    """Only keep missing fields that prevent the primary tool from running."""
-    obj_type = _get_primary_object_type(object_routing)
-    required = _CRITICAL_FIELDS.get(obj_type, set())
-    return [info for info in missing_info if info in required]
-
-
-def _get_primary_object_type(object_routing: RoutedObjectState) -> str:
-    if object_routing.primary_object is not None:
-        return object_routing.primary_object.object_type
-    if object_routing.active_object is not None:
-        return object_routing.active_object.object_type
-    return ""
+    object_type = (
+        missing_object_type
+        or (object_routing.primary_object.object_type if object_routing.primary_object is not None else "")
+        or (object_routing.active_object.object_type if object_routing.active_object is not None else "")
+    )
+    required = _CRITICAL_FIELDS.get(object_type, set())
+    return [item for item in missing_information if item in required]

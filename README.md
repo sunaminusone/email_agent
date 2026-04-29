@@ -1,118 +1,224 @@
 # Email Agent
 
-A modular biotech support agent built around typed Python layers plus LLM boundaries.
+A decision-support agent for ProMab's customer-service reps and sales reps.
+The agent's consumer is a human expert (CSR / sales) — never the customer
+directly. It produces internal drafts, similar past inquiries, and
+relevant documentation that the rep reviews, edits, and decides whether
+to send.
 
-The current canonical architecture is:
+This project combines typed Python service layers, retrieval systems, LLM-based understanding, and persistent session memory. The runtime sequence:
 
-`ingestion -> objects -> routing -> execution -> response`
+`memory recall -> ingestion -> object resolution -> routing -> executor -> response -> memory reflect`
 
-For the full design set and reading order, start with [docs/ARCHITECTURE_READING_ORDER.md](/Users/promab/anaconda_projects/email_agent/docs/ARCHITECTURE_READING_ORDER.md).
+For the full design set, start with [docs/AGENT_ARCHITECTURE_V4.md](/Users/promab/anaconda_projects/email_agent/docs/AGENT_ARCHITECTURE_V4.md) (current source of truth) and the [reading order](/Users/promab/anaconda_projects/email_agent/docs/ARCHITECTURE_READING_ORDER.md).
+
+## What This Project Does
+
+The agent serves CSRs and sales reps in two directions:
+
+- **Inbound** — A customer email or HubSpot form inquiry comes in. The rep
+  pastes it (or the system ingests it); the agent returns a drafted reply
+  alongside the most similar past customer/sales conversations and any
+  relevant KB documents.
+- **Outbound** *(planned, P2)* — A sales rep gives a scenario; the agent
+  drafts an outreach message in the sales voice.
+
+In both directions, the rep stays in control:
+
+- understands the inbound message (entities, intent, demand)
+- retrieves past similar inquiries from ~9k historical HubSpot threads,
+  plus relevant chunks from the technical RAG corpus
+- generates a 90%-ship-ready draft modeled on past sales replies
+- surfaces routing concerns ("ambiguous", "may need expert input") as
+  advisory metadata, never as gates
+- preserves multi-turn context across the rep's iterative refinement
+
+The main API entrypoint is [src/main.py](/Users/promab/anaconda_projects/email_agent/src/main.py), and the end-to-end runtime assembly lives in [src/app/service.py](/Users/promab/anaconda_projects/email_agent/src/app/service.py).
+
+## Core Capabilities
+
+- `Catalog lookup`: structured product retrieval, candidate ranking, and pricing-oriented support over PostgreSQL-backed catalog data
+- `Technical RAG`: semantic retrieval over curated service-page corpora with scoped query rewriting, reranking, and response grounding
+- `Document lookup`: local document inventory lookup and document-path surfacing
+- `QuickBooks lookups`: customer, invoice, order, and shipping retrieval through the QuickBooks integration
+- `Session memory`: Redis-backed recall and reflect flow for multi-turn continuity
+
+## Runtime Flow
+
+The current implementation in [src/app/service.py](/Users/promab/anaconda_projects/email_agent/src/app/service.py) follows this flow:
+
+1. `recall()` loads prior typed memory and builds turn context.
+2. `ingestion/` parses the incoming turn into an `IngestionBundle`.
+3. `objects/` resolves products, services, targets, and ambiguous references into `ResolvedObjectState`.
+4. `routing/` decides whether the agent should `execute`, `clarify`, `handoff`, or directly respond.
+5. `executor/` selects tools from the registry, dispatches them, and merges grounded results.
+6. `response/` composes the final answer, clarification, partial answer, or handoff message.
+7. `reflect()` persists updated memory for the next turn.
+
+## Architecture Principles
+
+- Typed contracts connect every major layer.
+- Tool execution is grounded in registered `ToolCapability` metadata.
+- Response generation is constrained by retrieved facts and content blocks.
+- Memory is explicit and typed, not implicit prompt stuffing.
+- LLMs are used inside bounded stages rather than as the architecture itself.
 
 ## Project Layout
 
 ```text
 src/
-  app/           # top-level runtime entrypoint and API-facing assembly
-  ingestion/     # normalize the current turn into IngestionBundle
-  objects/       # resolve products, services, and operational objects
-  routing/       # resolve dialogue act, modality, and tool selection
-  execution/     # plan and run tool calls from ExecutionIntent
-  response/      # compose grounded user-facing replies
-  memory/        # typed reusable cross-turn state and persistence
-  tools/         # tool contracts, registry, dispatch, and tool implementations
-  catalog/       # structured product lookup capability
-  documents/     # structured document lookup capability
-  rag/           # semantic technical retrieval capability
-  integrations/  # external system connectors
-  common/        # shared models reused across layers
-  config/        # runtime settings and configuration
-  strategies/    # reusable deterministic heuristics
+  agent/         # multi-group agent state and tool-call cache
+  app/           # top-level runtime assembly
+  catalog/       # structured catalog retrieval, ranking, selection
+  common/        # shared models, messages, execution contracts
+  config/        # runtime settings, LLM, embeddings, integration config
+  documents/     # document inventory lookup over local files
+  executor/      # tool selection, dispatch, merge, completeness logic
+  ingestion/     # parser pipeline, deterministic signals, intent assembly
+  integrations/  # external connectors such as QuickBooks
+  memory/        # recall/reflect lifecycle and persistence adapters
+  objects/       # entity extraction and resolution
+  rag/           # vectorstore, scope-aware retrieval, reranking, ingestion
+  response/      # content blocks, planning, rendering, rewrite
+  routing/       # route decision and dialogue-act handling
+  strategies/    # reusable heuristics
+  tools/         # tool contracts, registry, mappers, implementations
+
+docs/            # v3 architecture and subsystem design docs
+frontend/        # browser UI for the prototype workspace
+tests/           # integration and subsystem tests
+data/            # local corpora, processed artifacts, vectorstore inputs
+scripts/         # data import and evaluation scripts
 ```
 
-## Runtime Flow
+## Important Data and Dependencies
 
-1. `ingestion/` gathers turn evidence and emits `IngestionBundle`.
-2. `objects/` consumes that bundle and emits `ResolvedObjectState`.
-3. `routing/` resolves dialogue act, modality, clarification or handoff, and emits `ExecutionIntent`.
-4. `execution/` turns that intent into an `ExecutionPlan`, runs tool calls, and returns `ExecutionRun`.
-5. `response/` turns grounded execution output plus response memory into the final reply.
-6. `memory/` persists typed state updates for the next turn.
+This project currently depends on a few local and external systems:
 
-The runtime entrypoint in [src/app/service.py](/Users/promab/anaconda_projects/email_agent/src/app/service.py) follows this exact sequence.
+- `OpenAI API`: used for chat completions and embeddings
+- `Redis`: used for session memory persistence
+- `PostgreSQL`: used for catalog and registry-backed lookups
+- `Local document directories`: used by document retrieval
+- `Local RAG corpora`: used by the technical retrieval pipeline
+- `QuickBooks credentials`: optional, only needed for operational lookups
 
-## Layer Boundaries
+Some paths in the current codebase are still machine-specific and point into this repository's local `data/` directories. That means the app works best when run from this workspace as currently structured.
 
-- `ingestion/` does not resolve primary objects or choose tools.
-- `objects/` does not execute retrieval or choose tools.
-- `routing/` does not perform ingestion or object extraction.
-- `execution/` does not re-derive routing decisions or generate the final reply.
-- `response/` does not choose tools or perform object resolution.
-- `tools/` expose capability contracts; `execution/` is the orchestration layer that calls them.
+## Setup
 
-## Core Contracts
-
-- `IngestionBundle`
-- `ResolvedObjectState`
-- `DialogueActResult`
-- `ModalityDecision`
-- `ExecutionIntent`
-- `ExecutionPlan`
-- `ExecutionRun`
-- `MemorySnapshot`
-- `MemoryUpdate`
-- `ComposedResponse`
-
-## Capabilities
-
-- `catalog/`: structured product and pricing lookup
-- `documents/`: document metadata lookup over local inventories
-- `rag/`: semantic technical retrieval over curated service-page corpora
-- `tools/quickbooks/`: customer, invoice, order, and shipping lookups
-
-## Memory
-
-- Redis-backed session persistence keyed by `thread_id`
-- typed thread, object, clarification, and response memory
-- `stateful_anchors` reused by ingestion for safe follow-up handling
-
-## Canonical Docs
-
-- architecture entrypoint: [docs/ARCHITECTURE_READING_ORDER.md](/Users/promab/anaconda_projects/email_agent/docs/ARCHITECTURE_READING_ORDER.md)
-- ingestion: [docs/INGESTION_LAYER_DESIGN.md](/Users/promab/anaconda_projects/email_agent/docs/INGESTION_LAYER_DESIGN.md)
-- objects: [docs/OBJECTS_LAYER_DESIGN.md](/Users/promab/anaconda_projects/email_agent/docs/OBJECTS_LAYER_DESIGN.md)
-- routing: [docs/ROUTING_REDESIGN.md](/Users/promab/anaconda_projects/email_agent/docs/ROUTING_REDESIGN.md)
-- tools: [docs/TOOLS_LAYER_DESIGN.md](/Users/promab/anaconda_projects/email_agent/docs/TOOLS_LAYER_DESIGN.md)
-- execution: [docs/EXECUTION_LAYER_DESIGN.md](/Users/promab/anaconda_projects/email_agent/docs/EXECUTION_LAYER_DESIGN.md)
-- memory: [docs/MEMORY_LAYER_DESIGN.md](/Users/promab/anaconda_projects/email_agent/docs/MEMORY_LAYER_DESIGN.md)
-- response: [docs/RESPONSE_LAYER_DESIGN.md](/Users/promab/anaconda_projects/email_agent/docs/RESPONSE_LAYER_DESIGN.md)
-
-## Local Development
-
-- Python 3.11+
-- Redis
-- PostgreSQL
-- optional QuickBooks app credentials for operational lookups
-
-Install dependencies:
+### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Run the app:
+### 2. Configure environment variables
+
+The app reads configuration from `.env`.
+
+Minimum commonly used variables:
+
+```bash
+OPENAI_API_KEY=...
+REDIS_URL=redis://localhost:6379/0
+DATABASE_URL=postgresql://...
+```
+
+Optional QuickBooks variables:
+
+```bash
+QB_CLIENT_ID=...
+QB_CLIENT_SECRET=...
+QB_REDIRECT_URI=...
+QB_ENVIRONMENT=sandbox
+```
+
+Relevant config lives in [src/config/settings.py](/Users/promab/anaconda_projects/email_agent/src/config/settings.py).
+
+### 3. Start the app
 
 ```bash
 uvicorn src.main:app --reload
 ```
 
-Open:
+Then open:
 
-- app: [http://127.0.0.1:8000](http://127.0.0.1:8000)
-- endpoint: [http://127.0.0.1:8000/email-agent](http://127.0.0.1:8000/email-agent)
+- App UI: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+- LangServe endpoint: [http://127.0.0.1:8000/email-agent](http://127.0.0.1:8000/email-agent)
+- Health check: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
 
-## Testing
+## API Shape
+
+The main request model is [AgentRequest](/Users/promab/anaconda_projects/email_agent/src/api_models.py:22).
+
+At a high level, the API accepts:
+
+- `thread_id`
+- `user_query`
+- `locale`
+- `conversation_history`
+- `attachments`
+
+The response includes parsed signals, routing output, execution details, content blocks, and the final assistant message. The response model is [AgentPrototypeResponse](/Users/promab/anaconda_projects/email_agent/src/api_models.py:37).
+
+## Development Notes
+
+- The frontend is a prototype workspace, not just a bare API demo.
+- The executor is demand-aware and capability-driven.
+- The technical retrieval path currently focuses on curated service-page corpora in `data/processed/rag_ready_files`.
+- The response layer is grounded through content blocks before optional rewrite.
+
+## Tests
+
+Run the main automated checks with:
 
 ```bash
 python -m compileall src tests
 pytest -q
 ```
+
+I also verified a core subset locally while updating this README:
+
+```bash
+pytest -q tests/test_technical_inquiry.py tests/test_response_service.py tests/test_executor.py tests/test_routing_service.py
+```
+
+That subset currently passes.
+
+## Design Docs
+
+Start here:
+
+- [docs/ARCHITECTURE_READING_ORDER.md](/Users/promab/anaconda_projects/email_agent/docs/ARCHITECTURE_READING_ORDER.md)
+
+Primary v3 docs:
+
+- [docs/AGENT_ARCHITECTURE_V3.md](/Users/promab/anaconda_projects/email_agent/docs/AGENT_ARCHITECTURE_V3.md)
+- [docs/INGESTION_DESIGN_V3.md](/Users/promab/anaconda_projects/email_agent/docs/INGESTION_DESIGN_V3.md)
+- [docs/MEMORY_DESIGN_V3.md](/Users/promab/anaconda_projects/email_agent/docs/MEMORY_DESIGN_V3.md)
+- [docs/ROUTING_DESIGN_V3.md](/Users/promab/anaconda_projects/email_agent/docs/ROUTING_DESIGN_V3.md)
+- [docs/EXECUTOR_DESIGN_V3.md](/Users/promab/anaconda_projects/email_agent/docs/EXECUTOR_DESIGN_V3.md)
+- [docs/TOOL_CONTRACT_DESIGN_V3.md](/Users/promab/anaconda_projects/email_agent/docs/TOOL_CONTRACT_DESIGN_V3.md)
+
+## Current Status
+
+This repository is best understood as an actively evolving architecture prototype:
+
+- the layering and typed contracts are already substantial
+- the main agent path is runnable end to end
+- the design docs are deeper than the README and remain the canonical architecture reference
+- some infrastructure and file-path assumptions are still local-development oriented
+
+## HubSpot Training Query Export
+
+To export real inbound customer queries from HubSpot for agent training, set `HUBSPOT_ACCESS_TOKEN` in `.env`, then run:
+
+`python scripts/export_hubspot_training_queries.py --out data/processed/hubspot_training_queries.jsonl`
+
+Useful options:
+
+- `--contact-email user@example.com` to export only specific contacts.
+- `--emails-only` to export only CRM email engagements.
+- `--conversations-only` to export only inbox conversation messages.
+
+The exporter keeps inbound customer-side messages and writes one JSON object per line with `input_text`, contact metadata, timestamp, and recent context.

@@ -4,26 +4,27 @@ import json
 from typing import Any
 
 from src.agent.state import AgentState
+from src.app.agent_loop import _run_agent_loop
 from src.api_models import AgentPrototypeResponse, AgentRequest, FinalResponsePayload
 from src.common.messages import get_message
-from src.common.models import DemandProfile, IntentGroup, ObjectRef
-from src.executor import empty_execution_result, run_executor
+from src.common.models import DemandProfile, IntentGroup
 from src.common.execution_models import ExecutionResult
-from src.ingestion import assemble_intent_groups, build_demand_profile
+from src.ingestion import build_demand_profile
+from src.ingestion.models import build_ingestion_memory_contribution
+from src.routing.intent_assembly import assemble_intent_groups
 from src.ingestion.pipeline import build_ingestion_bundle
 from src.memory import (
     SessionStore,
     serialize_memory_snapshot,
-    snapshot_to_route_state,
     recall,
     reflect,
-    MemoryContribution,
 )
-from src.memory.models import ClarificationMemory, MemoryContext
+from src.memory.models import MemoryContext
+from src.objects.models import build_objects_memory_contribution
 from src.objects.resolution import resolve_objects
-from src.response import ResponseInput, build_response_bundle
-from src.routing import route
-
+from src.responser import ResponseInput, build_response_bundle
+from src.responser.models import build_response_memory_contribution
+from src.routing.models import build_routing_memory_contribution
 
 
 def _message_signature(message: dict[str, Any]) -> tuple[str, str, str]:
@@ -127,131 +128,13 @@ def _serialize_content_blocks(content_blocks) -> list[dict[str, Any]]:
     return serialized
 
 
-def _build_reply_preview(query: str, overall_action: str, execution_run_payload: dict[str, Any], final_response: FinalResponsePayload, *, locale: str = "zh") -> str:
+def _build_reply_preview(query: str, execution_run_payload: dict[str, Any], final_response: FinalResponsePayload, *, locale: str = "zh") -> str:
     if final_response.message:
         return final_response.message
-    if overall_action == "clarify":
-        return get_message("reply_preview_clarify", locale, query=query)
-    if overall_action == "handoff":
-        return get_message("reply_preview_handoff", locale, query=query)
+    # CSR mode always renders a draft (csr_draft renderer never returns
+    # an empty message), so this fallback is a safety net only.
     action_count = len(execution_run_payload.get("executed_actions", []))
     return get_message("reply_preview_done", locale, query=query, action_count=action_count)
-
-
-def _to_object_ref(candidate) -> ObjectRef | None:
-    if candidate is None:
-        return None
-    return ObjectRef(
-        object_type=candidate.object_type,
-        identifier=candidate.identifier,
-        identifier_type=getattr(candidate, "identifier_type", ""),
-        display_name=candidate.display_name or getattr(candidate, "canonical_value", ""),
-        business_line=candidate.business_line,
-    )
-
-
-def _build_objects_contribution(
-    resolved_object_state,
-    should_soft_reset: bool,
-) -> MemoryContribution:
-    active_object = (
-        None if should_soft_reset
-        else (resolved_object_state.primary_object or resolved_object_state.active_object)
-    )
-    recent_objects = [
-        item
-        for item in [
-            _to_object_ref(resolved_object_state.primary_object),
-            _to_object_ref(resolved_object_state.active_object),
-            *[_to_object_ref(obj) for obj in resolved_object_state.secondary_objects],
-        ]
-        if item is not None
-    ]
-    return MemoryContribution(
-        source="objects",
-        set_active_object=_to_object_ref(active_object),
-        secondary_active_objects=[
-            item
-            for item in (_to_object_ref(obj) for obj in resolved_object_state.secondary_objects)
-            if item is not None
-        ],
-        append_recent_objects=recent_objects,
-        soft_reset_current_topic=should_soft_reset,
-        reason="objects: resolved from current turn",
-    )
-
-
-def _build_ingestion_contribution(
-    intent_groups: list[IntentGroup],
-) -> MemoryContribution:
-    return MemoryContribution(
-        source="ingestion",
-        intent_groups=list(intent_groups),
-        reason=f"ingestion: assembled {len(intent_groups)} intent group(s)",
-    )
-
-
-def _build_routing_contribution(
-    route,
-    current_snapshot,
-    final_response: FinalResponsePayload,
-    active_object: ObjectRef | None,
-    should_soft_reset: bool,
-) -> MemoryContribution:
-    clarification = route.clarification
-    resume_route = (
-        current_snapshot.thread_memory.active_route
-        if current_snapshot.thread_memory.active_route and current_snapshot.thread_memory.active_route != "clarify"
-        else "execute"
-    )
-    return MemoryContribution(
-        source="routing",
-        active_route=route.action,
-        route_phase="waiting_for_user" if final_response.response_type == "clarification" else "active",
-        active_business_line=getattr(active_object, "business_line", "") if active_object is not None else "",
-        set_pending_clarification=(
-            ClarificationMemory(
-                pending_clarification_type=clarification.kind,
-                pending_candidate_options=[option.label or option.value for option in clarification.options],
-                pending_identifier=(clarification.options[0].value if clarification.options else ""),
-                pending_question=clarification.prompt,
-                pending_route_after_clarification=resume_route,
-            )
-            if not should_soft_reset and clarification is not None
-            else None
-        ),
-        clear_pending_clarification=should_soft_reset or clarification is None,
-        reason=f"routing: action={route.action}",
-    )
-
-
-def _build_response_contribution(
-    response_plan,
-) -> MemoryContribution:
-    if response_plan is None or response_plan.memory_update is None:
-        return MemoryContribution(source="response", reason="response: no memory update")
-
-    mu = response_plan.memory_update
-    return MemoryContribution(
-        source="response",
-        mark_revealed_attributes=(
-            list(mu.response_memory.revealed_attributes) if mu.response_memory else None
-        ),
-        set_last_tool_results=(
-            list(mu.response_memory.last_tool_results) if mu.response_memory else None
-        ),
-        set_last_response_topics=(
-            list(mu.response_memory.last_response_topics) if mu.response_memory else None
-        ),
-        set_last_demand_type=(
-            mu.response_memory.last_demand_type if mu.response_memory else None
-        ),
-        set_last_demand_flags=(
-            list(mu.response_memory.last_demand_flags) if mu.response_memory else None
-        ),
-        soft_reset_current_topic=mu.soft_reset_current_topic,
-        reason=mu.reason or "response: plan applied",
-    )
 
 
 def _build_agent_input_payload(
@@ -262,24 +145,37 @@ def _build_agent_input_payload(
 ) -> dict[str, Any]:
     parser_context = ingestion_bundle.turn_signals.parser_signals.context
     primary_object = resolved_object_state.primary_object or resolved_object_state.active_object
+    primary_label = ""
+    primary_type = ""
+    if primary_object is not None:
+        primary_label = (
+            primary_object.canonical_value
+            or primary_object.display_name
+            or primary_object.identifier
+            or ""
+        )
+        primary_type = primary_object.object_type
     route_decision = agent_state.primary_route_decision
     clarification = agent_state.primary_clarification
     return {
         "thread_id": ingestion_bundle.turn_core.thread_id,
         "query": ingestion_bundle.turn_core.normalized_query,
         "raw_query": ingestion_bundle.turn_core.raw_query,
-        "primary_intent": parser_context.primary_intent,
+        "semantic_intent": parser_context.semantic_intent,
         "missing_information": (
             list(clarification.missing_information)
             if clarification is not None
             else list(ingestion_bundle.turn_signals.parser_signals.missing_information)
         ),
+        "active_service_name": primary_label if primary_type == "service" else "",
+        "active_product_name": primary_label if primary_type == "product" else "",
+        "active_target": primary_label if primary_type == "scientific_target" else "",
         "resolved_object_state": resolved_object_state.model_dump(mode="json"),
         "routing_debug": {
             "action": agent_state.overall_action,
             "dialogue_act": route_decision.dialogue_act.act,
             "dialogue_act_confidence": route_decision.dialogue_act.confidence,
-            "intent": parser_context.primary_intent,
+            "intent": parser_context.semantic_intent,
             "intent_confidence": parser_context.intent_confidence,
             "business_line": getattr(primary_object, "business_line", "") if primary_object is not None else "",
             "business_line_confidence": resolved_object_state.resolution_confidence,
@@ -294,23 +190,14 @@ def _build_agent_input_payload(
     }
 
 
-def _build_suggested_workflow(overall_action: str, execution_plan_payload: dict[str, Any], *, locale: str = "zh") -> list[str]:
+def _build_suggested_workflow(execution_plan_payload: dict[str, Any], *, locale: str = "zh") -> list[str]:
+    """v4 CSR pipeline workflow: always parse → extract → route → execute → draft."""
     m = lambda key, **kw: get_message(key, locale, **kw)
     workflow = [
         m("workflow_parse_input"),
         m("workflow_extract_objects"),
         m("workflow_route"),
     ]
-    if overall_action == "clarify":
-        workflow.append(m("workflow_clarify"))
-        return workflow
-    if overall_action == "handoff":
-        workflow.append(m("workflow_handoff"))
-        return workflow
-    if overall_action == "respond":
-        workflow.append(m("workflow_respond"))
-        return workflow
-
     planned_actions = execution_plan_payload.get("planned_actions", [])
     if planned_actions:
         workflow.extend([m("workflow_execute_tool", action_type=action["action_type"]) for action in planned_actions])
@@ -320,6 +207,8 @@ def _build_suggested_workflow(overall_action: str, execution_plan_payload: dict[
 
 def _load_session_context(request: AgentRequest):
     session_store = SessionStore()
+    if request.start_new_conversation:
+        session_store.clear_session(request.thread_id)
     session = session_store.load_session(request.thread_id)
     memory_snapshot = session_store.load_memory_snapshot(request.thread_id)
     persisted_history = session.get("recent_turns", [])
@@ -339,7 +228,6 @@ def _build_final_response_payload(agent_state: AgentState, execution_result: Exe
             for call in execution_result.executed_calls
             if call.status != "error"
         ],
-        needs_human_handoff=response_bundle.composed_response.response_type == "handoff",
         missing_information_requested=(
             list(clarification.missing_information)
             if clarification is not None
@@ -375,10 +263,15 @@ def _persist_session_state(
 
     primary_route = agent_state.primary_route_decision
     contributions = [
-        _build_ingestion_contribution(intent_groups),
-        _build_objects_contribution(resolved_object_state, should_soft_reset),
-        _build_routing_contribution(primary_route, memory_context.snapshot, final_response, _to_object_ref(active_object), should_soft_reset),
-        _build_response_contribution(response_bundle.response_plan),
+        build_ingestion_memory_contribution(intent_groups),
+        build_objects_memory_contribution(resolved_object_state, should_soft_reset),
+        build_routing_memory_contribution(
+            primary_route,
+            memory_context.snapshot,
+            active_object,
+            should_soft_reset,
+        ),
+        build_response_memory_contribution(response_bundle.response_plan),
     ]
 
     updated_snapshot = reflect(
@@ -387,13 +280,6 @@ def _persist_session_state(
         thread_id=thread_id,
         normalized_query=ingestion_bundle.turn_core.normalized_query or ingestion_bundle.turn_core.raw_query,
         last_turn_type=final_response.response_type,
-    )
-    waiting_for_user = final_response.response_type in ("clarification", "partial_answer")
-    route_phase = "waiting_for_user" if waiting_for_user else "active"
-    route_state = snapshot_to_route_state(
-        updated_snapshot,
-        route_phase=route_phase,
-        last_assistant_prompt_type=final_response.response_type,
     )
     assistant_message = {
         "role": "assistant",
@@ -404,12 +290,10 @@ def _persist_session_state(
             "response_path": response_bundle.response_path,
             "grounded_action_types": list(final_response.grounded_action_types),
             "content_blocks": list(response_content_blocks),
-            "needs_human_handoff": final_response.needs_human_handoff,
             "response_debug": response_bundle.composed_response.debug_info,
             "agent_debug": agent_state.debug_summary(),
             "semantic_debug": demand_profile.model_dump(mode="json"),
             "memory_snapshot": serialize_memory_snapshot(updated_snapshot),
-            "route_state": route_state,
         },
     }
     session_store.append_turns(
@@ -419,11 +303,7 @@ def _persist_session_state(
             assistant_message,
         ],
     )
-    session_store.persist_memory_snapshot(
-        thread_id, updated_snapshot,
-        route_phase=route_phase,
-        last_assistant_prompt_type=final_response.response_type,
-    )
+    session_store.persist_memory_snapshot(thread_id, updated_snapshot)
     return assistant_message
 
 
@@ -460,11 +340,11 @@ def _assemble_agent_response(
             demand_profile,
         ),
         route=primary_route.model_dump(mode="json"),
-        suggested_workflow=_build_suggested_workflow(agent_state.overall_action, execution_plan_payload, locale=locale),
+        suggested_workflow=_build_suggested_workflow(execution_plan_payload, locale=locale),
         reply_preview=reply_preview,
         execution_plan=execution_plan_payload,
         execution_run=execution_run_payload,
-        response_resolution=response_bundle.response_resolution.model_dump(mode="json"),
+        answer_focus=response_bundle.response_plan.answer_focus,
         response_topic=response_bundle.response_topic,
         response_content_blocks=response_content_blocks,
         response_content_summary=response_bundle.response_content_summary,
@@ -472,66 +352,6 @@ def _assemble_agent_response(
         final_response=final_response,
         assistant_message=assistant_message,
     )
-
-
-def _run_agent_loop(
-    intent_groups: list[IntentGroup],
-    demand_profile: DemandProfile,
-    ingestion_bundle,
-    resolved_object_state,
-    memory_context: MemoryContext,
-) -> AgentState:
-    """Phase 2: iterate over intent groups, route and execute each independently.
-
-    A shared ToolCallCache enables:
-    - Deduplication: if group A already called catalog_lookup_tool for "CAR-T",
-      group B reuses the cached result instead of calling again.
-    - Cross-group observation: facts discovered by group A (e.g., product name,
-      business_line) are passed to group B's tool requests as enriched context.
-    """
-    from src.agent.tool_call_cache import ToolCallCache
-
-    agent_state = AgentState()
-    cache = ToolCallCache()
-
-    for group in intent_groups:
-        route_decision = route(
-            ingestion_bundle,
-            resolved_object_state,
-            focus_group=group,
-            demand_profile=demand_profile,
-        )
-
-        if route_decision.action == "execute":
-            execution_result = run_executor(
-                ingestion_bundle=ingestion_bundle,
-                resolved_object_state=resolved_object_state,
-                route_decision=route_decision,
-                memory_snapshot=memory_context.snapshot,
-                focus_group=group,
-                demand_profile=demand_profile,
-                tool_call_cache=cache,
-            )
-            status = (
-                "resolved"
-                if execution_result.final_status in ("ok", "partial")
-                else "needs_clarification"
-            )
-        elif route_decision.action == "handoff":
-            execution_result = empty_execution_result(reason="needs handoff")
-            status = "needs_handoff"
-        elif route_decision.action == "clarify":
-            execution_result = empty_execution_result(reason="needs clarification")
-            status = "needs_clarification"
-        else:
-            execution_result = empty_execution_result(
-                reason=f"No execution needed: action={route_decision.action}",
-            )
-            status = "resolved"
-
-        agent_state.record(group, route_decision, execution_result, status=status)
-
-    return agent_state
 
 
 def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeResponse:
@@ -552,9 +372,7 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
         user_query=request.user_query,
         conversation_history=merged_history,
         attachments=attachments,
-        prior_state=memory_context.snapshot,
-        stateful_anchors=memory_context.stateful_anchors,
-        has_recent_objects=bool(memory_context.recent_objects_by_relevance),
+        memory_context=memory_context,
     )
     resolved_object_state = resolve_objects(
         ingestion_bundle,
@@ -567,7 +385,7 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
             resolved_object_state.primary_object,
             *resolved_object_state.secondary_objects,
         ],
-        primary_intent=ingestion_bundle.turn_signals.parser_signals.context.primary_intent,
+        semantic_intent=ingestion_bundle.turn_signals.parser_signals.context.semantic_intent,
     )
     demand_profile = build_demand_profile(
         ingestion_bundle.turn_signals.parser_signals,
@@ -586,6 +404,7 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
     # --- Phase 3: Respond — merge all group outcomes into one response ---
     execution_result = agent_state.merged_execution_result
 
+    parser_signals = ingestion_bundle.turn_signals.parser_signals
     response_bundle = build_response_bundle(ResponseInput(
         query=query,
         locale=request.locale,
@@ -597,6 +416,8 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
         clarification=agent_state.primary_clarification,
         group_outcomes=list(agent_state.outcomes),
         demand_profile=demand_profile,
+        parser_constraints=parser_signals.constraints,
+        parser_open_slots=parser_signals.open_slots,
     ))
 
     # --- Phase 4: Serialize ---
@@ -605,7 +426,7 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
     response_content_blocks = _serialize_content_blocks(response_bundle.composed_response.content_blocks)
     final_response = _build_final_response_payload(agent_state, execution_result, response_bundle)
     reply_preview = _build_reply_preview(
-        query, agent_state.overall_action, execution_run_payload, final_response,
+        query, execution_run_payload, final_response,
         locale=request.locale,
     )
 

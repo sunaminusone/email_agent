@@ -42,7 +42,7 @@ def resolve_object_routing(resolved_object_state: ResolvedObjectState) -> Routed
 
 def _routing_status(resolved_object_state: ResolvedObjectState) -> str:
     if resolved_object_state.primary_object is not None:
-        if resolved_object_state.used_stateful_anchor:
+        if resolved_object_state.used_memory_context:
             return "contextual_reuse"
         return "resolved"
     if resolved_object_state.active_object is not None:

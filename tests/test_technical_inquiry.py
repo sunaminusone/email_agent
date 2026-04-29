@@ -13,9 +13,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.common.models import DemandProfile, GroupDemand, IntentGroup
+from src.ingestion.demand_profile import narrow_demand_profile
 from src.common.execution_models import ExecutedToolCall, ExecutionResult
 from src.executor.engine import run_executor
-from src.ingestion import assemble_intent_groups, build_demand_profile
+from src.ingestion import build_demand_profile
+from src.routing.intent_assembly import assemble_intent_groups
 from src.ingestion.models import (
     IngestionBundle,
     ParserContext,
@@ -27,7 +29,7 @@ from src.ingestion.models import (
     ReferenceSignals,
 )
 from src.objects.models import ObjectCandidate, ResolvedObjectState
-from src.response import ResponseInput, build_response_bundle
+from src.responser import ResponseInput, build_response_bundle
 from src.routing.models import DialogueActResult, RouteDecision
 from src.routing.orchestrator import route
 from src.tools.models import ToolCapability, ToolRequest, ToolResult
@@ -125,7 +127,7 @@ class TestTechnicalInquiryNoObject:
             ),
             turn_signals=TurnSignals(
                 parser_signals=ParserSignals(
-                    context=ParserContext(primary_intent="technical_question"),
+                    context=ParserContext(semantic_intent="technical_question"),
                     request_flags=ParserRequestFlags(needs_protocol=True),
                 ),
                 deterministic_signals=DeterministicSignals(),
@@ -138,7 +140,7 @@ class TestTechnicalInquiryNoObject:
         intent_groups = assemble_intent_groups(
             request_flags=ingestion_bundle.turn_signals.parser_signals.request_flags,
             resolved_objects=[None],
-            primary_intent="technical_question",
+            semantic_intent="technical_question",
         )
         demand_profile = build_demand_profile(
             ingestion_bundle.turn_signals.parser_signals,
@@ -159,9 +161,11 @@ class TestTechnicalInquiryNoObject:
         ingestion_bundle, resolved, intent_groups, demand_profile = self._build_scenario()
         focus_group = intent_groups[0]
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         decision = route(
             ingestion_bundle, resolved,
-            focus_group=focus_group, demand_profile=demand_profile,
+            focus_group=focus_group, scoped_demand=scoped_demand,
         )
 
         assert decision.action == "execute"
@@ -177,10 +181,13 @@ class TestTechnicalInquiryNoObject:
             dialogue_act=DialogueActResult(act="inquiry"),
         )
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         tool_names = [call.tool_name for call in result.executed_calls]
@@ -188,8 +195,8 @@ class TestTechnicalInquiryNoObject:
         assert "catalog_lookup_tool" not in tool_names
         assert result.final_status == "ok"
 
-    def test_response_mode_is_direct_answer(self):
-        """Pure technical → direct_answer with LLM rewrite."""
+    def test_answer_focus_is_knowledge_lookup(self):
+        """Pure technical RAG-driven inquiry → answer_focus=knowledge_lookup, csr_draft renderer."""
         ingestion_bundle, resolved, intent_groups, demand_profile = self._build_scenario()
         focus_group = intent_groups[0]
 
@@ -197,10 +204,13 @@ class TestTechnicalInquiryNoObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         execution_result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         bundle = build_response_bundle(ResponseInput(
@@ -211,9 +221,8 @@ class TestTechnicalInquiryNoObject:
             demand_profile=demand_profile,
         ))
 
-        assert bundle.response_plan.response_mode == "direct_answer"
-        assert bundle.response_plan.should_use_llm_rewrite is True
-        assert bundle.composed_response.response_type == "answer"
+        assert bundle.response_plan.answer_focus == "knowledge_lookup"
+        assert bundle.composed_response.response_type == "csr_draft"
 
     def test_response_contains_rag_content(self):
         """Response message should include content from the RAG tool."""
@@ -224,10 +233,13 @@ class TestTechnicalInquiryNoObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         execution_result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         bundle = build_response_bundle(ResponseInput(
@@ -250,10 +262,13 @@ class TestTechnicalInquiryNoObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         execution_result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         bundle = build_response_bundle(ResponseInput(
@@ -293,7 +308,7 @@ class TestTechnicalInquiryWithObject:
             ),
             turn_signals=TurnSignals(
                 parser_signals=ParserSignals(
-                    context=ParserContext(primary_intent="technical_question"),
+                    context=ParserContext(semantic_intent="technical_question"),
                     request_flags=ParserRequestFlags(needs_protocol=True),
                 ),
                 deterministic_signals=DeterministicSignals(),
@@ -315,7 +330,7 @@ class TestTechnicalInquiryWithObject:
         intent_groups = assemble_intent_groups(
             request_flags=ingestion_bundle.turn_signals.parser_signals.request_flags,
             resolved_objects=[primary_object],
-            primary_intent="technical_question",
+            semantic_intent="technical_question",
         )
         demand_profile = build_demand_profile(
             ingestion_bundle.turn_signals.parser_signals,
@@ -335,9 +350,11 @@ class TestTechnicalInquiryWithObject:
         ingestion_bundle, resolved, intent_groups, demand_profile = self._build_scenario()
         focus_group = intent_groups[0]
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         decision = route(
             ingestion_bundle, resolved,
-            focus_group=focus_group, demand_profile=demand_profile,
+            focus_group=focus_group, scoped_demand=scoped_demand,
         )
 
         assert decision.action == "execute"
@@ -355,10 +372,13 @@ class TestTechnicalInquiryWithObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         tool_names = [call.tool_name for call in result.executed_calls]
@@ -376,10 +396,13 @@ class TestTechnicalInquiryWithObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         rag_call = next(c for c in result.executed_calls if c.tool_name == "technical_rag_tool")
@@ -387,8 +410,8 @@ class TestTechnicalInquiryWithObject:
         assert rag_call.request.primary_object.object_type == "product"
         assert rag_call.request.primary_object.display_name == "Anti-CD3 Antibody"
 
-    def test_response_is_direct_answer_with_content(self):
-        """Full pipeline: technical + object → direct_answer with RAG content."""
+    def test_response_focuses_on_knowledge_with_content(self):
+        """Full pipeline: technical + object → answer_focus=knowledge_lookup with non-empty csr_draft message."""
         ingestion_bundle, resolved, intent_groups, demand_profile = self._build_scenario()
         focus_group = intent_groups[0]
 
@@ -396,10 +419,13 @@ class TestTechnicalInquiryWithObject:
             action="execute",
             dialogue_act=DialogueActResult(act="inquiry"),
         )
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         execution_result = run_executor(
             ingestion_bundle, resolved, route_decision,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         bundle = build_response_bundle(ResponseInput(
@@ -411,6 +437,6 @@ class TestTechnicalInquiryWithObject:
             demand_profile=demand_profile,
         ))
 
-        assert bundle.response_plan.response_mode == "direct_answer"
-        assert bundle.composed_response.response_type == "answer"
+        assert bundle.response_plan.answer_focus == "knowledge_lookup"
+        assert bundle.composed_response.response_type == "csr_draft"
         assert bundle.composed_response.message  # non-empty

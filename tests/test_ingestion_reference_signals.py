@@ -5,12 +5,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ingestion.models import ParserSignals, StatefulAnchors
+from src.ingestion.models import ParserSignals
 from src.ingestion.reference_signals import (
     detect_reference_mode,
     extract_reference_attribute_constraints,
     extract_reference_signals,
 )
+from src.memory.models import ClarificationMemory, MemoryContext, MemorySnapshot
 
 
 def test_pronoun_reference_mode_maps_to_active():
@@ -27,12 +28,31 @@ def test_extract_reference_signals_marks_pronoun_turn_as_active():
     signals = extract_reference_signals(
         "What about its datasheet?",
         parser_signals=ParserSignals(),
-        stateful_anchors=StatefulAnchors(),
     )
 
     assert signals.reference_mode == "active"
     assert signals.is_context_dependent is True
     assert signals.requires_active_context_for_safe_resolution is True
+
+
+def test_extract_reference_signals_can_source_recent_context_from_memory_context():
+    memory_context = MemoryContext(
+        snapshot=MemorySnapshot(
+            clarification_memory=ClarificationMemory(
+                pending_clarification_type="product_selection",
+                pending_candidate_options=["A100", "A101"],
+            )
+        ),
+        recent_objects_by_relevance=[],
+    )
+    signals = extract_reference_signals(
+        "Compare the other one",
+        parser_signals=ParserSignals(),
+        memory_context=memory_context,
+    )
+
+    assert signals.reference_mode == "other"
+    assert signals.requires_active_context_for_safe_resolution is False
 
 
 def test_extract_reference_attribute_constraints_supports_documented_forms():

@@ -35,15 +35,25 @@ def build_quickbooks_lookup_params(request: ToolRequest) -> dict[str, Any]:
     if order_number:
         order_numbers.append(order_number)
 
+    tool_constraints = request.constraints.tool
+
     destination = _first_non_empty(
         resolved_constraints.get("destination"),
         resolved_constraints.get("ship_to"),
     )
 
+    # Parser constraints as fallback
+    if not destination:
+        destination = (tool_constraints.get("destination") or "").strip()
+    timeline_requirement = (tool_constraints.get("timeline_requirement") or "").strip()
+    quantity = (tool_constraints.get("quantity") or "").strip()
+
     return {
         "customer_names": dedupe_strings(customer_names),
         "order_numbers": dedupe_strings(order_numbers),
         "destination": destination,
+        "timeline_requirement": timeline_requirement,
+        "quantity": quantity,
     }
 
 

@@ -15,7 +15,8 @@ def extract_context_candidates(
     ingestion_bundle: IngestionBundle,
     recent_objects: list[ScoredObjectRef] | None = None,
 ) -> ExtractorOutput:
-    anchors = ingestion_bundle.stateful_anchors
+    thread_memory = ingestion_bundle.thread_memory
+    clarification_memory = ingestion_bundle.clarification_memory
     reference_signals = ingestion_bundle.turn_signals.reference_signals
     reference_constraints = reference_signals.attribute_constraints
 
@@ -26,7 +27,7 @@ def extract_context_candidates(
         reference_signals.is_context_dependent
         or reference_signals.requires_active_context_for_safe_resolution
         or reference_signals.reference_mode != "none"
-        or bool(anchors.pending_clarification_field)
+        or bool(clarification_memory.pending_clarification_type)
     )
 
     # --- Context candidates from memory recent_objects ---
@@ -43,7 +44,7 @@ def extract_context_candidates(
                     scored_ref,
                     confidence=round(base * salience_factor, 4),
                     reference_constraints=reference_constraints,
-                    active_route=anchors.active_route,
+                    active_route=thread_memory.active_route,
                     reference_mode=reference_signals.reference_mode,
                 ))
         else:
@@ -56,39 +57,39 @@ def extract_context_candidates(
                     top,
                     confidence=round(0.3 * salience_factor, 4),
                     reference_constraints=[],
-                    active_route=anchors.active_route,
+                    active_route=thread_memory.active_route,
                     reference_mode="none",
                 ))
 
-    # --- Pending clarification options (still from stateful_anchors) ---
-    if anchors.pending_clarification_field and anchors.pending_candidate_options:
+    # --- Pending clarification options from clarification memory ---
+    if clarification_memory.pending_clarification_type and clarification_memory.pending_candidate_options:
         option_candidates = [
             ObjectCandidate(
-                object_type=_infer_pending_object_type(anchors.pending_clarification_field),
+                object_type=_infer_pending_object_type(clarification_memory.pending_clarification_type),
                 raw_value=option,
                 canonical_value=option,
                 display_name=option,
-                identifier=option if anchors.pending_clarification_field.endswith("_selection") else "",
-                identifier_type="pending_option" if anchors.pending_clarification_field.endswith("_selection") else "",
+                identifier=option if clarification_memory.pending_clarification_type.endswith("_selection") else "",
+                identifier_type="pending_option" if clarification_memory.pending_clarification_type.endswith("_selection") else "",
                 confidence=0.35,
                 recency="CONTEXTUAL",
-                source_type="stateful_anchor",
+                source_type="pending_option",
                 attribute_constraints=reference_constraints,
                 is_ambiguous=True,
-                used_stateful_anchor=True,
-                metadata={"pending_field": anchors.pending_clarification_field},
+                used_memory_context=True,
+                metadata={"pending_field": clarification_memory.pending_clarification_type},
             )
-            for option in anchors.pending_candidate_options
+            for option in clarification_memory.pending_candidate_options
             if option
         ]
         if option_candidates:
             ambiguous_sets.append(
                 AmbiguousObjectSet(
-                    object_type=_infer_pending_object_type(anchors.pending_clarification_field),
-                    query_value=anchors.pending_identifier or anchors.pending_clarification_field,
+                    object_type=_infer_pending_object_type(clarification_memory.pending_clarification_type),
+                    query_value=clarification_memory.pending_identifier or clarification_memory.pending_clarification_type,
                     candidates=option_candidates,
                     resolution_strategy="clarify",
-                    reason="Pending clarification options are still active in stateful anchors.",
+                    reason="Pending clarification options are still active in clarification memory.",
                     attribute_constraints=reference_constraints,
                 )
             )
@@ -118,9 +119,9 @@ def _scored_ref_to_candidate(
         business_line=ref.business_line,
         confidence=confidence,
         recency="CONTEXTUAL",
-        source_type="stateful_anchor",
+        source_type="recent_object",
         attribute_constraints=reference_constraints,
-        used_stateful_anchor=True,
+        used_memory_context=True,
         metadata={
             "active_route": active_route,
             "reference_mode": reference_mode,

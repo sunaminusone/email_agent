@@ -80,7 +80,7 @@ def _merge_contributions(
     """Merge all layer contributions into one MemoryUpdate.
 
     Merge rules:
-    - Scalar fields (active_route, route_phase): last writer wins
+    - Scalar fields (active_route): last writer wins
     - List fields (append_recent_objects): concatenate + dedupe
     - Control signals (soft_reset): any True wins (OR semantics)
     """
@@ -88,20 +88,16 @@ def _merge_contributions(
 
     # Build thread memory from contributions
     active_route = ""
-    route_phase = "active"
     active_business_line = ""
     for c in contributions:
         if c.active_route is not None:
             active_route = c.active_route
-        if c.route_phase is not None:
-            route_phase = c.route_phase
         if c.active_business_line is not None:
             active_business_line = c.active_business_line
 
     update.thread_memory = ThreadMemory(
         thread_id=thread_id,
         active_route=active_route,
-        route_phase=route_phase,
         last_turn_type=last_turn_type,
         last_user_goal=normalized_query,
         active_business_line=active_business_line,
@@ -253,6 +249,15 @@ def _store_intent_groups(
         new_primary = new_groups[0].intent if new_groups else "unknown"
         old_groups = list(current_intent_memory.prior_intent_groups)
 
+        # follow_up / unknown are dialogue-act / no-signal labels — not
+        # retrieval bucket intents. Keep prior_semantic_intent as the last
+        # meaningful bucket so chained follow-ups still inherit the right one.
+        prior_semantic_intent = (
+            current_intent_memory.prior_semantic_intent
+            if new_primary in {"follow_up", "unknown"}
+            else new_primary
+        )
+
         # Check if intents actually changed
         old_intents = {g.intent for g in old_groups}
         new_intents = {g.intent for g in new_groups}
@@ -268,7 +273,7 @@ def _store_intent_groups(
             "intent_memory": IntentMemory(
                 prior_intent_groups=new_groups,
                 stacked_intent_history=stacked,
-                prior_primary_intent=new_primary,
+                prior_semantic_intent=prior_semantic_intent,
                 continuity_confidence=current_intent_memory.continuity_confidence,
                 turns_since_last_intent_change=0 if intents_changed else current_intent_memory.turns_since_last_intent_change,
             ),

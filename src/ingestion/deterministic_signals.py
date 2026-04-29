@@ -28,113 +28,6 @@ _IDENTIFIER_MISSING_HINTS = (
     "alias",
     "target",
 )
-_PRODUCT_CONTEXT_TERMS = (
-    "product",
-    "products",
-    "catalog",
-    "catalog #",
-    "catalog no",
-    "catalog number",
-    "cat no",
-    "cat#",
-    "cat #",
-    "item",
-    "sku",
-    "antigen",
-    "clone",
-    "isotype",
-    "datasheet",
-    "data sheet",
-    "coa",
-    "sds",
-    "brochure",
-    "antibody",
-    "antibodies",
-    "reagent",
-    "pm-car",
-    "pm-lnp",
-)
-_SERVICE_CONTEXT_TERMS = (
-    "service",
-    "services",
-    "assay",
-    "screening",
-    "testing",
-    "sequencing",
-    "analysis",
-)
-_INVOICE_CONTEXT_TERMS = (
-    "invoice",
-    "invoices",
-    "billing",
-    "bill",
-    "payment",
-    "remit",
-    "remittance",
-    "amount due",
-    "balance due",
-    "invoice status",
-    "invoice amount",
-    "status of invoice",
-    "invoice balance",
-    "invoice due",
-)
-_ORDER_CONTEXT_TERMS = (
-    "order",
-    "orders",
-    "po",
-    "purchase order",
-    "order status",
-    "status of order",
-    "sales order",
-    "so ",
-    "tracking",
-    "shipment",
-    "shipping",
-    "delivery",
-)
-_DOCUMENTATION_CONTEXT_TERMS = (
-    "datasheet",
-    "data sheet",
-    "coa",
-    "sds",
-    "brochure",
-    "protocol",
-    "manual",
-)
-_PRICING_CONTEXT_TERMS = (
-    "quote",
-    "quotation",
-    "price",
-    "pricing",
-    "cost",
-)
-_TIMELINE_CONTEXT_TERMS = (
-    "lead time",
-    "eta",
-    "turnaround",
-    "how long",
-    "delivery time",
-)
-_TECHNICAL_CONTEXT_TERMS = (
-    "technical",
-    "protocol",
-    "workflow",
-    "development",
-    "mechanism",
-    "validation",
-    "assay",
-    "supported models",
-    "model support",
-    "elisa",
-    "western blot",
-    "wb",
-    "ihc",
-    "immunohistochemistry",
-    "flow cytometry",
-    "facs",
-    "pcr",
-)
 _DOCUMENT_TYPE_PATTERNS = {
     "datasheet": ("datasheet", "data sheet"),
     "coa": ("coa",),
@@ -143,6 +36,36 @@ _DOCUMENT_TYPE_PATTERNS = {
     "protocol": ("protocol",),
     "manual": ("manual",),
 }
+
+_PRODUCT_INTENTS = frozenset({
+    "product_inquiry", "pricing_question", "timeline_question",
+    "customization_request", "documentation_request", "technical_question",
+    "troubleshooting",
+})
+_OPERATIONAL_INTENTS = frozenset({
+    "order_support", "shipping_question", "complaint",
+})
+
+
+def _derive_product_context(parser_signals: ParserSignals | None) -> bool:
+    if parser_signals is None:
+        return False
+    return bool(
+        parser_signals.entities.product_names
+        or parser_signals.entities.catalog_numbers
+        or parser_signals.entities.service_names
+        or parser_signals.context.semantic_intent in _PRODUCT_INTENTS
+    )
+
+
+def _derive_operational_context(parser_signals: ParserSignals | None) -> bool:
+    if parser_signals is None:
+        return False
+    return bool(
+        parser_signals.entities.order_numbers
+        or parser_signals.entities.invoice_numbers
+        or parser_signals.context.semantic_intent in _OPERATIONAL_INTENTS
+    )
 
 
 def _signal_attribution() -> SourceAttribution:
@@ -217,39 +140,6 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return ordered
 
 
-def _contains_context_term(query: str, terms: tuple[str, ...]) -> bool:
-    normalized = str(query or "").strip().lower()
-    return any(term in normalized for term in terms)
-
-
-def _looks_like_product_reference(query: str) -> bool:
-    normalized_query = str(query or "").strip().lower()
-    product_reference_patterns = [
-        r"\b(?:product|antibody|catalog|cat(?:alog)?(?:\s*(?:no|number|#))?|item|sku)\s+[a-z0-9-]+\b",
-        r"\b(?:datasheet|data sheet|brochure|coa|sds|quote|price|availability|lead time)\s+(?:for\s+)?[a-z0-9-]+\b",
-    ]
-    return any(re.search(pattern, normalized_query) for pattern in product_reference_patterns)
-
-
-def _looks_like_invoice_reference(query: str) -> bool:
-    normalized_query = str(query or "").strip().lower()
-    invoice_reference_patterns = [
-        r"\b(?:invoice|bill|billing)\s+[a-z0-9-]+\b",
-        r"\bstatus of invoice\s+[a-z0-9-]+\b",
-        r"\binvoice\s+#?\s*[a-z0-9-]+\b",
-    ]
-    return any(re.search(pattern, normalized_query) for pattern in invoice_reference_patterns)
-
-
-def _looks_like_order_reference(query: str) -> bool:
-    normalized_query = str(query or "").strip().lower()
-    order_reference_patterns = [
-        r"\b(?:order|po|purchase order|shipment|tracking)\s+[a-z0-9-]+\b",
-        r"\bstatus of order\s+[a-z0-9-]+\b",
-    ]
-    return any(re.search(pattern, normalized_query) for pattern in order_reference_patterns)
-
-
 def _extract_catalog_numbers(query: str) -> list[str]:
     normalized_query = str(query or "").strip()
     direct_catalog_matches = [match.group(1).strip().upper() for match in _CATALOG_HINT_PATTERN.finditer(normalized_query)]
@@ -314,47 +204,12 @@ def strip_identifier_missing_information(missing_information: list[str]) -> list
     return cleaned
 
 
-def classify_identifier_candidates(query: str) -> dict[str, object]:
-    signals = extract_deterministic_signals(query)
-    return {
-        "catalog_numbers": [span.text for span in signals.catalog_numbers],
-        "order_numbers": [span.text for span in signals.order_numbers],
-        "ambiguous_identifiers": [signal.value for signal in signals.ambiguous_identifiers],
-        "product_context": signals.product_context,
-        "invoice_context": signals.invoice_context,
-        "order_context": signals.order_context,
-        "documentation_context": signals.documentation_context,
-        "pricing_context": signals.pricing_context,
-        "timeline_context": signals.timeline_context,
-    }
-
-
 def extract_deterministic_signals(
     query: str,
     parser_signals: ParserSignals | None = None,
 ) -> DeterministicSignals:
-    invoice_numbers = _extract_invoice_numbers(query)
-    document_types = _extract_document_types(query)
-
-    documentation_context = _contains_context_term(query, _DOCUMENTATION_CONTEXT_TERMS) or bool(document_types)
-    pricing_context = _contains_context_term(query, _PRICING_CONTEXT_TERMS)
-    timeline_context = _contains_context_term(query, _TIMELINE_CONTEXT_TERMS)
-    technical_context = _contains_context_term(query, _TECHNICAL_CONTEXT_TERMS)
-    product_context = (
-        _contains_context_term(query, _PRODUCT_CONTEXT_TERMS)
-        or _looks_like_product_reference(query)
-        or documentation_context
-        or pricing_context
-        or timeline_context
-        or technical_context
-    )
-    invoice_context = (
-        _contains_context_term(query, _INVOICE_CONTEXT_TERMS)
-        or _looks_like_invoice_reference(query)
-        or bool(invoice_numbers)
-    )
-    order_context = _contains_context_term(query, _ORDER_CONTEXT_TERMS) or _looks_like_order_reference(query)
-    operational_context = invoice_context or order_context
+    product_context = _derive_product_context(parser_signals)
+    operational_context = _derive_operational_context(parser_signals)
 
     catalog_numbers, order_numbers, ambiguous_identifiers = _classify_numeric_identifiers(
         query,
@@ -363,22 +218,10 @@ def extract_deterministic_signals(
         existing_catalog_numbers=_extract_catalog_numbers(query),
     )
 
-    service_context = _contains_context_term(query, _SERVICE_CONTEXT_TERMS) or bool(
-        parser_signals and parser_signals.entities.service_names
-    )
-
     return DeterministicSignals(
         catalog_numbers=_to_entity_spans(catalog_numbers),
         order_numbers=_to_entity_spans(order_numbers),
-        invoice_numbers=_to_entity_spans(invoice_numbers),
+        invoice_numbers=_to_entity_spans(_extract_invoice_numbers(query)),
         ambiguous_identifiers=_to_value_signals(ambiguous_identifiers),
-        document_types=_to_value_signals(document_types),
-        product_context=product_context,
-        service_context=service_context,
-        invoice_context=invoice_context,
-        order_context=order_context,
-        documentation_context=documentation_context,
-        pricing_context=pricing_context,
-        timeline_context=timeline_context,
-        technical_context=technical_context,
+        document_types=_to_value_signals(_extract_document_types(query)),
     )

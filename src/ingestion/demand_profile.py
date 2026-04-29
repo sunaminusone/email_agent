@@ -17,7 +17,6 @@ INTENT_DEMAND: dict[str, DemandType] = {
     "complaint": "operational",
     "follow_up": "general",
     "general_info": "general",
-    "partnership_request": "general",
     "unknown": "general",
 }
 
@@ -56,7 +55,7 @@ def build_demand_profile(
     matching groups receive a confidence boost.
     """
     active_flags = _active_flags(parser_signals.request_flags)
-    intent_hint = parser_signals.context.primary_intent
+    intent_hint = parser_signals.context.semantic_intent
     primary_demand, secondary_demands = _resolve_demands(
         active_flags,
         intent_hint=intent_hint,
@@ -162,15 +161,30 @@ def _compute_demand_confidence(flags: list[str], intent: str) -> float:
 def narrow_demand_profile(
     demand_profile: DemandProfile | None,
     focus_group: IntentGroup | None,
+    *,
+    prior_demand_type: str = "general",
+    prior_demand_flags: list[str] | None = None,
+    continuity_confidence: float = 0.0,
 ) -> GroupDemand | None:
-    """Return the demand scoped to a focus group, preserving shared semantics."""
+    """Return the demand scoped to a focus group, preserving shared semantics.
+
+    When the focus group cannot be matched against an existing GroupDemand
+    in the profile, the fallback builds a fresh one.  Passing prior_demand_*
+    context ensures the fallback inherits demand continuity (e.g. follow-up
+    messages like "那个呢？" correctly inherit the prior demand lane).
+    """
     if focus_group is None:
         return None
     if demand_profile is not None:
         matched = _match_group_demand(demand_profile.group_demands, focus_group)
         if matched is not None:
             return matched
-    return build_group_demand(focus_group)
+    return build_group_demand(
+        focus_group,
+        prior_demand_type=prior_demand_type,
+        prior_demand_flags=prior_demand_flags,
+        continuity_confidence=continuity_confidence,
+    )
 
 
 def is_truly_mixed(primary: DemandType, secondaries: list[DemandType]) -> bool:

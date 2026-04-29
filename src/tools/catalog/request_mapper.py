@@ -44,6 +44,8 @@ def build_catalog_lookup_params(request: ToolRequest) -> dict[str, Any]:
     if service_name:
         service_names.append(service_name)
 
+    tool_constraints = request.constraints.tool
+
     target = (resolved_constraints.get("target") or "").strip()
     application = (resolved_constraints.get("application") or "").strip()
     species = (resolved_constraints.get("species") or "").strip()
@@ -54,6 +56,12 @@ def build_catalog_lookup_params(request: ToolRequest) -> dict[str, Any]:
         or ""
     )
 
+    # Parser constraints as fallback when object resolution didn't capture them
+    if not format_or_size:
+        format_or_size = (tool_constraints.get("format_or_size") or "").strip()
+    grade_or_quality = (tool_constraints.get("grade_or_quality") or "").strip()
+    usage_context = (tool_constraints.get("usage_context") or "").strip()
+
     return {
         "query": request.query,
         "catalog_numbers": dedupe_strings(catalog_numbers),
@@ -63,6 +71,8 @@ def build_catalog_lookup_params(request: ToolRequest) -> dict[str, Any]:
         "applications": dedupe_strings([application] if application else []),
         "species": dedupe_strings([species] if species else []),
         "format_or_size": format_or_size,
+        "grade_or_quality": grade_or_quality,
+        "usage_context": usage_context,
         "business_line_hint": business_line_hint,
         "top_k": 10,
     }

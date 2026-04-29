@@ -3,8 +3,12 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from src.common.models import SourceAttribution as CommonSourceAttribution, ValueSignal as CommonValueSignal
-from src.memory.models import StatefulAnchors
+from src.common.models import (
+    IntentGroup,
+    SourceAttribution as CommonSourceAttribution,
+    ValueSignal as CommonValueSignal,
+)
+from src.memory.models import ClarificationMemory, MemoryContext, MemoryContribution, ThreadMemory
 
 
 class _IngestionModel(BaseModel):
@@ -12,7 +16,27 @@ class _IngestionModel(BaseModel):
 
 
 RecencyType = Literal["CURRENT_TURN", "CONTEXTUAL"]
-SourceType = Literal["deterministic", "parser", "attachment", "stateful_anchor"]
+SourceType = Literal["deterministic", "parser", "attachment", "recent_object", "pending_option"]
+
+
+SEMANTIC_INTENT_VALUES: tuple[str, ...] = (
+    "product_inquiry",
+    "technical_question",
+    "workflow_question",
+    "model_support_question",
+    "service_plan_question",
+    "pricing_question",
+    "timeline_question",
+    "customization_request",
+    "documentation_request",
+    "shipping_question",
+    "troubleshooting",
+    "order_support",
+    "complaint",
+    "follow_up",
+    "general_info",
+    "unknown",
+)
 
 
 class SourceAttribution(CommonSourceAttribution):
@@ -58,13 +82,14 @@ class TurnCore(_IngestionModel):
 class ParserContext(_IngestionModel):
     language: str = "other"
     channel: str = "internal_qa"
-    primary_intent: str = "unknown"
+    semantic_intent: str = "unknown"
     intent_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     query_type: str = "question"
     urgency: str = "low"
     risk_level: str = "low"
     needs_human_review: bool = False
     reasoning_note: str = ""
+    dialogue_act_hint: str = "inquiry"
 
 
 class ParserRequestFlags(_IngestionModel):
@@ -122,6 +147,9 @@ class ParserEntitySignals(_IngestionModel):
     targets: list[EntitySpan] = Field(default_factory=list)
     species: list[EntitySpan] = Field(default_factory=list)
     applications: list[EntitySpan] = Field(default_factory=list)
+    isotypes: list[EntitySpan] = Field(default_factory=list)
+    costim_domains: list[EntitySpan] = Field(default_factory=list)
+    car_t_groups: list[EntitySpan] = Field(default_factory=list)
     order_numbers: list[EntitySpan] = Field(default_factory=list)
     invoice_numbers: list[EntitySpan] = Field(default_factory=list)
     document_names: list[EntitySpan] = Field(default_factory=list)
@@ -136,11 +164,23 @@ class ParserOutputEntities(_IngestionModel):
     targets: list[ParserEntityOutputSpan] = Field(default_factory=list)
     species: list[ParserEntityOutputSpan] = Field(default_factory=list)
     applications: list[ParserEntityOutputSpan] = Field(default_factory=list)
+    isotypes: list[ParserEntityOutputSpan] = Field(default_factory=list)
+    costim_domains: list[ParserEntityOutputSpan] = Field(default_factory=list)
+    car_t_groups: list[ParserEntityOutputSpan] = Field(default_factory=list)
     order_numbers: list[ParserEntityOutputSpan] = Field(default_factory=list)
     invoice_numbers: list[ParserEntityOutputSpan] = Field(default_factory=list)
     document_names: list[ParserEntityOutputSpan] = Field(default_factory=list)
     company_names: list[ParserEntityOutputSpan] = Field(default_factory=list)
     customer_names: list[ParserEntityOutputSpan] = Field(default_factory=list)
+
+
+class SelectionResolution(_IngestionModel):
+    """LLM-resolved selection when the user responds to a prior clarification."""
+    selected_index: int | None = None
+    selected_value: str = ""
+    selection_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    carries_new_intent: bool = False
+    reason: str = ""
 
 
 class ParserSignals(_IngestionModel):
@@ -152,6 +192,7 @@ class ParserSignals(_IngestionModel):
     retrieval_hints: ParserRetrievalHints = Field(default_factory=ParserRetrievalHints)
     missing_information: list[str] = Field(default_factory=list)
     extra_instructions: str | None = None
+    selection_resolution: SelectionResolution | None = None
 
 
 class ParserOutput(_IngestionModel):
@@ -164,6 +205,7 @@ class ParserOutput(_IngestionModel):
     retrieval_hints: ParserRetrievalHints = Field(default_factory=ParserRetrievalHints)
     missing_information: list[str] = Field(default_factory=list)
     extra_instructions: str | None = None
+    selection_resolution: SelectionResolution | None = None
 
 
 class DeterministicSignals(_IngestionModel):
@@ -172,14 +214,6 @@ class DeterministicSignals(_IngestionModel):
     invoice_numbers: list[EntitySpan] = Field(default_factory=list)
     ambiguous_identifiers: list[ValueSignal] = Field(default_factory=list)
     document_types: list[ValueSignal] = Field(default_factory=list)
-    product_context: bool = False
-    service_context: bool = False
-    invoice_context: bool = False
-    order_context: bool = False
-    documentation_context: bool = False
-    pricing_context: bool = False
-    timeline_context: bool = False
-    technical_context: bool = False
 
 
 ReferenceMode = Literal["active", "other", "first", "second", "previous", "all", "none"]
@@ -222,4 +256,26 @@ class TurnSignals(_IngestionModel):
 class IngestionBundle(_IngestionModel):
     turn_core: TurnCore = Field(default_factory=TurnCore)
     turn_signals: TurnSignals = Field(default_factory=TurnSignals)
-    stateful_anchors: StatefulAnchors = Field(default_factory=StatefulAnchors)
+    memory_context: MemoryContext = Field(default_factory=MemoryContext)
+
+    @property
+    def thread_memory(self) -> ThreadMemory:
+        return self.memory_context.snapshot.thread_memory
+
+    @property
+    def clarification_memory(self) -> ClarificationMemory:
+        return self.memory_context.snapshot.clarification_memory
+
+    @property
+    def has_recent_memory_context(self) -> bool:
+        return bool(self.memory_context.recent_objects_by_relevance)
+
+
+def build_ingestion_memory_contribution(
+    intent_groups: list[IntentGroup],
+) -> MemoryContribution:
+    return MemoryContribution(
+        source="ingestion",
+        intent_groups=list(intent_groups),
+        reason=f"ingestion: assembled {len(intent_groups)} intent group(s)",
+    )

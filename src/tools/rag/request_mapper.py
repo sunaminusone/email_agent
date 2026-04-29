@@ -6,6 +6,36 @@ from src.common.utils import dedupe_strings
 from src.tools.models import ToolRequest
 
 
+def _build_retrieval_context(request: ToolRequest) -> dict[str, Any]:
+    tool_constraints = request.constraints.tool
+    retrieval_hints = request.constraints.retrieval.get("hints", {})
+
+    context: dict[str, Any] = {}
+
+    scalar_fields = (
+        "usage_context",
+        "experiment_type",
+        "customer_goal",
+        "pain_point",
+        "requested_action",
+        "regulatory_or_compliance_note",
+    )
+    for field_name in scalar_fields:
+        value = str(tool_constraints.get(field_name) or "").strip()
+        if value:
+            context[field_name] = value
+
+    keywords = [
+        str(keyword).strip()
+        for keyword in (retrieval_hints.get("keywords") or [])
+        if str(keyword).strip()
+    ]
+    if keywords:
+        context["keywords"] = dedupe_strings(keywords)
+
+    return context
+
+
 def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
     primary_object = request.primary_object
     scope_constraints = request.constraints.scope
@@ -14,10 +44,8 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
 
     active_service_name = ""
     active_product_name = ""
-    active_target = ""
     product_names: list[str] = []
     service_names: list[str] = []
-    targets: list[str] = []
 
     if primary_object is not None:
         label = primary_object.canonical_value or primary_object.display_name
@@ -29,10 +57,6 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
             active_product_name = label
             if label:
                 product_names.append(label)
-        elif primary_object.object_type == "scientific_target":
-            active_target = label
-            if label:
-                targets.append(label)
 
     product_name = (resolved_constraints.get("product_name") or "").strip()
     if product_name:
@@ -41,10 +65,6 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
     service_name = (resolved_constraints.get("service_name") or "").strip()
     if service_name:
         service_names.append(service_name)
-
-    target = (resolved_constraints.get("target") or "").strip()
-    if target:
-        targets.append(target)
 
     business_line_hint = (
         (primary_object.business_line if primary_object is not None else "")
@@ -57,14 +77,12 @@ def build_rag_lookup_params(request: ToolRequest) -> dict[str, Any]:
         "query": request.query,
         "business_line_hint": business_line_hint,
         "retrieval_hints": retrieval_constraints.get("hints", {}),
+        "retrieval_context": _build_retrieval_context(request),
         "active_service_name": active_service_name or scope_constraints.get("active_service_name", ""),
         "active_product_name": active_product_name or scope_constraints.get("active_product_name", ""),
-        "active_target": active_target or scope_constraints.get("active_target", ""),
         "product_names": dedupe_strings(product_names),
         "service_names": dedupe_strings(service_names),
-        "targets": dedupe_strings(targets),
         "top_k": 5,
         "scope_context": scope_constraints,
     }
-
 
