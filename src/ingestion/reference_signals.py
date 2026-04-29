@@ -10,7 +10,7 @@ from src.ingestion.models import (
     SourceAttribution,
     ValueSignal,
 )
-from src.memory.models import StatefulAnchors
+from src.memory.models import MemoryContext
 
 
 _REFERENTIAL_PATTERNS: dict[ReferenceMode, tuple[str, ...]] = {
@@ -210,11 +210,12 @@ def requires_active_context_for_safe_resolution(
 def extract_reference_signals(
     query: str,
     parser_signals: ParserSignals,
-    stateful_anchors: StatefulAnchors | None = None,
-    *,
-    has_recent_objects: bool = False,
+    memory_context: MemoryContext | None = None,
 ) -> ReferenceSignals:
-    anchors = stateful_anchors or StatefulAnchors()
+    pending_candidate_options = (
+        memory_context.pending_candidate_options if memory_context is not None else []
+    )
+    effective_has_recent_objects = bool(memory_context and memory_context.recent_objects_by_relevance)
     reference_mode = detect_reference_mode(query)
     is_context_dependent = detect_context_dependence(query, parser_signals, reference_mode)
     referenced_prior_context = None
@@ -240,7 +241,7 @@ def extract_reference_signals(
         requires_active_context_for_safe_resolution=requires_active_context_for_safe_resolution(
             reference_mode,
             is_context_dependent,
-            has_recent_objects=has_recent_objects,
-            has_pending_candidates=bool(anchors.pending_candidate_options),
+            has_recent_objects=effective_has_recent_objects,
+            has_pending_candidates=bool(pending_candidate_options),
         ),
     )

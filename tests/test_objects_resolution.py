@@ -13,9 +13,9 @@ from src.ingestion.models import (
     ParserSignals,
     ReferenceSignals,
     SourceAttribution,
-    StatefulAnchors,
     TurnSignals,
 )
+from src.memory.models import ClarificationMemory, MemoryContext, MemorySnapshot
 from src.common.models import ObjectRef
 from src.memory.models import ScoredObjectRef
 from src.objects.constraint_matching import candidate_matches_constraint
@@ -126,20 +126,24 @@ def test_service_abbreviation_variant_resolves_to_canonical_service():
     assert "abbreviation" in resolved.primary_object.metadata.get("matched_alias_kinds", [])
 
 
-def test_pending_only_constraints_promote_single_remaining_candidate_to_primary():
+def test_pending_only_constraints_direct_anchor_path_still_works_for_compatibility():
     bundle = IngestionBundle(
         turn_signals=TurnSignals(
             reference_signals=ReferenceSignals(
                 attribute_constraints=[_constraint("species", "human")],
             ),
         ),
-        stateful_anchors=StatefulAnchors(
-            pending_clarification_field="product_selection",
-            pending_candidate_options=[
-                "Rabbit Monoclonal Antibody",
-                "Human Monoclonal Antibody",
-            ],
-            pending_identifier="candidate set",
+        memory_context=MemoryContext(
+            snapshot=MemorySnapshot(
+                clarification_memory=ClarificationMemory(
+                    pending_clarification_type="product_selection",
+                    pending_candidate_options=[
+                        "Rabbit Monoclonal Antibody",
+                        "Human Monoclonal Antibody",
+                    ],
+                    pending_identifier="candidate set",
+                )
+            )
         ),
     )
 
@@ -153,6 +157,33 @@ def test_pending_only_constraints_promote_single_remaining_candidate_to_primary(
         resolved.resolution_reason
         == "Resolved the pending clarification to a single object candidate."
     )
+
+
+def test_pending_only_constraints_can_flow_from_memory_context_without_bundle_anchor_plumbing():
+    bundle = IngestionBundle(
+        turn_signals=TurnSignals(
+            reference_signals=ReferenceSignals(
+                attribute_constraints=[_constraint("species", "human")],
+            ),
+        ),
+        memory_context=MemoryContext(
+            snapshot=MemorySnapshot(
+                clarification_memory=ClarificationMemory(
+                    pending_clarification_type="product_selection",
+                    pending_candidate_options=[
+                        "Rabbit Monoclonal Antibody",
+                        "Human Monoclonal Antibody",
+                    ],
+                    pending_identifier="candidate set",
+                )
+            ),
+        ),
+    )
+
+    resolved = resolve_object_state(bundle, extract_object_bundle(bundle))
+
+    assert resolved.primary_object is not None
+    assert resolved.primary_object.display_name == "Human Monoclonal Antibody"
 
 
 def test_product_ambiguity_kind_and_clarification_strategy_are_derived_from_alias_kind():

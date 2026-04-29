@@ -18,10 +18,7 @@ class _MemoryModel(BaseModel):
 class ThreadMemory(_MemoryModel):
     thread_id: str | None = None
     active_route: str = ""
-    continuity_mode: str = ""
     last_turn_type: str = ""
-    route_phase: str = ""
-    last_assistant_prompt_type: str = ""
     last_user_goal: str = ""
     active_business_line: str = ""
 
@@ -59,17 +56,6 @@ class IntentMemory(_MemoryModel):
 
 
 # ---------------------------------------------------------------------------
-# Stateful anchors (read-only view for downstream)
-# ---------------------------------------------------------------------------
-
-class StatefulAnchors(_MemoryModel):
-    active_route: str = ""
-    pending_clarification_field: str = ""
-    pending_candidate_options: list[str] = Field(default_factory=list)
-    pending_identifier: str = ""
-
-
-# ---------------------------------------------------------------------------
 # Snapshot and update
 # ---------------------------------------------------------------------------
 
@@ -96,7 +82,6 @@ class MemoryUpdate(_MemoryModel):
     set_last_demand_type: str | None = None
     set_last_demand_flags: list[str] = Field(default_factory=list)
     response_memory: ResponseMemory | None = None
-    route_updates: dict[str, Any] = Field(default_factory=dict)
     soft_reset_current_topic: bool = False
     reason: str = ""
 
@@ -189,7 +174,6 @@ class IntentDriftResult(_MemoryModel):
 class MemoryContext(_MemoryModel):
     """Enriched, prioritized memory view for the current turn."""
     snapshot: MemorySnapshot = Field(default_factory=MemorySnapshot)
-    stateful_anchors: StatefulAnchors = Field(default_factory=StatefulAnchors)
     prior_intent_groups: list[IntentGroup] = Field(default_factory=list)
     intent_continuity_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     trajectory: ConversationTrajectory = Field(default_factory=ConversationTrajectory)
@@ -199,6 +183,18 @@ class MemoryContext(_MemoryModel):
     last_response_topics: list[str] = Field(default_factory=list)
     prior_demand_type: str = "general"
     prior_demand_flags: list[str] = Field(default_factory=list)
+
+    @property
+    def active_route(self) -> str:
+        return self.snapshot.thread_memory.active_route
+
+    @property
+    def pending_candidate_options(self) -> list[str]:
+        return list(self.snapshot.clarification_memory.pending_candidate_options)
+
+    @property
+    def pending_identifier(self) -> str:
+        return self.snapshot.clarification_memory.pending_identifier
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +207,6 @@ class MemoryContribution(_MemoryModel):
 
     # Thread state (typically from routing)
     active_route: str | None = None
-    route_phase: str | None = None
     active_business_line: str | None = None
 
     # Object state (typically from objects layer)

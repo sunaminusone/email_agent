@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.memory.models import MemoryContribution
 from src.ingestion.models import AttributeConstraint, EntitySpan, RecencyType, SourceType
 from src.common.models import ObjectRef, ObjectType
 
@@ -28,7 +29,7 @@ class ObjectCandidate(ObjectRef):
     attribute_constraints: list[AttributeConstraint] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     is_ambiguous: bool = False
-    used_stateful_anchor: bool = False
+    used_memory_context: bool = False
 
 
 class AmbiguousObjectSet(_ObjectsModel):
@@ -60,7 +61,35 @@ class ResolvedObjectState(_ObjectsModel):
     secondary_objects: list[ObjectCandidate] = Field(default_factory=list)
     ambiguous_sets: list[AmbiguousObjectSet] = Field(default_factory=list)
     active_object: ObjectCandidate | None = None
-    used_stateful_anchor: bool = False
+    used_memory_context: bool = False
     resolution_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     resolution_reason: str = ""
     resolution_phase: str = ""
+
+
+def build_objects_memory_contribution(
+    resolved_object_state: ResolvedObjectState,
+    should_soft_reset: bool,
+) -> MemoryContribution:
+    active_object = (
+        None
+        if should_soft_reset
+        else (resolved_object_state.primary_object or resolved_object_state.active_object)
+    )
+    recent_objects = [
+        item
+        for item in [
+            active_object,
+            resolved_object_state.active_object,
+            *resolved_object_state.secondary_objects,
+        ]
+        if item is not None
+    ]
+    return MemoryContribution(
+        source="objects",
+        set_active_object=active_object,
+        secondary_active_objects=list(resolved_object_state.secondary_objects),
+        append_recent_objects=recent_objects,
+        soft_reset_current_topic=should_soft_reset,
+        reason="objects: resolved from current turn",
+    )

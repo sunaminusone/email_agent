@@ -1,4 +1,4 @@
-"""Tests for memory v3: recall, reflect, salience scoring, intent drift detection."""
+"""Tests for the v4-compatible memory lifecycle: recall, reflect, and drift handling."""
 from pathlib import Path
 import sys
 
@@ -112,6 +112,14 @@ class TestTrajectoryDetection:
         assert t.has_pending_clarification is True
 
     def test_follow_up(self):
+        snapshot = MemorySnapshot(
+            thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="csr_draft"),
+            response_memory=ResponseMemory(last_response_topics=["knowledge_lookup"]),
+        )
+        t = _compute_trajectory(snapshot)
+        assert t.phase == "follow_up"
+
+    def test_follow_up_legacy_turn_type_still_supported(self):
         snapshot = MemorySnapshot(
             thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="answer"),
         )
@@ -249,7 +257,7 @@ class TestRecall:
             ),
             response_memory=ResponseMemory(
                 revealed_attributes=["identity", "applications"],
-                last_response_topics=["direct_answer"],
+                last_response_topics=["knowledge_lookup"],
             ),
         )
 
@@ -272,7 +280,8 @@ class TestRecall:
     def test_recall_surfaces_prior_intent_groups_when_following_up(self):
         groups = [IntentGroup(intent="technical_question", object_display_name="CAR-T", confidence=0.85)]
         snapshot = MemorySnapshot(
-            thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="answer"),
+            thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="csr_draft"),
+            response_memory=ResponseMemory(last_response_topics=["knowledge_lookup"]),
             intent_memory=IntentMemory(
                 prior_intent_groups=groups,
                 prior_semantic_intent="technical_question",
@@ -299,7 +308,6 @@ class TestReflectMergeContributions:
             MemoryContribution(
                 source="routing",
                 active_route="execute",
-                route_phase="active",
             ),
             MemoryContribution(
                 source="response",
@@ -307,7 +315,7 @@ class TestReflectMergeContributions:
                 set_last_response_topics=["pricing_question"],
             ),
         ]
-        update = _merge_contributions(contribs, "t1", "find product A100", "answer")
+        update = _merge_contributions(contribs, "t1", "find product A100", "csr_draft")
 
         assert update.thread_memory.thread_id == "t1"
         assert update.thread_memory.active_route == "execute"
@@ -523,7 +531,6 @@ class TestReflectIntegration:
             MemoryContribution(
                 source="routing",
                 active_route="execute",
-                route_phase="active",
             ),
             MemoryContribution(
                 source="ingestion",
@@ -541,7 +548,7 @@ class TestReflectIntegration:
             contributions=contribs,
             thread_id="t1",
             normalized_query="find product A100",
-            last_turn_type="answer",
+            last_turn_type="csr_draft",
         )
 
         assert result.thread_memory.active_route == "execute"
@@ -581,7 +588,7 @@ class TestReflectIntegration:
             contributions=contribs_t1,
             thread_id="t1",
             normalized_query="check order 12345 and explain CAR-T",
-            last_turn_type="answer",
+            last_turn_type="csr_draft",
         )
 
         # Verify turn 1 results

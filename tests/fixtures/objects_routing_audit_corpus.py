@@ -57,23 +57,25 @@ Note on selection follow-up state
 ---------------------------------
 Selection resolution does NOT come from `conversation_history` alone.
 `src/objects/extractors/context_extractor.py:64-94` rebuilds the live
-`ambiguous_sets` ONLY when `stateful_anchors.pending_clarification_field`
-is non-empty AND `pending_candidate_options` is populated. Then in
-`src/objects/resolution.py:84-95`, `resolve_objects()` applies the
-parser's `selection_resolution` to those rebuilt ambiguous sets — but
-only if `pending_clarification` is true AND `ambiguous_sets` is
+`ambiguous_sets` ONLY when
+`memory_context.snapshot.clarification_memory` carries a non-empty
+`pending_clarification_type` and populated `pending_candidate_options`.
+Then in `src/objects/resolution.py:84-95`, `resolve_objects()` applies
+the parser's `selection_resolution` to those rebuilt ambiguous sets —
+but only if `pending_clarification` is true AND `ambiguous_sets` is
 non-empty AND `selection.selection_confidence >= 0.5`.
 
 Consequence: a fixture that only carries prior turns as natural-language
 text is under-specified — the production code path needs the structured
 pending state too. Each `selection_followup` row therefore carries a
-`prior_stateful_anchors` dict that an audit harness must construct into
-a `StatefulAnchors` instance and pass into `build_ingestion_bundle(...,
-stateful_anchors=...)`. Without this, a follow-up may fail to resolve
-even when the plumbing is correct, producing a misleading audit signal.
+`prior_clarification_state` dict that an audit harness must wrap in a
+minimal `MemoryContext` and pass into
+`build_ingestion_bundle(..., memory_context=...)`. Without this, a
+follow-up may fail to resolve even when the plumbing is correct,
+producing a misleading audit signal.
 
 Additional constraint: `_infer_pending_object_type` keys off whether
-`pending_clarification_field` contains "service" / "product" / "order"
+`pending_clarification_type` contains "service" / "product" / "order"
 / etc. Use a value that contains the right keyword (e.g.
 "service_selection") so the rebuilt ambiguous set has the correct
 `object_type`.
@@ -138,16 +140,19 @@ values and flags mismatches.
                              "Note on parser-dependent route"). Observe
                              script records actuals but does not flag
                              mismatches.
-  prior_stateful_anchors   : optional dict — only required for
-                             selection_followup rows. Keys mirror
-                             `src.memory.models.StatefulAnchors`:
-                                 pending_clarification_field (str)
+  prior_clarification_state   : optional dict — only required for
+                             selection_followup rows. Keys mirror the
+                             clarification-memory fields carried inside
+                             `src.memory.models.MemoryContext.snapshot`:
+                                 pending_clarification_type  (str)
                                  pending_candidate_options    (list[str])
                                  pending_identifier           (str)
-                             The audit harness MUST construct a
-                             `StatefulAnchors(**prior_stateful_anchors)`
-                             and pass it to `build_ingestion_bundle(...,
-                             stateful_anchors=...)`. None / absent for
+                             The audit harness MUST construct a minimal
+                             `MemoryContext(snapshot=MemorySnapshot(
+                             clarification_memory=ClarificationMemory(...)))`
+                             and pass it to
+                             `build_ingestion_bundle(...,
+                             memory_context=...)`. None / absent for
                              non-selection rows.
   hypothesis_notes         : short rationale — what behavior we expect and
                              why (parser→objects→routing path-specific)
@@ -323,8 +328,8 @@ AUDIT_CORPUS: list[dict[str, Any]] = [
                 ),
             },
         ],
-        "prior_stateful_anchors": {
-            "pending_clarification_field": "service_selection",
+        "prior_clarification_state": {
+            "pending_clarification_type": "service_selection",
             "pending_candidate_options": [
                 "Mouse Monoclonal Antibodies",
                 "Rabbit Monoclonal Antibody Development",
@@ -342,7 +347,7 @@ AUDIT_CORPUS: list[dict[str, Any]] = [
         "expected_business_line": "antibody",
         "hypothesis_notes": (
             "Named selection ('the rabbit one'). Required state path: "
-            "(1) context_extractor reads pending_clarification_field + "
+            "(1) context_extractor reads pending_clarification_type + "
             "pending_candidate_options and rebuilds an AmbiguousObjectSet "
             "with three candidates; (2) parser sees pending clarification "
             "in its prompt and emits SelectionResolution with "
@@ -351,10 +356,10 @@ AUDIT_CORPUS: list[dict[str, Any]] = [
             "rebuilt ambiguous_sets and the registry canonicalizes the "
             "alias 'Rabbit Monoclonal Antibody Development' to its "
             "canonical 'Rabbit Monoclonal Antibodies'. Any of those "
-            "three breaking is a finding.  conversation_history alone is "
-            "INSUFFICIENT — harness must construct StatefulAnchors from "
-            "prior_stateful_anchors and pass it to "
-            "build_ingestion_bundle()."
+            "three breaking is a finding. conversation_history alone is "
+            "INSUFFICIENT — harness must wrap prior_clarification_state in a "
+            "minimal MemoryContext so build_ingestion_bundle() sees the "
+            "derived anchor view."
         ),
     },
     {
@@ -376,8 +381,8 @@ AUDIT_CORPUS: list[dict[str, Any]] = [
                 ),
             },
         ],
-        "prior_stateful_anchors": {
-            "pending_clarification_field": "service_selection",
+        "prior_clarification_state": {
+            "pending_clarification_type": "service_selection",
             "pending_candidate_options": [
                 "CAR-T Cell Design and Development",
                 "Custom CAR-NK Manufacturing",
@@ -395,7 +400,7 @@ AUDIT_CORPUS: list[dict[str, Any]] = [
             "SelectionResolution with selected_index=1 (zero-based — "
             "verify against parser_prompt) or selected_value matching "
             "the second candidate. Service-level selection chosen "
-            "deliberately so pending_clarification_field='service_selection' "
+            "deliberately so pending_clarification_type='service_selection' "
             "produces object_type='service' via "
             "_infer_pending_object_type. (Selection at attribute level, "
             "e.g. host-cell-line as a property of stable-cell-line "
@@ -420,7 +425,7 @@ _EXPECTED_BUCKET_COUNTS = {
 
 
 _REQUIRED_PENDING_KEYS = {
-    "pending_clarification_field",
+    "pending_clarification_type",
     "pending_candidate_options",
     "pending_identifier",
 }
@@ -457,16 +462,16 @@ def _validate_corpus() -> None:
                         "route=clarify')."
                     )
         if row["bucket"] == "selection_followup":
-            anchors = row.get("prior_stateful_anchors")
+            anchors = row.get("prior_clarification_state")
             if not isinstance(anchors, dict):
                 raise ValueError(
                     f"Row {row['id']}: selection_followup rows require a "
-                    "prior_stateful_anchors dict (see schema docstring)."
+                    "prior_clarification_state dict (see schema docstring)."
                 )
             missing = _REQUIRED_PENDING_KEYS - anchors.keys()
             if missing:
                 raise ValueError(
-                    f"Row {row['id']}: prior_stateful_anchors missing keys "
+                    f"Row {row['id']}: prior_clarification_state missing keys "
                     f"{sorted(missing)}."
                 )
             if not anchors["pending_candidate_options"]:
@@ -474,9 +479,9 @@ def _validate_corpus() -> None:
                     f"Row {row['id']}: pending_candidate_options must be "
                     "non-empty for selection_followup."
                 )
-            if not anchors["pending_clarification_field"]:
+            if not anchors["pending_clarification_type"]:
                 raise ValueError(
-                    f"Row {row['id']}: pending_clarification_field must be "
+                    f"Row {row['id']}: pending_clarification_type must be "
                     "non-empty so context_extractor rebuilds ambiguous_sets."
                 )
     for bucket, expected_n in _EXPECTED_BUCKET_COUNTS.items():

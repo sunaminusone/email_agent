@@ -6,9 +6,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.common.models import ObjectRef
-from src.ingestion.stateful_anchors import extract_stateful_anchors
+from src.memory.adapters.redis_store import RedisSessionAdapter
 from src.memory.models import ClarificationMemory, MemorySnapshot, MemoryUpdate, ResponseMemory, ThreadMemory
-from src.memory.store import apply_memory_update, load_memory_snapshot, snapshot_to_route_state
+from src.memory.session_store import SessionStore
+from src.memory.store import apply_memory_update, load_memory_snapshot
 
 
 def test_load_memory_snapshot_rehydrates_typed_families() -> None:
@@ -45,6 +46,32 @@ def test_load_memory_snapshot_reads_canonical_memory_snapshot_wrapper() -> None:
     assert snapshot.thread_memory.active_route == "execute"
     assert snapshot.object_memory.active_object is not None
     assert snapshot.object_memory.active_object.identifier == "A100"
+
+
+def test_load_memory_snapshot_ignores_retired_legacy_fields() -> None:
+    snapshot = load_memory_snapshot(
+        {
+            "memory_snapshot": {
+                "thread_memory": {
+                    "active_route": "execute",
+                    "route_phase": "active",
+                    "last_assistant_prompt_type": "answer",
+                },
+                "response_memory": {
+                    "revealed_attributes": ["identity"],
+                },
+                "intent_memory": {
+                    "prior_semantic_intent": "workflow_question",
+                },
+            }
+        },
+        thread_id="thread-1",
+    )
+
+    assert snapshot.thread_memory.thread_id == "thread-1"
+    assert snapshot.thread_memory.active_route == "execute"
+    assert snapshot.response_memory.revealed_attributes == ["identity"]
+    assert snapshot.intent_memory.prior_semantic_intent == "workflow_question"
 
 
 def test_apply_memory_update_sets_and_appends_explicit_fields() -> None:
@@ -136,63 +163,72 @@ def test_apply_memory_update_soft_reset_clears_current_topic_but_keeps_recent_ob
     assert updated.response_memory.last_response_topics == ["direct_answer"]
 
 
-def test_snapshot_to_route_state_uses_typed_memory_fields() -> None:
-    snapshot = MemorySnapshot(
-        thread_memory=ThreadMemory(thread_id="thread-1", active_route="execute", active_business_line="antibody"),
-        clarification_memory=ClarificationMemory(
-            pending_clarification_type="product_selection",
-            pending_candidate_options=["A100", "A101"],
-            pending_identifier="A100",
-            pending_route_after_clarification="execute",
-        ),
-    )
-
-    route_state = snapshot_to_route_state(
-        snapshot,
-        route_phase="waiting_for_user",
-        last_assistant_prompt_type="clarification",
-        session_payload={"thread_id": "thread-1"},
-    )
-
-    assert route_state["active_route"] == "execute"
-    assert route_state["active_business_line"] == "antibody"
-    assert route_state["route_phase"] == "waiting_for_user"
-    assert route_state["last_assistant_prompt_type"] == "clarification"
-    assert route_state["pending_route_after_clarification"] == "execute"
-    assert route_state["pending_identifiers"] == ["A100"]
-    assert route_state["memory_snapshot"]["thread_memory"]["active_route"] == "execute"
-
-
-def test_extract_stateful_anchors_reads_memory_snapshot_shape() -> None:
-    snapshot = MemorySnapshot(
-        thread_memory=ThreadMemory(active_route="execute", active_business_line="antibody"),
-        clarification_memory={
-            "pending_clarification_type": "product_selection",
-            "pending_candidate_options": ["A100", "A101"],
-            "pending_identifier": "A100",
-        },
-    )
-
-    anchors = extract_stateful_anchors(snapshot)
-
-    assert anchors.active_route == "execute"
-    assert anchors.pending_clarification_field == "product_selection"
-    assert anchors.pending_candidate_options == ["A100", "A101"]
-    assert anchors.pending_identifier == "A100"
-
-
-def test_load_memory_snapshot_from_history_metadata_prefers_memory_snapshot_key() -> None:
+def test_load_memory_snapshot_from_history_metadata_reads_memory_snapshot_key() -> None:
     metadata = {
         "memory_snapshot": {
             "thread_memory": {"active_route": "execute"},
             "object_memory": {"active_object": {"object_type": "product", "identifier": "A100"}},
         },
-        "route_state": {
-            "thread_memory": {"active_route": "clarify"},
-        },
     }
-    snapshot = load_memory_snapshot(metadata.get("memory_snapshot") or metadata.get("route_state"))
+    snapshot = load_memory_snapshot(metadata.get("memory_snapshot"))
 
     assert snapshot.thread_memory.active_route == "execute"
     assert snapshot.object_memory.active_object is not None
     assert snapshot.object_memory.active_object.identifier == "A100"
+
+
+class _AdapterSpy:
+    def __init__(self, payload):
+        self.payload = payload
+        self.saved: list[tuple[str | None, dict]] = []
+
+    def is_configured(self) -> bool:
+        return True
+
+    def load(self, thread_id: str | None):
+        return self.payload
+
+    def save(self, thread_id: str | None, payload: dict[str, object]) -> None:
+        self.saved.append((thread_id, payload))
+
+    def delete(self, thread_id: str | None) -> None:
+        return None
+
+    def session_key(self, thread_id: str) -> str:
+        return thread_id
+
+
+def test_session_store_migrates_legacy_snapshot_on_read(monkeypatch) -> None:
+    legacy_payload = {
+        "thread_id": "thread-1",
+        "recent_turns": [{"role": "user", "content": "hello", "metadata": {}}],
+        "memory_snapshot": {
+            "thread_memory": {
+                "active_route": "execute",
+                "route_phase": "active",
+                "last_assistant_prompt_type": "answer",
+            },
+        },
+        "updated_at": "2026-04-28T20:00:00+00:00",
+    }
+    adapter = _AdapterSpy(legacy_payload)
+    monkeypatch.setattr(RedisSessionAdapter, "__init__", lambda self, settings: None)
+
+    store = SessionStore()
+    store.settings = {"is_configured": True}
+    store.adapter = adapter
+
+    snapshot = store.load_memory_snapshot("thread-1")
+
+    assert snapshot.thread_memory.active_route == "execute"
+    assert len(adapter.saved) == 1
+    saved_thread_id, saved_payload = adapter.saved[0]
+    assert saved_thread_id == "thread-1"
+    assert saved_payload["recent_turns"] == legacy_payload["recent_turns"]
+    assert saved_payload["memory_snapshot"]["thread_memory"] == {
+        "thread_id": "thread-1",
+        "active_route": "execute",
+        "last_turn_type": "",
+        "last_user_goal": "",
+        "active_business_line": "",
+    }

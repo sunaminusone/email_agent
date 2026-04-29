@@ -5,8 +5,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ingestion.parser_adapter import adapt_parsed_result_to_parser_signals
+from src.ingestion.parser_adapter import adapt_parsed_result_to_parser_signals, preprocess_for_parser
 from src.ingestion.signal_refinement import refine_parser_signals
+from src.memory.models import ClarificationMemory, MemoryContext, MemorySnapshot
 
 
 def test_adapter_preserves_structured_parser_entity_surface_form_and_offsets():
@@ -80,3 +81,23 @@ def test_adapter_corrects_inaccurate_parser_offsets_against_raw_surface_form():
     assert span.start == 26
     assert span.end == 31
     assert "Please send datasheet for 20001"[span.start : span.end] == "20001"
+
+
+def test_preprocess_for_parser_prefers_memory_context_over_direct_anchor_plumbing():
+    payload = preprocess_for_parser(
+        user_query="The first one sounds right",
+        conversation_history=[],
+        attachments=[],
+        memory_context=MemoryContext(
+            snapshot=MemorySnapshot(
+                clarification_memory=ClarificationMemory(
+                    pending_clarification_type="service_selection",
+                    pending_candidate_options=["A", "B"],
+                )
+            )
+        ),
+    )
+
+    assert "Type: service_selection" in payload["pending_clarification"]
+    assert "1: A" in payload["pending_clarification"]
+    assert "2: B" in payload["pending_clarification"]

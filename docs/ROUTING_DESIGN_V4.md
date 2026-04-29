@@ -170,7 +170,7 @@ Three modules read the RouteDecision:
 | `models.py` | Data models (RoutingDecision, ExecutionIntent, etc.) | **Simplify** — flatten into RouteDecision, remove ModalityDecision |
 | `vocabulary.py` | Term sets and type literals | **Keep** — remove ToolName, remove ModalityType, update DialogueActType |
 | `utils.py` | Text normalization helpers | **Keep** as-is |
-| `stages/dialogue_act.py` | Classify intent type | **Enhance** — simplify to 3 acts, add stateful_anchors awareness, add Level 2 |
+| `stages/dialogue_act.py` | Classify intent type | **Enhance** — simplify to 3 acts, add memory_context awareness, add Level 2 |
 | `stages/modality.py` | Determine information modality | **Delete** — executor derives retrieval needs from request_flags |
 | `stages/object_routing.py` | Validate object state for routing | **Keep** as-is |
 | `stages/tool_routing.py` | Select specific tools | **Delete** — moved to executor |
@@ -212,9 +212,9 @@ Output:
   - RouteDecision           (action + dialogue_act + clarification)
 ```
 
-Routing reads ingestion signals and object state, but does **not** read tool capabilities, session memory, or modality. It focuses on two decisions: what kind of action is needed, and what is the customer trying to do.
+Routing reads ingestion signals and object state, but does **not** read tool capabilities or modality. It focuses on two decisions: what kind of action is needed, and what is the customer trying to do.
 
-Note on session awareness: routing accesses limited session state through `IngestionBundle.stateful_anchors`, which carries `pending_clarification_field`, `active_route`, and active entity info. This is populated by the ingestion module from memory, so routing does not import or read memory directly.
+Note on session awareness: routing accesses limited session state through `IngestionBundle.memory_context`, especially `memory_context.snapshot.clarification_memory` and active object context derived from memory. This is populated upstream by recall/ingestion, so routing still does not import the memory store directly.
 
 ### Entry Point
 
@@ -240,8 +240,8 @@ IngestionBundle + ResolvedObjectState
           v
   +----------------+
   | Dialogue Act    |  What is the customer trying to do?
-  |                 |  Level 1: patterns + stateful_anchors
-  |                 |  Level 2: LLM classifier (if no match)
+  |                 |  Level 1: parser signals + memory_context
+  |                 |  Level 2: LLM classifier (residual ambiguity only)
   +-------+--------+
           | DialogueActResult
           v
@@ -279,16 +279,19 @@ Classifies what the customer is trying to do. Simplified from 6 acts to 3:
 
 The old `ELABORATE` is replaced by `inquiry` with `is_continuation=True`. The old `UNKNOWN` is eliminated — Level 2 resolves ambiguous cases instead of returning a useless label.
 
-**Level 1 (deterministic + stateful_anchors awareness):**
+**Level 1 (deterministic + memory_context awareness):**
 
 ```python
-def resolve_dialogue_act(query, object_routing, *, stateful_anchors=None):
+def resolve_dialogue_act(query, parser_signals, object_routing, *, memory_context=None):
     text = normalize_routing_text(query or "").strip()
     if not text:
         return DialogueActResult(act="closing", reason="Empty turn")
 
-    # Stateful anchors awareness: pending clarification biases toward selection
-    if stateful_anchors and stateful_anchors.pending_clarification_field:
+    # MemoryContext awareness: pending clarification biases toward selection
+    if (
+        memory_context
+        and memory_context.snapshot.clarification_memory.pending_clarification_type
+    ):
         if _looks_like_selection(text, object_routing):
             return DialogueActResult(
                 act="selection", confidence=0.90,
@@ -337,38 +340,49 @@ def resolve_dialogue_act(query, object_routing, *, stateful_anchors=None):
             matched_signals=["inquiry_pattern"],
         )
 
-    # No pattern matched -> Level 2
-    return _llm_classify_dialogue_act(query, object_routing, stateful_anchors)
+    # Residual ambiguity only -> Level 2
+    if _should_use_llm_fallback(text, parser_signals):
+        return _llm_classify_dialogue_act(query, object_routing, memory_context)
+
+    return DialogueActResult(act="inquiry", confidence=0.70, reason="Default inquiry fallback.")
 ```
 
 Key changes from v2:
-- Instead of returning `UNKNOWN (0.35)` when no pattern matches, Level 1 directly calls Level 2. No confidence threshold — Level 2 activates when Level 1 has no answer.
-- `stateful_anchors` provides pending clarification state, allowing Level 1 to correctly handle "sure" after a disambiguation prompt.
+- Instead of returning `UNKNOWN (0.35)` when Level 1 still sees unresolved ambiguity, routing escalates only those residual cases to Level 2.
+- `memory_context.snapshot.clarification_memory` provides pending clarification state, allowing Level 1 to correctly handle "sure" after a disambiguation prompt.
 
 **Level 2 (LLM classifier):**
 
-Activates only when Level 1 finds no matching pattern (~15% of messages).
+Activates only when Level 1 still leaves residual ambiguity after parser signals
+and deterministic rules are applied. It is intentionally conservative and does
+not run on every short message or every non-English inquiry.
 
 ```python
-def _llm_classify_dialogue_act(query, object_routing, stateful_anchors=None):
+def _llm_classify_dialogue_act(query, object_routing, memory_context=None):
     """LLM fallback for dialogue act classification."""
     ...
 ```
 
-LLM prompt (uses stateful_anchors, not memory):
+LLM prompt (uses `memory_context`'s clarification state, not the memory store directly):
 
 ```
-You are classifying a customer support message for a biotech company.
+You are classifying a support-copilot user message for a biotech company.
 
 Customer message: "{query}"
 Resolved entity: {primary_object or "none"}
-Conversation state: {stateful_anchors.active_route or "new"}
-Pending clarification: {stateful_anchors.pending_clarification_field or "none"}
+Conversation state: {memory_context.active_route or "new"}
+Pending clarification: {memory_context.snapshot.clarification_memory.pending_clarification_type or "none"}
 
 Classify the customer's intent:
 - inquiry: asking for information or requesting an action
 - selection: choosing from previously offered options
 - closing: confirming, thanking, or ending the conversation
+
+Rules:
+- Use selection only when the message clearly chooses or commits to a previously discussed option.
+- Generic acknowledgements like "sure", "ok", or "sounds good" are closing unless there is a pending clarification.
+- If the message asks for new information, treat it as inquiry even if it begins with "ok" or "thanks".
+- Be conservative: if unsure between inquiry and closing, prefer inquiry. If unsure between selection and closing without pending clarification, prefer closing.
 
 Also determine:
 - is_continuation: true if this continues a prior topic, false if new question
@@ -380,11 +394,11 @@ Output: {"act": "...", "is_continuation": true/false, "confidence": 0.0-1.0, "re
 
 | Message | Level 1 | Level 2 |
 | --- | --- | --- |
-| "sure" (no pending clarification) | No pattern -> Level 2 | closing (0.82) — casual confirmation |
-| "sure" (pending clarification) | selection (0.90) — stateful anchors | N/A — Level 1 handles it |
-| "and the pricing?" | inquiry (0.84) | inquiry, is_continuation=True (0.88) |
-| "I'll take that" | No pattern -> Level 2 | selection (0.90) — purchase intent |
-| "这个抗体多少钱？" | No pattern -> Level 2 | inquiry (0.91) — non-English |
+| "sure" (no pending clarification) | Likely Level 1 closing pattern | Level 2 usually not needed |
+| "sure" (pending clarification) | selection (0.90) — memory context | N/A — Level 1 handles it |
+| "ok and what about the price?" | Mixed acknowledgement + inquiry | inquiry, is_continuation=True |
+| "Let's go with that" | No strong deterministic pattern | selection (0.90) — commitment to prior option |
+| "这个可以" | Short non-English ambiguous reply | closing or selection depending on context |
 
 ### Stage 3: Policies + Action Determination
 
@@ -527,14 +541,14 @@ class ClarificationPayload(BaseModel):
 ```
                 +----------------------------------------------+
   Level 1       |  Deterministic rules (~85%)                   |
-  (fast)        |  Pattern matching + stateful_anchors          |
+  (fast)        |  Pattern matching + memory_context            |
                 |  for dialogue act classification              |
                 |                                              |
                 |  Latency: 0ms                                |
                 +----------------------------------------------+
 
                 +----------------------------------------------+
-  Level 2       |  LLM classifier (~15%)                        |
+  Level 2       |  LLM classifier (residual ambiguous cases)    |
   (smart)       |  Structured output LLM call                   |
                 |  Handles: no-match, non-English, edge cases   |
                 |                                              |
@@ -544,15 +558,21 @@ class ClarificationPayload(BaseModel):
 
 ### When Level 2 activates
 
-Level 2 activates when Level 1 returns no match — not based on a confidence threshold. This is simpler and more robust than v2's approach of returning `UNKNOWN (0.35)` and checking `confidence < 0.5`.
+Level 2 activates only when Level 1 still leaves residual ambiguity after
+parser signals and deterministic rules. Current trigger categories are:
+
+- Short ambiguous replies with weak semantic signals
+- Mixed-posture messages (for example acknowledgement + new question)
+- Weak non-English replies without strong inquiry markers
+- Low-confidence follow-up fragments where parser + rules do not settle the act
 
 | Trigger | Example |
 | --- | --- |
-| No pattern matches query text | "I'll take that" — not in any pattern set |
-| Non-English message | "这个抗体多少钱？" — Chinese text, no English patterns |
+| No strong deterministic pattern | "Let's go with that" |
+| Weak non-English short reply | "这个可以" |
 | Ambiguous between acts | "ok and what about the price?" — closing + inquiry |
 
-Note: when `stateful_anchors.pending_clarification_field` is set, Level 1 handles common post-clarification replies ("sure", "the first one") directly, avoiding unnecessary LLM calls.
+Note: when `memory_context.snapshot.clarification_memory.pending_clarification_type` is set, Level 1 handles common post-clarification replies ("sure", "the first one") directly, avoiding unnecessary LLM calls.
 
 ### Contrast with executor Level 2
 
@@ -596,7 +616,7 @@ src/routing/                          # Same directory, simplified contents
 | `orchestrator.py` | **Simplify** — remove tool selection + modality stages, add action determination |
 | `vocabulary.py` | **Simplify** — remove ToolName, ModalityType; update DialogueActType |
 | `runtime.py` | **Adapt** — update return type from RoutingDecision to RouteDecision |
-| `stages/dialogue_act.py` | **Enhance** — simplify to 3 acts, add stateful_anchors, add Level 2 |
+| `stages/dialogue_act.py` | **Enhance** — simplify to 3 acts, add memory_context awareness, add Level 2 |
 | `policies/clarification.py` | **Enhance** — add ingestion signal awareness |
 | Other files | **Unchanged** |
 
@@ -674,16 +694,16 @@ The executor still runs the always-include retrieval (historical threads +
 technical RAG); the renderer surfaces the `AI_ROUTING_NOTE` so the rep can
 see that the classifier judged this as a closing turn.
 
-### Scenario 5: Post-clarification selection (stateful anchors)
+### Scenario 5: Post-clarification selection (memory context)
 
 ```
 Customer: "sure" (after system asked "which antibody do you mean?")
 
-Stateful anchors: pending_clarification_field = "object_disambiguation"
-                  pending_candidate_options = ["PM-AB0042", "PM-AB0051"]
+Memory context: clarification_memory.pending_clarification_type = "object_disambiguation"
+                clarification_memory.pending_candidate_options = ["PM-AB0042", "PM-AB0051"]
 
 Object routing: active_object from memory
-Dialogue act:   Level 1 -> selection (0.90, stateful anchors detect pending state)
+Dialogue act:   Level 1 -> selection (0.90, memory context detects pending state)
 Policies:       no clarification, no handoff
 Action:         execute (selection -> execute)
 
@@ -695,17 +715,17 @@ RouteDecision:
 ### Scenario 6: Non-English query (Level 2)
 
 ```
-Customer: "这个抗体多少钱？"
+Customer: "这个可以"
 
 Object routing: active_object = product (PM-AB0001), status = contextual_reuse
-Dialogue act:   Level 1 -> no pattern matched (Chinese text)
-                Level 2 -> inquiry (0.91, LLM: "customer asking about antibody pricing")
+Dialogue act:   Level 1 -> insufficient evidence (short non-English reply)
+                Level 2 -> closing or selection depending on context
 Policies:       no clarification, no handoff
-Action:         execute
+Action:         respond or execute depending on LLM classification
 
 RouteDecision:
-  action: execute
-  dialogue_act: inquiry (0.91)
+  action: respond
+  dialogue_act: closing (0.86)
 ```
 
 ### Scenario 7: Handoff
@@ -742,11 +762,11 @@ RouteDecision:
 4. Remove their calls from `orchestrator.py`
 5. Remove `ToolName`, `ModalityType` from `vocabulary.py`
 
-### Step 3: Simplify dialogue act + add stateful_anchors (low risk)
+### Step 3: Simplify dialogue act + add memory_context awareness (low risk)
 
 1. Update `dialogue_act.py` to use 3 acts (`inquiry`, `selection`, `closing`)
-2. Add `stateful_anchors` parameter to `resolve_dialogue_act()`
-3. Add Level 2 LLM fallback (called when no pattern matches, replacing UNKNOWN)
+2. Add `memory_context` parameter to `resolve_dialogue_act()`
+3. Add Level 2 LLM fallback for residual ambiguous cases (replacing UNKNOWN)
 
 ### Step 4: Add action determination + enhance clarification (low risk)
 
@@ -767,7 +787,7 @@ RouteDecision:
 | Module | What routing reads | Why |
 | --- | --- | --- |
 | **Ingestion** | `parser_signals.context.risk_level`, `needs_human_review`, `normalized_query`, `missing_information` | Risk assessment, handoff, query text, clarification signals |
-| **Ingestion** | `stateful_anchors.pending_clarification_field`, `active_route` | Session awareness for dialogue act classification |
+| **Ingestion** | `memory_context.snapshot.clarification_memory`, `memory_context.active_route` | Session awareness for dialogue act classification |
 | **Objects** | `ResolvedObjectState` (primary_object, ambiguous_sets) | Object validation, clarification decision |
 
 ### Routing does NOT read from
@@ -775,7 +795,7 @@ RouteDecision:
 | Module | Why not |
 | --- | --- |
 | **Tools** | Tool selection is the executor's job |
-| **Memory** | Session state flows through `IngestionBundle.stateful_anchors` and `ResolvedObjectState` |
+| **Memory** | Session state flows through `IngestionBundle.memory_context` and `ResolvedObjectState` |
 | **Executor** | Routing runs before execution |
 | **Responser** | Routing runs before response synthesis |
 
@@ -783,10 +803,10 @@ RouteDecision:
 
 | Module | What it reads from RouteDecision |
 | --- | --- |
-| **service.py** | `action` — decides whether to call executor or skip to responser |
+| **service.py / agent_loop.py** | `action` and `reason` — coerces non-`execute` outputs into CSR advisory execution flow |
 | **Executor** | `dialogue_act` — builds execution context |
-| **Responser** | `action`, `clarification` — selects response mode |
-| **Memory** | `action` — persists route state for next turn |
+| **Responser** | `reason`, `clarification`, `dialogue_act` — surfaces routing notes and context in the CSR draft |
+| **Memory** | `action`, `clarification` — persists advisory route context for next turn |
 
 ## Anti-Patterns
 
@@ -798,7 +818,7 @@ RouteDecision:
 
 4. **Routing reads tool capabilities.** Routing should not import from `src/tools/`. If routing needs to know what tools exist, the architecture is wrong.
 
-5. **LLM routing on every call.** Level 2 is for the ~15% of messages where no pattern matches. "What is PM-AB0001?" should never touch an LLM for dialogue act classification.
+5. **LLM routing on every call.** Level 2 is only for residual ambiguity after parser signals and deterministic rules. "What is PM-AB0001?" should never touch an LLM for dialogue act classification.
 
 6. **Passing object data through routing.** In v2, `ExecutionIntent` carried objects duplicated from `ResolvedObjectState`. In v3, objects flow directly from objects module to executor.
 

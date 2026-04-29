@@ -39,7 +39,7 @@ draft + reference bundle for the rep, never a customer-facing reply.
 1. **Agent, not pipeline** — the system reasons about what to do, acts, observes, and iterates
 2. **Module independence** — each module has a typed contract; changing one module does not require changing others
 3. **Tool self-description** — tools declare their own capabilities; the executor discovers and selects tools at runtime
-4. **LangChain as framework, not architecture** — LangChain/LangGraph helps implement modules; Pydantic contracts define the boundaries
+4. **LangChain as framework, not architecture** — LangChain may help implement modules; Pydantic contracts define the boundaries
 5. **Incremental upgrade** — the new design reuses existing code wherever possible
 
 ## Architecture Diagram
@@ -118,7 +118,6 @@ src/
 │   ├── deterministic_signals.py #   rule-based signal extraction
 │   ├── reference_signals.py     #   pronoun / reference resolution
 │   ├── signal_refinement.py     #   post-processing refinement
-│   ├── stateful_anchors.py      #   session state extraction
 │   ├── parser_prompt.py         #   parser prompt template
 │   └── models.py                #   IngestionBundle, TurnCore, signals
 │
@@ -133,11 +132,10 @@ src/
 │   └── models.py                #   ObjectCandidate, ResolvedObjectState
 │
 ├── routing/                     # Decision layer (route only, no tool selection)
-│   ├── runtime.py               #   main entry
+│   ├── runtime.py               #   convenience adapter for single-group routing
 │   ├── orchestrator.py          #   stage pipeline
 │   ├── stages/
 │   │   ├── dialogue_act.py      #   classify intent type
-│   │   ├── modality.py          #   text / structured / hybrid
 │   │   └── object_routing.py    #   validate object state
 │   ├── policies/
 │   │   ├── clarification.py     #   should we ask for more info?
@@ -145,7 +143,7 @@ src/
 │   └── models.py                #   RouteDecision
 │
 ├── executor/                    # Reasoning + execution layer
-│   ├── engine.py                #   reasoning loop (LangGraph)
+│   ├── engine.py                #   reasoning loop (select -> dispatch -> evaluate -> retry)
 │   ├── tool_selector.py         #   reads registry, selects tools
 │   ├── request_builder.py       #   builds ToolRequest from context
 │   ├── dispatcher.py            #   dispatches tool calls
@@ -167,9 +165,9 @@ src/
 │   └── quickbooks/              #   order, invoice, shipping (QuickBooks API)
 │
 ├── responser/                   # Response synthesis layer
-│   ├── service.py               #   main orchestrator (always dispatches csr_draft)
+│   ├── service.py               #   main orchestrator (always renders csr_draft)
 │   ├── blocks.py                #   content block extraction
-│   ├── composer.py              #   LLM rewrite (skipped for csr_draft type)
+│   ├── composer.py              #   pass-through finalizer for CSR structured output
 │   ├── renderers/               #   v4: only csr_draft is dispatched
 │   │   ├── csr_draft.py         #   ★ the only renderer used in v4
 │   │   ├── answer.py            #   dormant (kept for import safety)
@@ -227,6 +225,7 @@ Memory          all of the above                   MemoryUpdate
 class IngestionBundle:
     turn_core: TurnCore               # thread_id, raw/normalized query, language
     turn_signals: TurnSignals         # parser + deterministic + reference signals
+    memory_context: MemoryContext     # recall output carried downstream
 
 # objects
 class ResolvedObjectState:
@@ -238,17 +237,16 @@ class ResolvedObjectState:
 
 # routing
 class RouteDecision:
-    action: Literal["execute", "clarify", "handoff"]
-    dialogue_act: DialogueActResult   # INQUIRY, REQUEST, INFORM, etc.
-    modality: ModalityDecision        # text, structured, hybrid
+    action: Literal["execute", "respond", "clarify", "handoff"]
+    dialogue_act: DialogueActResult   # inquiry, selection, closing
     clarification: ClarificationPayload | None
+    reason: str
 
 # executor
 class ExecutionResult:
-    tool_calls: list[ExecutedToolCall]
-    merged_results: MergedResults
-    iterations: int                   # how many reasoning loops
+    executed_calls: list[ExecutedToolCall]
     final_status: str
+    reason: str
 
 # tools
 class ToolCapability:
@@ -301,7 +299,7 @@ class MemorySnapshot:
 - invoke LLM parser chain for intent, entities, confidence (via LangChain)
 - extract deterministic signals via regex patterns (catalog numbers, order numbers)
 - resolve pronouns and references from conversation history
-- extract stateful anchors from prior memory
+- carry forward recall output as `memory_context`
 
 **LangChain usage**: parser chain (`ChatOpenAI` + structured output parsing)
 
@@ -329,12 +327,13 @@ v4 the **classification still runs as designed**, but its `clarify` /
 `handoff` decisions no longer **gate** retrieval — they become advisory
 metadata for the rep.
 
-Three classifications still emitted (for visibility / future use):
+Four actions are still emitted (for visibility / future use):
 - `execute` — straightforward inquiry, no warning
+- `respond` — conversational closing / acknowledgement
 - `clarify` — agent thinks the inquiry is ambiguous (would-have-asked-customer)
 - `handoff` — agent thinks this needs expert / AE input
 
-In v4, `_run_agent_loop` (`src/app/service.py`) coerces every group to
+In v4, `_run_agent_loop` (`src/app/agent_loop.py`) coerces every group to
 `execute` regardless of original classification. The original judgment is
 preserved on `route_decision.reason` as an `AI_ROUTING_NOTE` string that
 the renderer surfaces in a ⚠️ section of the draft. Rationale: an
@@ -343,14 +342,15 @@ it away or hiding it serves no one. Blocking retrieval based on it would
 mean the rep gets nothing useful exactly when the agent is uncertain.
 
 Also resolves:
-- `DialogueActResult` (INQUIRY, REQUEST, INFORM, ELABORATE, etc.)
-- `ModalityDecision` (text, structured, hybrid)
+- `DialogueActResult` (`inquiry`, `selection`, `closing`)
 
 **Key change from v2**: routing no longer selects tools. That responsibility moved to the executor in v3.
 
 **Key change from v3**: `clarify` / `handoff` are advisory, not gating.
 
-**LangChain usage**: optional LLM classifier for dialogue act in ambiguous cases.
+**Current implementation note**: the code currently uses parser signals +
+memory-aware heuristics for dialogue act classification. The v4 design's
+full Level-2 LLM fallback is still a target state, not fully implemented.
 
 **Does not**: select tools, dispatch tool calls, generate replies.
 
@@ -383,10 +383,10 @@ documentation says. The CSR sees both and decides.
 7. Merge all results into ExecutionResult
 ```
 
-**LangChain / LangGraph usage**: this is the best fit for LangGraph.
-- The reasoning loop maps naturally to a LangGraph state graph
-- Tool dispatch can use LangChain tool wrappers
-- State transitions are explicit and traceable
+**Current implementation note**: the executor is currently a typed Python
+loop (`select -> dispatch -> evaluate -> retry`) rather than a LangGraph
+state graph. LangGraph remains a possible future implementation, not a
+current dependency.
 
 **Configuration**:
 - `max_iterations`: maximum reasoning loops (default: 3)
@@ -424,27 +424,31 @@ Each tool:
 4. Register in the tool registry
 5. No changes to routing, executor, or any other module
 
-**LangChain usage**: wrap each tool as a LangChain `Tool` or `StructuredTool` for standardized invocation and tracing.
+**LangChain usage**: optional wrapper layer only. The current contracts are
+tool-registry-first, not LangChain-first.
 
 ### 6. Responser
 
 **Purpose**: synthesize the CSR-facing draft bundle.
 
 **v4 invariant — always csr_draft**: `_render_response`
-(`src/responser/service.py`) no longer dispatches by `response_mode`. It
-always calls `render_csr_draft_response` (`src/responser/renderers/csr_draft.py`),
-which produces the Slack-style structured output:
+(`src/responser/service.py`) always calls
+`render_csr_draft_response` (`src/responser/renderers/csr_draft.py`),
+which produces the structured output:
 
 ```
 📝 Draft reply              — LLM-synthesized, marked clearly as draft
+🧭 Grounding signal         — trust / grounding summary
+💰 Live catalog facts       — structured records when available
 📚 Similar past inquiries   — Top historical threads (full conversation)
 📄 Relevant documents       — Top KB chunks
+📦 Operational records      — QuickBooks records when available
 ⚠️ AI routing notes         — Only when routing flagged ambiguity / handoff
 ```
 
-`compose_final_response` (`src/responser/composer.py`) skips its legacy
-LLM rewrite when `response_type == "csr_draft"` — the structured sections
-must not be collapsed back into a flowing reply.
+`compose_final_response` (`src/responser/composer.py`) is now effectively a
+pass-through finalizer — the renderer already returns the final structured
+message, and no post-render rewrite runs.
 
 The seven legacy renderers (`acknowledgement`, `answer`, `clarification`,
 `handoff`, `knowledge`, `partial_answer`, `termination`) **are kept** but
@@ -474,7 +478,28 @@ the retrieved threads / docs say.
 
 **LangChain usage**: none. Memory contracts are richer than LangChain's chat buffer and must remain typed.
 
-## LangChain / LangGraph Integration Summary
+## Current Gaps vs Target v4
+
+The architecture is directionally v4-complete, but a few target-state items
+described across the design set are still not fully landed in code:
+
+- **Routing Level 2 LLM fallback**: docs describe a two-level dialogue-act
+  classifier; current code still relies primarily on parser output plus
+  heuristic fallbacks.
+- **Doc/code convergence across all v4 docs**: `ARCHITECTURE.md` and
+  `ROUTING_DESIGN_V4.md` are now aligned more closely to code, but other v4
+  docs may still describe target-state behavior rather than exact runtime behavior.
+- **Response memory contract hardening**: response-layer `MemoryUpdate`
+  control signals now need explicit end-to-end ownership so future fields
+  are not silently dropped between `ResponsePlan.memory_update`,
+  `MemoryContribution`, and `reflect()`.
+- **Dormant renderer cleanup**: legacy customer-facing renderers remain on
+  disk for compatibility even though `csr_draft` is the only dispatched path.
+- **Potential future LangGraph migration**: executor is currently a Python
+  loop; any LangGraph wording in older docs should be read as roadmap, not
+  current runtime behavior.
+
+## LangChain Integration Summary
 
 ```
 Module        Framework         Usage
@@ -482,9 +507,9 @@ Module        Framework         Usage
 Ingestion     LangChain         Parser chain (structured extraction)
 Objects       (none)            Deterministic logic
 Routing       LangChain (opt)   Classifier fallback for edge cases
-Executor      LangGraph         Reasoning loop, state graph
-Tools         LangChain         Tool wrappers for invocation + tracing
-Responser     LangChain         LLM response synthesis and rewrite
+Executor      Python loop       Typed reasoning loop; LangGraph is future option
+Tools         Optional          Wrappers possible, not required by contracts
+Responser     LangChain         LLM draft synthesis inside csr_draft renderer
 Memory        (none)            Own typed contracts via Redis
 ```
 
@@ -696,7 +721,8 @@ No changes to any other module. The executor discovers and uses it automatically
 
 ### Adding a new route type
 
-Add a new case in `routing/policies/` and a new renderer in `responser/renderers/`.
+Add a new case in `routing/policies/` and decide whether it should surface as
+new advisory metadata in `csr_draft` or remain internal-only.
 
 ### Supporting a new object type
 

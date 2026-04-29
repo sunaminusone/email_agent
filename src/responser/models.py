@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.common.models import DemandProfile, SourceAttribution
 from src.common.execution_models import ExecutionResult
 from src.ingestion.models import ParserConstraints, ParserOpenSlots
-from src.memory.models import MemoryUpdate, ResponseMemory
+from src.memory.models import MemoryContribution, MemoryUpdate, ResponseMemory
 from src.objects.models import ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult
 
@@ -67,3 +67,32 @@ class ResponseBundle(_ResponseModel):
     response_topic: str = ""
     response_content_summary: str = ""
     response_path: str = "csr_renderer_direct"
+
+
+def build_response_memory_contribution(
+    response_plan: ResponsePlan | None,
+) -> MemoryContribution:
+    if response_plan is None or response_plan.memory_update is None:
+        return MemoryContribution(source="response", reason="response: no memory update")
+
+    mu = response_plan.memory_update
+    return MemoryContribution(
+        source="response",
+        mark_revealed_attributes=(
+            list(mu.response_memory.revealed_attributes) if mu.response_memory else None
+        ),
+        set_last_tool_results=(
+            list(mu.response_memory.last_tool_results) if mu.response_memory else None
+        ),
+        set_last_response_topics=(
+            list(mu.response_memory.last_response_topics) if mu.response_memory else None
+        ),
+        set_last_demand_type=(
+            mu.response_memory.last_demand_type if mu.response_memory else None
+        ),
+        set_last_demand_flags=(
+            list(mu.response_memory.last_demand_flags) if mu.response_memory else None
+        ),
+        soft_reset_current_topic=mu.soft_reset_current_topic,
+        reason=mu.reason or "response: captured response memory",
+    )

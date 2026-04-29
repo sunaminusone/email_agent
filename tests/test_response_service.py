@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -13,6 +14,8 @@ from src.objects.models import ObjectCandidate, ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
 from src.responser import ResponseInput, build_response_bundle, compose_response
+from src.responser.renderers.csr_draft import render_csr_draft_response
+from src.responser.models import ResponsePlan, build_response_memory_contribution
 
 
 def _empty_execution_result(
@@ -22,6 +25,22 @@ def _empty_execution_result(
     return ExecutionResult(
         executed_calls=executed_calls or [],
     )
+
+
+class _FakeStructuredLLM:
+    def __init__(self, draft: str) -> None:
+        self._draft = draft
+
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, _messages):
+        class _Result:
+            draft = ""
+
+        result = _Result()
+        result.draft = self._draft
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +105,24 @@ def test_closing_without_terminate_signal_yields_conversation_control() -> None:
     assert plan.answer_focus == "conversation_control"
     assert response.response_type == "csr_draft"
     assert plan.memory_update.soft_reset_current_topic is False
+
+
+def test_response_memory_contribution_preserves_soft_reset_control_signal() -> None:
+    _, plan = compose_response(
+        ResponseInput(
+            query="stop",
+            locale="en",
+            dialogue_act=DialogueActResult(
+                act="closing",
+                matched_signals=["terminate_pattern"],
+            ),
+            execution_result=_empty_execution_result(),
+        )
+    )
+
+    contribution = build_response_memory_contribution(plan)
+
+    assert contribution.soft_reset_current_topic is True
 
 
 def test_clarify_action_yields_missing_information_focus() -> None:
@@ -423,8 +460,8 @@ def test_object_summary_block_includes_customer_constraints() -> None:
         parser_constraints=constraints,
     ))
 
-    # csr_draft renders a single csr_draft block; the planner's content blocks
-    # (where object_summary lives) live on the ResponsePlan instead.
+    # csr_draft now returns multiple structured blocks, but the planner's
+    # object_summary block still lives on the ResponsePlan instead.
     plan_blocks = [
         *bundle.response_plan.primary_content_blocks,
         *bundle.response_plan.supporting_content_blocks,
@@ -474,3 +511,172 @@ def test_no_customer_constraints_when_none() -> None:
     obj_blocks = [b for b in plan_blocks if b.block_type == "object_summary"]
     if obj_blocks:
         assert "customer_constraints" not in obj_blocks[0].data
+
+
+def test_csr_draft_marks_ungrounded_when_no_references_exist() -> None:
+    with patch("src.responser.renderers.csr_draft.get_llm", return_value=_FakeStructuredLLM("Please share more project details.")):
+        response = render_csr_draft_response(
+            ResponseInput(
+                query="We need a monoclonal antibody against a membrane protein. What do you need for a quote?",
+                execution_result=_empty_execution_result(),
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    assert response.response_type == "csr_draft"
+    assert response.debug_info["grounding_status"] == "ungrounded"
+    trust_block = next(block for block in response.content_blocks if block.block_type == "trust_signal")
+    assert trust_block.data["grounding_status"] == "ungrounded"
+    assert "No live data, strong historical replies, or relevant documents were retrieved" in trust_block.body
+    assert "*📚 Similar past inquiries*" in response.message
+    assert "No strong similar historical replies were retrieved" in response.message
+    assert "*📄 Relevant documents*" in response.message
+
+
+def test_csr_draft_surfaces_structured_reference_blocks_when_grounded() -> None:
+    historical_call = ExecutedToolCall(
+        call_id="hist-1",
+        tool_name="historical_thread_tool",
+        status="ok",
+        request=ToolRequest(tool_name="historical_thread_tool", query="stable cell line"),
+        result=ToolResult(
+            tool_name="historical_thread_tool",
+            status="ok",
+            structured_facts={
+                "threads": [
+                    {
+                        "submission_id": "s1",
+                        "best_score": 0.91,
+                        "reply_count": 1,
+                        "units": [
+                            {
+                                "submitted_at": "2026-01-01T00:00:00",
+                                "sender_name": "Sarah",
+                                "institution": "Emory",
+                                "service_of_interest": "Stable Cell Line Development",
+                                "products_of_interest": "",
+                                "page_content": "Customer message: quote for stable line\nSales reply: please share host cell and target details",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ),
+    )
+    rag_call = ExecutedToolCall(
+        call_id="rag-1",
+        tool_name="technical_rag_tool",
+        status="ok",
+        request=ToolRequest(tool_name="technical_rag_tool", query="stable cell line"),
+        result=ToolResult(
+            tool_name="technical_rag_tool",
+            status="ok",
+            structured_facts={
+                "matches": [
+                    {
+                        "section_type": "service_overview",
+                        "chunk_label": "Stable Cell Line Flyer",
+                        "final_score": 1.72,
+                        "content_preview": "Stable cell line development service details.",
+                    }
+                ],
+                "retrieval_confidence": {"level": "high"},
+            },
+        ),
+    )
+
+    with patch("src.responser.renderers.csr_draft.get_llm", return_value=_FakeStructuredLLM("We can help with stable cell line development. Please share the target and host system.")):
+        response = render_csr_draft_response(
+            ResponseInput(
+                query="We need a stable cell line quote.",
+                execution_result=_empty_execution_result(executed_calls=[historical_call, rag_call]),
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    block_types = [block.block_type for block in response.content_blocks]
+    assert response.debug_info["grounding_status"] == "grounded"
+    assert "trust_signal" in block_types
+    assert "historical_references" in block_types
+    assert "relevant_documents" in block_types
+    draft_block = next(block for block in response.content_blocks if block.block_type == "csr_draft")
+    assert draft_block.data["grounding_status"] == "grounded"
+    assert "*🧭 Grounding signal*" in response.message
+    assert "*📚 Similar past inquiries*" in response.message
+    assert "*📄 Relevant documents*" in response.message
+
+
+def test_csr_draft_surfaces_live_pricing_records_from_pricing_lookup_tool() -> None:
+    """Live pricing facts must reach the CSR draft (regression: silent drop)."""
+    pricing_call = ExecutedToolCall(
+        call_id="price-1",
+        tool_name="pricing_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="pricing_lookup_tool", query="CD45 antibody"),
+        result=ToolResult(
+            tool_name="pricing_lookup_tool",
+            status="ok",
+            primary_records=[
+                {
+                    "catalog_no": "20081",
+                    "name": "Anti-CD45 mAb",
+                    "price": 350.0,
+                    "currency": "USD",
+                    "lead_time": "in stock",
+                    "size": "100 ug",
+                    "business_line": "antibody",
+                }
+            ],
+            structured_facts={
+                "query": "CD45 antibody",
+                "match_status": "ok",
+                "pricing_records": [
+                    {
+                        "catalog_no": "20081",
+                        "name": "Anti-CD45 mAb",
+                        "price": 350.0,
+                        "currency": "USD",
+                        "lead_time": "in stock",
+                        "size": "100 ug",
+                        "business_line": "antibody",
+                    }
+                ],
+                "match_count": 1,
+            },
+        ),
+    )
+
+    with patch(
+        "src.responser.renderers.csr_draft.get_llm",
+        return_value=_FakeStructuredLLM(
+            "CD45 mAb (20081) is $350 USD per 100 ug, currently in stock."
+        ),
+    ):
+        response = render_csr_draft_response(
+            ResponseInput(
+                query="How much is your CD45 antibody?",
+                execution_result=_empty_execution_result(executed_calls=[pricing_call]),
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    block_types = [block.block_type for block in response.content_blocks]
+    assert "structured_facts" in block_types
+
+    draft_block = next(b for b in response.content_blocks if b.block_type == "csr_draft")
+    assert draft_block.data["structured_record_count"] == 1
+
+    structured_block = next(b for b in response.content_blocks if b.block_type == "structured_facts")
+    assert structured_block.data["records"][0]["catalog_no"] == "20081"
+    assert structured_block.data["records"][0]["_source_tool"] == "pricing_lookup_tool"
+
+    # Slack-style section appears in the message body
+    assert "*💰 Live catalog / pricing facts*" in response.message
+    assert "20081" in response.message
+    assert "350" in response.message
+
+    # Live data alone is enough to ground the draft
+    assert response.debug_info["grounding_status"] == "grounded"
+    assert response.debug_info["structured_records_returned"] == 1
+    trust_block = next(b for b in response.content_blocks if b.block_type == "trust_signal")
+    assert trust_block.data["has_live_data"] is True

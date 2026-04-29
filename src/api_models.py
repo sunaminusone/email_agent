@@ -28,6 +28,7 @@ class AgentRequest(_ApiModel):
     thread_id: str = ""
     user_query: str
     locale: str = "en"
+    start_new_conversation: bool = False
     conversation_history: list[ConversationMessage] = Field(default_factory=list)
     attachments: list[RequestAttachment] = Field(default_factory=list)
 

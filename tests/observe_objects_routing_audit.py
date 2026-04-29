@@ -16,10 +16,11 @@ Per the fixture's docstring, four observation points per row:
 Notes on what this script DOES NOT do:
   - It does not run the executor or any tools (no LLM-driven retrieval). The
     audit's purpose is upstream of execution.
-  - It does not rebuild a full MemorySnapshot. `prior_stateful_anchors` is
-    converted to a `StatefulAnchors` and passed directly to
-    `build_ingestion_bundle`, which is sufficient for the production-equivalent
-    path that context_extractor → resolve_objects relies on.
+  - It does not rebuild a full MemorySnapshot. `prior_clarification_state` is
+    converted into a minimal `MemoryContext` / `MemorySnapshot`
+    clarification state, which is sufficient for the
+    production-equivalent path that context_extractor → resolve_objects
+    relies on.
 
 Usage:
     python tests/observe_objects_routing_audit.py
@@ -42,7 +43,7 @@ from src.executor.request_builder import _build_scope_context  # noqa: E402
 from src.ingestion import build_demand_profile  # noqa: E402
 from src.ingestion.demand_profile import narrow_demand_profile  # noqa: E402
 from src.ingestion.pipeline import build_ingestion_bundle  # noqa: E402
-from src.memory.models import StatefulAnchors  # noqa: E402
+from src.memory.models import ClarificationMemory, MemoryContext, MemorySnapshot  # noqa: E402
 from src.objects.extraction import extract_object_bundle  # noqa: E402
 from src.objects.resolution import resolve_objects  # noqa: E402
 from src.routing.intent_assembly import assemble_intent_groups  # noqa: E402
@@ -60,7 +61,7 @@ def _observe_row(row: dict[str, Any]) -> dict[str, Any]:
     bucket = row["bucket"]
     query = row["query"]
     history = row.get("conversation_history") or []
-    prior_anchors_dict = row.get("prior_stateful_anchors")
+    prior_clarification_state = row.get("prior_clarification_state")
 
     out: dict[str, Any] = {
         "id": row_id,
@@ -78,7 +79,7 @@ def _observe_row(row: dict[str, Any]) -> dict[str, Any]:
         "actual_dialogue_act": "",
         # Pre-resolution view: what context_extractor / object extractors
         # built BEFORE selection consumed any matching set. This is the only
-        # signal that tells us whether `pending_clarification_field` →
+        # signal that tells us whether `pending_clarification_type` →
         # ambiguous_set rebuild actually fired on selection_followup rows.
         "pre_resolution_ambiguous_sets_count": "",
         "pre_resolution_ambiguity_kinds": "",
@@ -102,19 +103,33 @@ def _observe_row(row: dict[str, Any]) -> dict[str, Any]:
         "error": "",
     }
 
-    # Build StatefulAnchors if present (only selection_followup rows have it,
-    # but the schema permits it elsewhere too).
-    stateful_anchors: StatefulAnchors | None = None
-    if prior_anchors_dict is not None:
-        stateful_anchors = StatefulAnchors(**prior_anchors_dict)
+    # Build a minimal MemoryContext if present (only selection_followup rows
+    # have it, but the schema permits it elsewhere too).
+    memory_context: MemoryContext | None = None
+    if prior_clarification_state is not None:
+        memory_context = MemoryContext(
+            snapshot=MemorySnapshot(
+                clarification_memory=ClarificationMemory(
+                    pending_clarification_type=prior_clarification_state.get(
+                        "pending_clarification_type", ""
+                    ),
+                    pending_candidate_options=list(
+                        prior_clarification_state.get("pending_candidate_options", [])
+                        or []
+                    ),
+                    pending_identifier=prior_clarification_state.get(
+                        "pending_identifier", ""
+                    ),
+                )
+            )
+        )
 
     try:
         bundle = build_ingestion_bundle(
             thread_id=f"audit::{row_id}",
             user_query=query,
             conversation_history=history,
-            stateful_anchors=stateful_anchors,
-            has_recent_objects=False,
+            memory_context=memory_context,
         )
         # Capture the pre-resolution ambiguous_sets explicitly. resolve_objects
         # internally calls extract_object_bundle and then may consume matching
@@ -281,7 +296,7 @@ def _flag_mismatches(row: dict[str, Any], out: dict[str, Any]) -> None:
     # Ambiguous_sets sanity uses PRE-resolution count.
     #   strong_ambig         : extractor must have produced >=1 set.
     #   selection_followup   : context_extractor must have rebuilt >=1 set
-    #                          from prior_stateful_anchors before
+    #                          from the derived memory anchor view before
     #                          selection_resolution could consume it.
     #   weak_ambig / referential: pre==0 expected; pre>0 is a soft note,
     #                             not a hard fail (extractor may legitimately

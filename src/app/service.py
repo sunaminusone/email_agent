@@ -1,47 +1,30 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
 from src.agent.state import AgentState
+from src.app.agent_loop import _run_agent_loop
 from src.api_models import AgentPrototypeResponse, AgentRequest, FinalResponsePayload
 from src.common.messages import get_message
-from src.common.models import DemandProfile, IntentGroup, ObjectRef
-from src.executor import empty_execution_result, run_executor
+from src.common.models import DemandProfile, IntentGroup
 from src.common.execution_models import ExecutionResult
 from src.ingestion import build_demand_profile
+from src.ingestion.models import build_ingestion_memory_contribution
 from src.routing.intent_assembly import assemble_intent_groups
-from src.ingestion.demand_profile import narrow_demand_profile
 from src.ingestion.pipeline import build_ingestion_bundle
 from src.memory import (
     SessionStore,
     serialize_memory_snapshot,
-    snapshot_to_route_state,
     recall,
     reflect,
-    MemoryContribution,
 )
-from src.memory.models import ClarificationMemory, MemoryContext
-from src.objects.models import ObjectCandidate
+from src.memory.models import MemoryContext
+from src.objects.models import build_objects_memory_contribution
 from src.objects.resolution import resolve_objects
 from src.responser import ResponseInput, build_response_bundle
-from src.responser.planner import INFORMATIONAL_TOPICS
-from src.routing import route
-
-
-logger = logging.getLogger(__name__)
-
-
-def _extract_rag_confidence(execution_result: ExecutionResult) -> dict[str, Any] | None:
-    """Pull retrieval_confidence off the first technical_rag_tool call, if any."""
-    for call in execution_result.executed_calls:
-        if call.tool_name != "technical_rag_tool" or call.result is None:
-            continue
-        confidence = call.result.structured_facts.get("retrieval_confidence")
-        if confidence:
-            return dict(confidence)
-    return None
+from src.responser.models import build_response_memory_contribution
+from src.routing.models import build_routing_memory_contribution
 
 
 def _message_signature(message: dict[str, Any]) -> tuple[str, str, str]:
@@ -154,129 +137,6 @@ def _build_reply_preview(query: str, execution_run_payload: dict[str, Any], fina
     return get_message("reply_preview_done", locale, query=query, action_count=action_count)
 
 
-def _to_object_ref(candidate: ObjectCandidate | None) -> ObjectRef | None:
-    """Convert ObjectCandidate → ObjectRef, stripping resolution metadata.
-
-    ObjectCandidate IS-A ObjectRef, but memory/response layers should
-    store the lightweight ObjectRef to avoid carrying evidence_spans,
-    attribute_constraints, etc.
-    """
-    if candidate is None:
-        return None
-    return ObjectRef(
-        object_type=candidate.object_type,
-        identifier=candidate.identifier,
-        identifier_type=candidate.identifier_type,
-        display_name=candidate.display_name or candidate.canonical_value,
-        business_line=candidate.business_line,
-    )
-
-
-def _build_objects_contribution(
-    resolved_object_state,
-    should_soft_reset: bool,
-) -> MemoryContribution:
-    active_object = (
-        None if should_soft_reset
-        else (resolved_object_state.primary_object or resolved_object_state.active_object)
-    )
-    recent_objects = [
-        item
-        for item in [
-            _to_object_ref(resolved_object_state.primary_object),
-            _to_object_ref(resolved_object_state.active_object),
-            *[_to_object_ref(obj) for obj in resolved_object_state.secondary_objects],
-        ]
-        if item is not None
-    ]
-    return MemoryContribution(
-        source="objects",
-        set_active_object=_to_object_ref(active_object),
-        secondary_active_objects=[
-            item
-            for item in (_to_object_ref(obj) for obj in resolved_object_state.secondary_objects)
-            if item is not None
-        ],
-        append_recent_objects=recent_objects,
-        soft_reset_current_topic=should_soft_reset,
-        reason="objects: resolved from current turn",
-    )
-
-
-def _build_ingestion_contribution(
-    intent_groups: list[IntentGroup],
-) -> MemoryContribution:
-    return MemoryContribution(
-        source="ingestion",
-        intent_groups=list(intent_groups),
-        reason=f"ingestion: assembled {len(intent_groups)} intent group(s)",
-    )
-
-
-def _build_routing_contribution(
-    route,
-    current_snapshot,
-    active_object: ObjectRef | None,
-    should_soft_reset: bool,
-) -> MemoryContribution:
-    clarification = route.clarification
-    resume_route = (
-        current_snapshot.thread_memory.active_route
-        if current_snapshot.thread_memory.active_route and current_snapshot.thread_memory.active_route != "clarify"
-        else "execute"
-    )
-    return MemoryContribution(
-        source="routing",
-        active_route=route.action,
-        # v4 CSR mode renders every turn as csr_draft; no clarification-typed
-        # response_type can ever be produced, so route_phase is always "active".
-        route_phase="active",
-        active_business_line=getattr(active_object, "business_line", "") if active_object is not None else "",
-        set_pending_clarification=(
-            ClarificationMemory(
-                pending_clarification_type=clarification.kind,
-                pending_candidate_options=[option.label or option.value for option in clarification.options],
-                pending_identifier=(clarification.options[0].value if clarification.options else ""),
-                pending_question=clarification.prompt,
-                pending_route_after_clarification=resume_route,
-            )
-            if not should_soft_reset and clarification is not None
-            else None
-        ),
-        clear_pending_clarification=should_soft_reset or clarification is None,
-        reason=f"routing: action={route.action}",
-    )
-
-
-def _build_response_contribution(
-    response_plan,
-) -> MemoryContribution:
-    if response_plan is None or response_plan.memory_update is None:
-        return MemoryContribution(source="response", reason="response: no memory update")
-
-    mu = response_plan.memory_update
-    return MemoryContribution(
-        source="response",
-        mark_revealed_attributes=(
-            list(mu.response_memory.revealed_attributes) if mu.response_memory else None
-        ),
-        set_last_tool_results=(
-            list(mu.response_memory.last_tool_results) if mu.response_memory else None
-        ),
-        set_last_response_topics=(
-            list(mu.response_memory.last_response_topics) if mu.response_memory else None
-        ),
-        set_last_demand_type=(
-            mu.response_memory.last_demand_type if mu.response_memory else None
-        ),
-        set_last_demand_flags=(
-            list(mu.response_memory.last_demand_flags) if mu.response_memory else None
-        ),
-        soft_reset_current_topic=mu.soft_reset_current_topic,
-        reason=mu.reason or "response: plan applied",
-    )
-
-
 def _build_agent_input_payload(
     ingestion_bundle,
     resolved_object_state,
@@ -347,6 +207,8 @@ def _build_suggested_workflow(execution_plan_payload: dict[str, Any], *, locale:
 
 def _load_session_context(request: AgentRequest):
     session_store = SessionStore()
+    if request.start_new_conversation:
+        session_store.clear_session(request.thread_id)
     session = session_store.load_session(request.thread_id)
     memory_snapshot = session_store.load_memory_snapshot(request.thread_id)
     persisted_history = session.get("recent_turns", [])
@@ -401,37 +263,23 @@ def _persist_session_state(
 
     primary_route = agent_state.primary_route_decision
     contributions = [
-        _build_ingestion_contribution(intent_groups),
-        _build_objects_contribution(resolved_object_state, should_soft_reset),
-        _build_routing_contribution(primary_route, memory_context.snapshot, _to_object_ref(active_object), should_soft_reset),
-        _build_response_contribution(response_bundle.response_plan),
+        build_ingestion_memory_contribution(intent_groups),
+        build_objects_memory_contribution(resolved_object_state, should_soft_reset),
+        build_routing_memory_contribution(
+            primary_route,
+            memory_context.snapshot,
+            active_object,
+            should_soft_reset,
+        ),
+        build_response_memory_contribution(response_bundle.response_plan),
     ]
 
-    # v4 CSR mode renders every turn as csr_draft, but recall._compute_trajectory
-    # still keys on the pre-pivot vocabulary ("answer" / "clarification_answer")
-    # to detect a follow_up turn. Map informational answer_focus values back to
-    # "answer" so the follow_up branch keeps firing — otherwise post-answer
-    # turns silently fall through to topic_switch and lose context-reuse +
-    # candidate-confidence in objects.resolution.
-    last_turn_type_for_memory = (
-        "answer"
-        if response_bundle.response_plan.answer_focus in INFORMATIONAL_TOPICS
-        else final_response.response_type
-    )
     updated_snapshot = reflect(
         current_snapshot=memory_context.snapshot,
         contributions=contributions,
         thread_id=thread_id,
         normalized_query=ingestion_bundle.turn_core.normalized_query or ingestion_bundle.turn_core.raw_query,
-        last_turn_type=last_turn_type_for_memory,
-    )
-    # v4 CSR mode: every turn produces a csr_draft, so no response_type can
-    # signal that we are blocked waiting for the user — route_phase is always
-    # "active".
-    route_state = snapshot_to_route_state(
-        updated_snapshot,
-        route_phase="active",
-        last_assistant_prompt_type=final_response.response_type,
+        last_turn_type=final_response.response_type,
     )
     assistant_message = {
         "role": "assistant",
@@ -446,7 +294,6 @@ def _persist_session_state(
             "agent_debug": agent_state.debug_summary(),
             "semantic_debug": demand_profile.model_dump(mode="json"),
             "memory_snapshot": serialize_memory_snapshot(updated_snapshot),
-            "route_state": route_state,
         },
     }
     session_store.append_turns(
@@ -456,11 +303,7 @@ def _persist_session_state(
             assistant_message,
         ],
     )
-    session_store.persist_memory_snapshot(
-        thread_id, updated_snapshot,
-        route_phase="active",
-        last_assistant_prompt_type=final_response.response_type,
-    )
+    session_store.persist_memory_snapshot(thread_id, updated_snapshot)
     return assistant_message
 
 
@@ -511,192 +354,6 @@ def _assemble_agent_response(
     )
 
 
-def _run_agent_loop(
-    intent_groups: list[IntentGroup],
-    demand_profile: DemandProfile,
-    ingestion_bundle,
-    resolved_object_state,
-    memory_context: MemoryContext,
-) -> AgentState:
-    """Phase 2: iterate over intent groups, route and execute each independently.
-
-    A shared ToolCallCache enables:
-    - Deduplication: if group A already called catalog_lookup_tool for "CAR-T",
-      group B reuses the cached result instead of calling again.
-    - Cross-group observation: facts discovered by group A (e.g., product name,
-      business_line) are passed to group B's tool requests as enriched context.
-
-    Path evaluation (post-tool-selection) determines whether the system should
-    execute or clarify.  Clarification only triggers when ALL candidate paths
-    are insufficient and resolution chain cannot help.
-    """
-    from src.agent.tool_call_cache import ToolCallCache
-    from src.executor.engine import build_execution_context, extract_available_params
-    from src.executor.path_evaluation import (
-        evaluate_execution_paths,
-        find_resolution_provider,
-    )
-    from src.executor.tool_selector import select_tools
-    from src.routing.models import ClarificationPayload
-
-    agent_state = AgentState()
-    cache = ToolCallCache()
-
-    for group in intent_groups:
-        # Compute scoped demand ONCE per group — shared by routing and executor
-        scoped_demand = narrow_demand_profile(
-            demand_profile,
-            group,
-            prior_demand_type=memory_context.prior_demand_type,
-            prior_demand_flags=memory_context.prior_demand_flags,
-            continuity_confidence=memory_context.intent_continuity_confidence,
-        )
-
-        route_decision = route(
-            ingestion_bundle,
-            resolved_object_state,
-            focus_group=group,
-            scoped_demand=scoped_demand,
-        )
-
-        # CSR mode invariant: clarify/handoff are informational signals for
-        # the rep, not gates that block retrieval. Force every group through
-        # the execute path; preserve the original routing judgment on the
-        # decision's `reason` so the composer can surface it as a draft note.
-        if route_decision.action != "execute":
-            note_parts = [f"AI_ROUTING_NOTE original_action={route_decision.action}"]
-            if route_decision.reason:
-                note_parts.append(route_decision.reason)
-            if route_decision.clarification and route_decision.clarification.reason:
-                note_parts.append(
-                    f"clarification_reason={route_decision.clarification.reason}"
-                )
-            route_decision = route_decision.model_copy(update={
-                "action": "execute",
-                "reason": " | ".join(note_parts),
-            })
-
-        if route_decision.action == "execute":
-            # Build context (shared by path evaluation and executor)
-            context = build_execution_context(
-                ingestion_bundle=ingestion_bundle,
-                resolved_object_state=resolved_object_state,
-                route_decision=route_decision,
-                memory_snapshot=memory_context.snapshot,
-                focus_group=group,
-                demand_profile=demand_profile,
-                tool_call_cache=cache,
-                active_demand=scoped_demand,
-            )
-
-            # Path evaluation: select tools → assess readiness → decide
-            selections = select_tools(context)
-            available_params = extract_available_params(context, tool_call_cache=cache)
-            obj_type = context.primary_object.object_type if context.primary_object else ""
-
-            path_eval = evaluate_execution_paths(selections, obj_type, available_params)
-
-            if path_eval.recommended_action == "execute":
-                # Normal execution — run_executor handles dispatch + retry loop
-                execution_result = run_executor(
-                    ingestion_bundle=ingestion_bundle,
-                    resolved_object_state=resolved_object_state,
-                    route_decision=route_decision,
-                    memory_snapshot=memory_context.snapshot,
-                    focus_group=group,
-                    demand_profile=demand_profile,
-                    tool_call_cache=cache,
-                    active_demand=scoped_demand,
-                )
-                # CSR mode: a primary-tool error doesn't invalidate the
-                # always-include retrievals. As long as at least one call
-                # produced grounded output, treat the group as resolved so
-                # historical_thread_tool / technical_rag_tool results survive
-                # the merge into agent_state.merged_execution_result.
-                any_successful_call = any(
-                    call.status in ("ok", "partial")
-                    for call in execution_result.executed_calls
-                )
-                status = (
-                    "resolved"
-                    if execution_result.final_status in ("ok", "partial") or any_successful_call
-                    else "needs_clarification"
-                )
-            else:
-                # All paths insufficient — try resolution chain
-                provider = find_resolution_provider(path_eval, available_params)
-                if provider is not None:
-                    # Run executor with resolution provider as force_include
-                    execution_result = run_executor(
-                        ingestion_bundle=ingestion_bundle,
-                        resolved_object_state=resolved_object_state,
-                        route_decision=route_decision,
-                        memory_snapshot=memory_context.snapshot,
-                        focus_group=group,
-                        demand_profile=demand_profile,
-                        tool_call_cache=cache,
-                        active_demand=scoped_demand,
-                    )
-                    status = (
-                        "resolved"
-                        if execution_result.final_status in ("ok", "partial")
-                        else "needs_clarification"
-                    )
-                else:
-                    # Truly blocked — override to clarify
-                    execution_result = empty_execution_result(
-                        reason="all execution paths insufficient",
-                    )
-                    if path_eval.clarification_context is not None:
-                        missing_info = []
-                        for ids_list in path_eval.clarification_context.missing_by_path.values():
-                            for identifier in ids_list:
-                                if identifier not in missing_info:
-                                    missing_info.append(identifier)
-                        route_decision = route_decision.model_copy(update={
-                            "action": "clarify",
-                            "clarification": ClarificationPayload(
-                                kind="path_evaluation",
-                                reason="All candidate execution paths are insufficient.",
-                                missing_information=missing_info,
-                                path_context=path_eval.clarification_context,
-                            ),
-                        })
-                    else:
-                        route_decision = route_decision.model_copy(update={
-                            "action": "clarify",
-                        })
-                    status = "needs_clarification"
-
-        else:
-            # Unreachable in CSR mode (action is always coerced to "execute"
-            # above), but kept as defensive default in case future code
-            # introduces a non-execute action.
-            execution_result = empty_execution_result(
-                reason=f"No execution needed: action={route_decision.action}",
-            )
-            status = "resolved"
-
-        # CSR mode: retrieval confidence is a trust indicator surfaced to the
-        # rep through the renderer (📈 high / 📊 medium / ⚠️ low), never a
-        # gate. Log it for telemetry; the renderer reads it off the tool result.
-        if route_decision.action == "execute":
-            rag_confidence = _extract_rag_confidence(execution_result)
-            if rag_confidence is not None:
-                logger.info(
-                    "rag_confidence thread=%s confidence=%s",
-                    ingestion_bundle.turn_core.thread_id,
-                    rag_confidence,
-                )
-
-        agent_state.record(
-            group, route_decision, execution_result,
-            status=status, scoped_demand=scoped_demand,
-        )
-
-    return agent_state
-
-
 def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeResponse:
     if isinstance(request, dict):
         request = AgentRequest.model_validate(request)
@@ -715,9 +372,7 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
         user_query=request.user_query,
         conversation_history=merged_history,
         attachments=attachments,
-        prior_state=memory_context.snapshot,
-        stateful_anchors=memory_context.stateful_anchors,
-        has_recent_objects=bool(memory_context.recent_objects_by_relevance),
+        memory_context=memory_context,
     )
     resolved_object_state = resolve_objects(
         ingestion_bundle,

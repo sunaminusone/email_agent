@@ -29,6 +29,8 @@ from src.ingestion.parser_adapter import (
     adapt_parsed_result_to_parser_signals,
     invoke_parser,
 )
+from src.objects.models import ResolvedObjectState
+from src.routing.stages.object_routing import resolve_object_routing
 from src.routing.stages.dialogue_act import resolve_dialogue_act
 
 
@@ -93,7 +95,11 @@ def predict_one(query: str) -> dict:
     pred_aux_flags = sorted(f for f in AUX_FLAGS if request_flags.get(f, False))
 
     parser_signals = adapt_parsed_result_to_parser_signals(payload, source_query=query)
-    da_result = resolve_dialogue_act(parser_signals, stateful_anchors=None)
+    da_result = resolve_dialogue_act(
+        query,
+        parser_signals,
+        resolve_object_routing(ResolvedObjectState()),
+    )
     pred_dialogue_act = da_result.act
 
     return {

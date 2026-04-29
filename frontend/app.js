@@ -22,7 +22,7 @@ const sessionHint = document.getElementById("session_hint");
 const questionSamples = document.getElementById("question_samples");
 const refreshSamplesButton = document.getElementById("refresh-samples-btn");
 
-const CHAT_STORAGE_KEY = "email_agent.chat_messages";
+const CHAT_SESSIONS_STORAGE_KEY = "email_agent.chat_sessions";
 const THREAD_STORAGE_KEY = "email_agent.thread_id";
 
 const SAMPLE_QUESTIONS = {
@@ -97,6 +97,7 @@ const SAMPLE_CATEGORY_LABELS = {
 
 let messages = [];
 let threadId = "";
+let sessions = {};
 
 function escapeHtml(value) {
   return String(value)
@@ -147,11 +148,74 @@ function ensureThreadId() {
     threadId = window.localStorage.getItem(THREAD_STORAGE_KEY) || createThreadId();
     window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
   }
+  ensureSessionRecord(threadId);
   return threadId;
 }
 
-function syncStoredMessages() {
-  window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+function loadStoredSessions() {
+  try {
+    sessions = JSON.parse(window.localStorage.getItem(CHAT_SESSIONS_STORAGE_KEY) || "{}");
+  } catch (_error) {
+    sessions = {};
+  }
+  if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
+    sessions = {};
+  }
+}
+
+function saveStoredSessions() {
+  window.localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
+}
+
+function buildSessionTitle(sessionMessages) {
+  const firstUserMessage = (sessionMessages || []).find((message) => message.role === "user");
+  const preview = (firstUserMessage?.content || "").trim();
+  if (!preview) {
+    return "New conversation";
+  }
+  return preview.length > 56 ? `${preview.slice(0, 56)}...` : preview;
+}
+
+function ensureSessionRecord(id) {
+  if (!id) {
+    return;
+  }
+  if (!sessions[id]) {
+    sessions[id] = {
+      thread_id: id,
+      messages: [],
+      updated_at: new Date().toISOString(),
+      title: "New conversation",
+    };
+    saveStoredSessions();
+  }
+}
+
+function syncCurrentSession() {
+  const activeThreadId = ensureThreadId();
+  sessions[activeThreadId] = {
+    thread_id: activeThreadId,
+    messages: [...messages],
+    updated_at: new Date().toISOString(),
+    title: buildSessionTitle(messages),
+  };
+  saveStoredSessions();
+}
+
+function loadThreadSession(id) {
+  ensureSessionRecord(id);
+  threadId = id;
+  window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
+  messages = [...(sessions[id]?.messages || [])];
+}
+
+function createAndSwitchToNewThread() {
+  syncCurrentSession();
+  threadId = createThreadId();
+  window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
+  messages = [];
+  ensureSessionRecord(threadId);
+  syncCurrentSession();
 }
 
 function renderSessionHint() {
@@ -257,29 +321,41 @@ function renderChatHistory() {
 }
 
 function renderHistoryNav() {
-  if (!messages.length) {
+  const entries = Object.values(sessions)
+    .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+
+  if (!entries.length) {
     historyNav.innerHTML = '<p class="history-empty">No conversation yet.</p>';
     return;
   }
 
-  const items = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (message.role !== "user") {
-      continue;
-    }
+  historyNav.innerHTML = entries.map((entry) => {
+    const sessionMessages = entry.messages || [];
+    const title = entry.title || buildSessionTitle(sessionMessages);
+    const updated = String(entry.updated_at || "").replace("T", " ").slice(0, 16) || "No activity yet";
+    const isActive = entry.thread_id === ensureThreadId();
+    return `
+      <button type="button" class="history-item ${isActive ? "history-item-active" : ""}" data-thread-id="${escapeHtml(entry.thread_id || "")}">
+        <p class="history-item-title">${escapeHtml(title)}</p>
+        <p class="history-item-meta">${escapeHtml(updated)}</p>
+      </button>
+    `;
+  }).join("");
 
-    const preview = (message.content || "").trim() || "Untitled conversation";
-    const shortened = preview.length > 56 ? `${preview.slice(0, 56)}...` : preview;
-    items.push(`
-      <article class="history-item">
-        <p class="history-item-title">${escapeHtml(shortened)}</p>
-        <p class="history-item-meta">User message ${items.length + 1}</p>
-      </article>
-    `);
-  }
-
-  historyNav.innerHTML = items.join("") || '<p class="history-empty">No conversation yet.</p>';
+  historyNav.querySelectorAll("[data-thread-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextThreadId = button.dataset.threadId || "";
+      if (!nextThreadId || nextThreadId === threadId) {
+        return;
+      }
+      syncCurrentSession();
+      loadThreadSession(nextThreadId);
+      renderChatHistory();
+      renderHistoryNav();
+      renderSessionHint();
+      resetInspectorPanels("Loaded prior conversation. Submit a new message to continue this thread.");
+    });
+  });
 }
 
 function resetInspectorPanels(errorMessage = "等待输入...") {
@@ -338,12 +414,9 @@ function normalizeAssistantMessage(output) {
   };
 }
 
-try {
-  messages = JSON.parse(window.localStorage.getItem(CHAT_STORAGE_KEY) || "[]");
-} catch (_error) {
-  messages = [];
-}
+loadStoredSessions();
 ensureThreadId();
+loadThreadSession(threadId);
 renderSessionHint();
 renderChatHistory();
 renderHistoryNav();
@@ -585,7 +658,7 @@ form.addEventListener("submit", async (event) => {
     };
 
     messages = [...messages, userMessage];
-    syncStoredMessages();
+    syncCurrentSession();
     renderChatHistory();
     renderHistoryNav();
     trustSummary.innerHTML = '<p class="signal-state">Retrieving similar threads + docs…</p>';
@@ -610,7 +683,7 @@ form.addEventListener("submit", async (event) => {
     const assistantMessage = normalizeAssistantMessage(output);
 
     messages = [...messages, assistantMessage];
-    syncStoredMessages();
+    syncCurrentSession();
     renderChatHistory();
     renderHistoryNav();
     if (output.agent_input?.thread_id) {
@@ -636,7 +709,7 @@ form.addEventListener("submit", async (event) => {
   } catch (error) {
     if (messages.length && messages[messages.length - 1].role === "user") {
       messages = messages.slice(0, -1);
-      syncStoredMessages();
+      syncCurrentSession();
       renderChatHistory();
       renderHistoryNav();
     }
@@ -649,9 +722,7 @@ form.addEventListener("submit", async (event) => {
 
 clearChatButton.addEventListener("click", () => {
   messages = [];
-  threadId = createThreadId();
-  window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
-  syncStoredMessages();
+  syncCurrentSession();
   renderChatHistory();
   renderHistoryNav();
   renderSessionHint();
@@ -659,10 +730,7 @@ clearChatButton.addEventListener("click", () => {
 });
 
 newChatButton.addEventListener("click", () => {
-  messages = [];
-  threadId = createThreadId();
-  window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
-  syncStoredMessages();
+  createAndSwitchToNewThread();
   renderChatHistory();
   renderHistoryNav();
   renderSessionHint();

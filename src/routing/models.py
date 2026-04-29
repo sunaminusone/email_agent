@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.common.models import ObjectRef
+from src.memory.models import ClarificationMemory, MemoryContribution, MemorySnapshot
 from src.common.models import ObjectType
 from src.routing.vocabulary import ActionType, DialogueActType
 
@@ -75,3 +77,38 @@ class RouteDecision(_RoutingModel):
     dialogue_act: DialogueActResult = Field(default_factory=DialogueActResult)
     clarification: ClarificationPayload | None = None
     reason: str = ""
+
+
+def build_routing_memory_contribution(
+    route: RouteDecision,
+    current_snapshot: MemorySnapshot,
+    active_object: ObjectRef | None,
+    should_soft_reset: bool,
+) -> MemoryContribution:
+    clarification = route.clarification
+    resume_route = (
+        current_snapshot.thread_memory.active_route
+        if current_snapshot.thread_memory.active_route
+        and current_snapshot.thread_memory.active_route != "clarify"
+        else "execute"
+    )
+    return MemoryContribution(
+        source="routing",
+        active_route=route.action,
+        active_business_line=active_object.business_line if active_object is not None else "",
+        set_pending_clarification=(
+            ClarificationMemory(
+                pending_clarification_type=clarification.kind,
+                pending_candidate_options=[
+                    option.label or option.value for option in clarification.options
+                ],
+                pending_identifier=(clarification.options[0].value if clarification.options else ""),
+                pending_question=clarification.prompt,
+                pending_route_after_clarification=resume_route,
+            )
+            if not should_soft_reset and clarification is not None
+            else None
+        ),
+        clear_pending_clarification=should_soft_reset or clarification is None,
+        reason=f"routing: action={route.action}",
+    )

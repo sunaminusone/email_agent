@@ -281,28 +281,7 @@ def _session_payload(agent_input: Mapping[str, Any]) -> Mapping[str, Any]:
             "last_user_goal": thread_memory.get("last_user_goal", ""),
         }
 
-    route_state = agent_input.get("route_state", {})
-    if not isinstance(route_state, Mapping):
-        return {}
-
-    object_memory = route_state.get("object_memory", {})
-    if not isinstance(object_memory, Mapping):
-        object_memory = {}
-    active_object = object_memory.get("active_object", {})
-    if not isinstance(active_object, Mapping):
-        active_object = {}
-
-    return {
-        "active_entity": {
-            "identifier": active_object.get("identifier", ""),
-            "identifier_type": active_object.get("identifier_type", ""),
-            "entity_kind": active_object.get("object_type", ""),
-            "display_name": active_object.get("display_name", ""),
-            "business_line": active_object.get("business_line", ""),
-        },
-        "active_service_name": "",
-        "active_product_name": active_object.get("display_name", ""),
-    }
+    return {}
 
 
 def _routing_memory(agent_input: Mapping[str, Any]) -> Mapping[str, Any]:

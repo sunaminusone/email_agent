@@ -31,11 +31,23 @@ def route(
 
     object_routing = resolve_object_routing(resolved_object_state)
     dialogue_act = resolve_dialogue_act(
+        ingestion_bundle.turn_core.normalized_query or ingestion_bundle.turn_core.raw_query,
         parser_signals,
-        stateful_anchors=ingestion_bundle.stateful_anchors,
+        object_routing,
+        memory_context=ingestion_bundle.memory_context,
     )
 
-    clarification = decide_clarification(object_routing, dialogue_act)
+    scoped_missing_information = _scope_missing_information(
+        parser_signals.missing_information,
+        focus_group=focus_group,
+    )
+
+    clarification = decide_clarification(
+        object_routing,
+        dialogue_act,
+        missing_information=scoped_missing_information,
+        missing_object_type=(focus_group.object_type if focus_group is not None else ""),
+    )
     handoff_required, handoff_reason = decide_handoff(
         risk_level=parser_signals.context.risk_level,
         needs_human_review=parser_signals.context.needs_human_review,
@@ -108,3 +120,24 @@ def _determine_action(
     if has_object or can_execute_without_object:
         return "execute"
     return "respond"
+
+
+def _scope_missing_information(
+    missing_information: list[str],
+    *,
+    focus_group: IntentGroup | None,
+) -> list[str]:
+    if focus_group is None:
+        return list(missing_information)
+
+    object_type = focus_group.object_type
+    if object_type == "order":
+        allowed = {"order_number", "customer_identifier", "customer_name"}
+    elif object_type == "invoice":
+        allowed = {"invoice_number", "customer_identifier", "customer_name"}
+    elif object_type == "shipment":
+        allowed = {"order_number", "tracking_number", "customer_identifier", "customer_name"}
+    else:
+        return []
+
+    return [item for item in missing_information if item in allowed]

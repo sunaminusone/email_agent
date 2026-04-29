@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -10,15 +11,48 @@ from src.ingestion.models import (
     ParserContext,
     ParserRequestFlags,
     ParserSignals,
-    TurnCore,
     TurnSignals,
+    TurnCore,
 )
 from src.common.models import IntentGroup
 from src.ingestion import build_demand_profile
 from src.ingestion.demand_profile import narrow_demand_profile
+from src.memory.models import ClarificationMemory, MemoryContext, MemorySnapshot
 from src.objects.models import AmbiguousObjectSet, ObjectCandidate, ResolvedObjectState
 from src.routing.orchestrator import route
 from src.routing.runtime import route_single_group
+
+
+class _FakeDialogueActLLM:
+    def __init__(
+        self,
+        *,
+        act: str,
+        is_continuation: bool = False,
+        confidence: float = 0.9,
+        reason: str = "LLM fallback",
+    ) -> None:
+        self._act = act
+        self._is_continuation = is_continuation
+        self._confidence = confidence
+        self._reason = reason
+
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, _prompt):
+        class _Result:
+            act = "inquiry"
+            is_continuation = False
+            confidence = 0.0
+            reason = ""
+
+        result = _Result()
+        result.act = self._act
+        result.is_continuation = self._is_continuation
+        result.confidence = self._confidence
+        result.reason = self._reason
+        return result
 
 
 def test_product_inquiry_routes_to_execute():
@@ -454,3 +488,206 @@ def test_elaboration_routes_to_execute_with_continuation():
     assert decision.action == "execute"
     assert decision.dialogue_act.act == "inquiry"
     assert decision.dialogue_act.is_continuation is True
+
+
+def test_pending_clarification_reply_uses_memory_context_to_route_selection() -> None:
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="sure",
+            normalized_query="sure",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(semantic_intent="unknown", intent_confidence=0.2)
+            )
+        ),
+        memory_context=MemoryContext(
+            snapshot=MemorySnapshot(
+                clarification_memory=ClarificationMemory(
+                    pending_clarification_type="object_disambiguation",
+                    pending_candidate_options=["A", "B"],
+                )
+            )
+        ),
+    )
+
+    resolved = ResolvedObjectState(
+        active_object=ObjectCandidate(
+            object_type="product",
+            canonical_value="CD3 Antibody",
+            display_name="CD3 Antibody",
+            confidence=0.8,
+        ),
+        resolution_reason="Active object reused.",
+    )
+
+    decision = route_single_group(
+        ingestion_bundle=ingestion_bundle,
+        resolved_object_state=resolved,
+    )
+
+    assert decision.dialogue_act.act == "selection"
+    assert "pending_clarification" in decision.dialogue_act.matched_signals
+
+
+def test_group_scoped_missing_information_only_clarifies_for_operational_focus_group() -> None:
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="check my order and explain CAR-T",
+            normalized_query="check my order and explain CAR-T",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(semantic_intent="order_support", intent_confidence=0.85),
+                request_flags=ParserRequestFlags(needs_order_status=True, needs_protocol=True),
+                missing_information=["order_number", "target_name"],
+            )
+        ),
+    )
+    resolved = ResolvedObjectState(
+        resolution_reason="No object found.",
+    )
+
+    operational_group = IntentGroup(
+        intent="order_support",
+        request_flags=["needs_order_status"],
+        object_type="order",
+        confidence=0.9,
+    )
+    technical_group = IntentGroup(
+        intent="technical_question",
+        request_flags=["needs_protocol"],
+        object_type="scientific_target",
+        confidence=0.9,
+    )
+    demand_profile = build_demand_profile(
+        ingestion_bundle.turn_signals.parser_signals,
+        [operational_group, technical_group],
+    )
+
+    operational_decision = route(
+        ingestion_bundle,
+        resolved,
+        focus_group=operational_group,
+        scoped_demand=narrow_demand_profile(demand_profile, operational_group),
+    )
+    technical_decision = route(
+        ingestion_bundle,
+        resolved,
+        focus_group=technical_group,
+        scoped_demand=narrow_demand_profile(demand_profile, technical_group),
+    )
+
+    assert operational_decision.action == "clarify"
+    assert operational_decision.clarification is not None
+    assert operational_decision.clarification.kind == "missing_information"
+    assert operational_decision.clarification.missing_information == ["order_number"]
+
+    assert technical_decision.clarification is None
+
+
+def test_llm_fallback_classifies_non_english_ambiguous_short_reply() -> None:
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="这个可以",
+            normalized_query="这个可以",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(semantic_intent="unknown", intent_confidence=0.35)
+            )
+        ),
+    )
+    resolved = ResolvedObjectState(
+        active_object=ObjectCandidate(
+            object_type="product",
+            canonical_value="CD3 Antibody",
+            display_name="CD3 Antibody",
+            confidence=0.8,
+        ),
+        resolution_reason="Active object reused.",
+    )
+
+    with patch(
+        "src.routing.stages.dialogue_act.get_llm",
+        return_value=_FakeDialogueActLLM(
+            act="closing",
+            is_continuation=False,
+            confidence=0.86,
+            reason="Short non-English acknowledgement-style reply.",
+        ),
+    ):
+        decision = route_single_group(
+            ingestion_bundle=ingestion_bundle,
+            resolved_object_state=resolved,
+        )
+
+    assert decision.dialogue_act.act == "closing"
+    assert "llm_fallback" in decision.dialogue_act.matched_signals
+    assert decision.dialogue_act.confidence == 0.86
+
+
+def test_llm_fallback_classifies_ambiguous_selection_phrase() -> None:
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="Let's go with that",
+            normalized_query="Let's go with that",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(semantic_intent="unknown", intent_confidence=0.3)
+            )
+        ),
+    )
+    resolved = ResolvedObjectState(
+        active_object=ObjectCandidate(
+            object_type="product",
+            canonical_value="CD3 Antibody",
+            display_name="CD3 Antibody",
+            confidence=0.8,
+        ),
+        resolution_reason="Active object reused.",
+    )
+
+    with patch(
+        "src.routing.stages.dialogue_act.get_llm",
+        return_value=_FakeDialogueActLLM(
+            act="selection",
+            confidence=0.9,
+            reason="Purchase-style acceptance of the previously discussed option.",
+        ),
+    ):
+        decision = route_single_group(
+            ingestion_bundle=ingestion_bundle,
+            resolved_object_state=resolved,
+        )
+
+    assert decision.dialogue_act.act == "selection"
+    assert decision.dialogue_act.selection_value == "Let's go with that"
+    assert "llm_fallback" in decision.dialogue_act.matched_signals
+
+
+def test_llm_fallback_failure_degrades_safely_to_inquiry() -> None:
+    ingestion_bundle = IngestionBundle(
+        turn_core=TurnCore(
+            raw_query="这个可以吗",
+            normalized_query="这个可以吗",
+        ),
+        turn_signals=TurnSignals(
+            parser_signals=ParserSignals(
+                context=ParserContext(semantic_intent="unknown", intent_confidence=0.2)
+            )
+        ),
+    )
+
+    with patch(
+        "src.routing.stages.dialogue_act.get_llm",
+        side_effect=RuntimeError("LLM unavailable"),
+    ):
+        decision = route_single_group(
+            ingestion_bundle=ingestion_bundle,
+            resolved_object_state=ResolvedObjectState(),
+        )
+
+    assert decision.dialogue_act.act == "inquiry"
+    assert "llm_fallback" not in decision.dialogue_act.matched_signals

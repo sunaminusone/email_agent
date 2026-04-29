@@ -333,6 +333,20 @@ button {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.88);
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.history-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+.history-item-active {
+  border-color: rgba(18, 97, 60, 0.35);
+  box-shadow: 0 0 0 3px rgba(18, 97, 60, 0.08);
 }
 
 .history-item-title {

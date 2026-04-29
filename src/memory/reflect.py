@@ -80,7 +80,7 @@ def _merge_contributions(
     """Merge all layer contributions into one MemoryUpdate.
 
     Merge rules:
-    - Scalar fields (active_route, route_phase): last writer wins
+    - Scalar fields (active_route): last writer wins
     - List fields (append_recent_objects): concatenate + dedupe
     - Control signals (soft_reset): any True wins (OR semantics)
     """
@@ -88,20 +88,16 @@ def _merge_contributions(
 
     # Build thread memory from contributions
     active_route = ""
-    route_phase = "active"
     active_business_line = ""
     for c in contributions:
         if c.active_route is not None:
             active_route = c.active_route
-        if c.route_phase is not None:
-            route_phase = c.route_phase
         if c.active_business_line is not None:
             active_business_line = c.active_business_line
 
     update.thread_memory = ThreadMemory(
         thread_id=thread_id,
         active_route=active_route,
-        route_phase=route_phase,
         last_turn_type=last_turn_type,
         last_user_goal=normalized_query,
         active_business_line=active_business_line,

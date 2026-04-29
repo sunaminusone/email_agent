@@ -82,9 +82,6 @@ def run_observation(csv_path: str | None = None) -> None:
             user_query=query,
             conversation_history=None,
             attachments=None,
-            prior_state=None,
-            stateful_anchors=None,
-            has_recent_objects=False,
         )
         normalized = bundle.turn_core.normalized_query
         ps = bundle.turn_signals.parser_signals
