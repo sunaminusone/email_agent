@@ -46,7 +46,7 @@ from src.ingestion.pipeline import build_ingestion_bundle  # noqa: E402
 from src.memory.models import ClarificationMemory, MemoryContext, MemorySnapshot  # noqa: E402
 from src.objects.extraction import extract_object_bundle  # noqa: E402
 from src.objects.resolution import resolve_objects  # noqa: E402
-from src.routing.intent_assembly import assemble_intent_groups  # noqa: E402
+from src.ingestion.intent_assembly import assemble_intent_groups  # noqa: E402
 from src.routing.orchestrator import route  # noqa: E402
 from tests.fixtures.objects_routing_audit_corpus import AUDIT_CORPUS  # noqa: E402
 

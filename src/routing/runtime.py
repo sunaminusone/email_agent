@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from src.common.models import DemandProfile, GroupDemand, IntentGroup
 from src.ingestion.demand_profile import build_demand_profile, narrow_demand_profile
-from src.routing.intent_assembly import assemble_intent_groups
+from src.ingestion.intent_assembly import assemble_intent_groups
 from src.ingestion.models import IngestionBundle
 from src.objects.models import ResolvedObjectState
 from src.routing.models import RouteDecision

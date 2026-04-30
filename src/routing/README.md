@@ -7,7 +7,6 @@ what action to take (execute, clarify, handoff, or respond).
 ## Structure
 
 - `models.py` — canonical routing contracts (`RouteDecision`, `DialogueActResult`, etc.)
-- `intent_assembly.py` — deterministic binding of request flags to resolved objects → `IntentGroup`
 - `stages/` — internal layered routing implementation
   - `dialogue_act.py` — signal-driven dialogue act classification
 - `policies/` — routing helpers for clarification, handoff, and answer-shaping decisions

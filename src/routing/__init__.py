@@ -1,4 +1,3 @@
-from .intent_assembly import assemble_intent_groups
 from .models import (
     ClarificationOption,
     ClarificationPayload,
@@ -13,7 +12,6 @@ __all__ = [
     "ClarificationPayload",
     "DialogueActResult",
     "RouteDecision",
-    "assemble_intent_groups",
     "route",
     "route_single_group",
 ]

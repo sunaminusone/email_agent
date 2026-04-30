@@ -15,7 +15,7 @@ from src.conversations import ConversationStore
 _conversation_store = ConversationStore()
 from src.ingestion import build_demand_profile
 from src.ingestion.models import build_ingestion_memory_contribution
-from src.routing.intent_assembly import assemble_intent_groups
+from src.ingestion.intent_assembly import assemble_intent_groups
 from src.ingestion.pipeline import build_ingestion_bundle
 from src.memory import (
     SessionStore,

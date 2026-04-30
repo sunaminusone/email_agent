@@ -17,7 +17,7 @@ from src.ingestion.demand_profile import narrow_demand_profile
 from src.common.execution_models import ExecutedToolCall, ExecutionResult
 from src.executor.engine import run_executor
 from src.ingestion import build_demand_profile
-from src.routing.intent_assembly import assemble_intent_groups
+from src.ingestion.intent_assembly import assemble_intent_groups
 from src.ingestion.models import (
     IngestionBundle,
     ParserContext,

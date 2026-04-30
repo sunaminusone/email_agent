@@ -33,12 +33,14 @@ from .demand_profile import (
     FLAG_DEMAND,
     INTENT_DEMAND,
 )
+from .intent_assembly import assemble_intent_groups
 from .pipeline import build_ingestion_bundle
 
 __all__ = [
     "AttributeConstraint",
     "AttachmentPointer",
     "AttachmentSignals",
+    "assemble_intent_groups",
     "build_demand_profile",
     "FLAG_DEMAND",
     "INTENT_DEMAND",

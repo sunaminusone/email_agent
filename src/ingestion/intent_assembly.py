@@ -4,7 +4,7 @@ Runs AFTER object resolution. Binds request_flags to resolved objects
 using flag-to-object-type affinity rules derived from tool capabilities.
 
 Usage:
-    from src.routing.intent_assembly import assemble_intent_groups
+    from src.ingestion.intent_assembly import assemble_intent_groups
 
     groups = assemble_intent_groups(
         request_flags=ingestion_bundle.turn_signals.parser_signals.request_flags,
