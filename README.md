@@ -81,7 +81,6 @@ src/
   rag/           # vectorstore, scope-aware retrieval, reranking, ingestion
   response/      # content blocks, planning, rendering, rewrite
   routing/       # route decision and dialogue-act handling
-  strategies/    # reusable heuristics
   tools/         # tool contracts, registry, mappers, implementations
 
 docs/            # v3 architecture and subsystem design docs
