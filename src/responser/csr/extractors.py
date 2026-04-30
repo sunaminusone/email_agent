@@ -4,7 +4,7 @@ from typing import Any
 
 from src.common.execution_models import ExecutedToolCall
 from src.responser.models import ResponseInput
-from src.services.service_documents import get_primary_service_document_link
+from src.documents.retrieval.service_documents import get_primary_service_document_link
 
 _TOOL_BUCKETS: dict[str, str] = {
     "historical_thread_tool": "historical",

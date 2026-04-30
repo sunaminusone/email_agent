@@ -4,11 +4,10 @@ import logging
 from functools import lru_cache
 from typing import Any
 
-from src.services.service_documents import (
+from src.documents.retrieval.service_documents import (
     SERVICE_CATALOG_TABLE,
     SERVICE_DOCUMENTS_TABLE,
     build_connection_string,
-    generate_presigned_document_url,
 )
 
 try:

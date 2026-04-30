@@ -31,7 +31,7 @@ import psycopg  # noqa: E402
 from psycopg.rows import dict_row  # noqa: E402
 
 from src.config import get_embeddings  # noqa: E402
-from src.services.service_documents import build_connection_string  # noqa: E402
+from src.documents.retrieval.service_documents import build_connection_string  # noqa: E402
 
 ATTACHMENTS_CACHE_PATH = PROJECT_ROOT / "data" / "processed" / "hubspot_attachments_cache.json"
 CHROMA_DIR = PROJECT_ROOT / "data" / "processed" / "chroma_historical_threads"

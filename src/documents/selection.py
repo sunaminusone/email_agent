@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.services.service_documents import generate_presigned_document_url
+from src.documents.storage import generate_presigned_document_url
 
 from .normalization import (
     business_line_matches,
