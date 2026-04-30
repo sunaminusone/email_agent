@@ -54,17 +54,12 @@ def build_document_lookup_params(request: ToolRequest) -> dict[str, Any]:
         or ""
     )
 
-    # Parser constraints for retrieval refinement
-    tool_constraints = request.constraints.tool
-    usage_context = (tool_constraints.get("usage_context") or "").strip()
-
     return {
         "query": request.query,
         "catalog_numbers": dedupe_strings(catalog_numbers),
         "product_names": dedupe_strings(product_names),
         "document_names": dedupe_strings(document_names),
         "business_line_hint": business_line_hint,
-        "usage_context": usage_context,
         "top_k": 5,
     }
 

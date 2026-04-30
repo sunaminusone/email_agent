@@ -59,8 +59,6 @@ def build_catalog_lookup_params(request: ToolRequest) -> dict[str, Any]:
     # Parser constraints as fallback when object resolution didn't capture them
     if not format_or_size:
         format_or_size = (tool_constraints.get("format_or_size") or "").strip()
-    grade_or_quality = (tool_constraints.get("grade_or_quality") or "").strip()
-    usage_context = (tool_constraints.get("usage_context") or "").strip()
 
     return {
         "query": request.query,
@@ -71,8 +69,6 @@ def build_catalog_lookup_params(request: ToolRequest) -> dict[str, Any]:
         "applications": dedupe_strings([application] if application else []),
         "species": dedupe_strings([species] if species else []),
         "format_or_size": format_or_size,
-        "grade_or_quality": grade_or_quality,
-        "usage_context": usage_context,
         "business_line_hint": business_line_hint,
         "top_k": 10,
     }
