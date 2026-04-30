@@ -20,7 +20,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.integrations.hubspot.service import HubSpotClient  # noqa: E402
+from src.data_sources.hubspot.service import HubSpotClient  # noqa: E402
 
 CSV_PATH = PROJECT_ROOT / "data" / "processed" / "hubspot_form_inquiries_long.csv"
 CACHE_PATH = PROJECT_ROOT / "data" / "processed" / "hubspot_attachments_cache.json"

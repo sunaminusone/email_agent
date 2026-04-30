@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.integrations import HubSpotClient
+from src.data_sources import HubSpotClient
 
 
 CONTACT_US_FORM_ID = "7fcd4b55-c78d-4401-b9b3-0f7a30456c0d"

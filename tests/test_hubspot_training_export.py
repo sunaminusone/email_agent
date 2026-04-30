@@ -5,7 +5,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.integrations.hubspot.service import (
+from src.data_sources.hubspot.service import (
     build_training_examples_from_conversation_messages,
     _clean_text,
     _extract_latest_email_reply,
