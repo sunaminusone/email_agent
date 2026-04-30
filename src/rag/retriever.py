@@ -248,8 +248,8 @@ def _entity_matches(metadata: Dict[str, Any], kind: str, canonical_normalized: s
     # Type-aware match for the Layer-2 active-entity boost. Requires the
     # chunk's entity_type to equal `kind` so a product chunk cannot match
     # active_service (or vice versa) via string equality on entity_name.
-    # Both service_page_ingestion and email_knowledge_extraction set
-    # entity_type explicitly; legacy chunks without it forfeit the boost.
+    # service_page_ingestion sets entity_type explicitly; legacy chunks
+    # without it forfeit the boost.
     if not canonical_normalized:
         return False
     meta_kind = str(metadata.get("entity_type") or "").strip().lower()
