@@ -24,14 +24,55 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
+import psycopg
+from dotenv import load_dotenv
 from langchain_core.documents import Document
+from psycopg.rows import dict_row
 
 from src.objects.registries.service_registry import KNOWN_BUSINESS_LINES
+from src.services.service_documents import build_connection_string
 from .ingestion_config import build_chunk_metadata, build_embedding_string
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EMAIL_KNOWLEDGE_JSONL_PATH = _PROJECT_ROOT / "data" / "processed" / "rag_email_facts.jsonl"
+
+# Pulls one row per thread with its first customer message + first sales reply,
+# preserving the column names the legacy CSV exposed (so --body-column args
+# like thread_first_reply_text continue to work without translation).
+_PG_QUERY = """
+    WITH first_idx AS (
+        SELECT
+            thread_id,
+            MIN(CASE WHEN role = 'customer' THEN message_index END) AS first_customer_idx,
+            MIN(CASE WHEN role = 'sales' THEN message_index END) AS first_sales_idx
+        FROM historical_thread_messages
+        GROUP BY thread_id
+    )
+    SELECT
+        t.submission_id,
+        t.contact_id,
+        t.submitted_at,
+        t.sender_name,
+        t.sender_email AS email,
+        t.institution,
+        t.service_of_interest,
+        t.products_of_interest,
+        cust_msg.source AS customer_message_source,
+        sales_msg.subject AS reply_subject,
+        cust_msg.body AS thread_first_inquiry,
+        sales_msg.body AS thread_first_reply_text,
+        t.message_count
+    FROM historical_threads t
+    LEFT JOIN first_idx fi ON fi.thread_id = t.thread_id
+    LEFT JOIN historical_thread_messages cust_msg
+        ON cust_msg.thread_id = t.thread_id
+       AND cust_msg.message_index = fi.first_customer_idx
+    LEFT JOIN historical_thread_messages sales_msg
+        ON sales_msg.thread_id = t.thread_id
+       AND sales_msg.message_index = fi.first_sales_idx
+    WHERE sales_msg.body IS NOT NULL
+    ORDER BY t.thread_id
+"""
 
 # ---------------------------------------------------------------------------
 # 提取提示词
@@ -357,33 +398,38 @@ def call_llm(email_body: str, *, model: str = "claude-opus-4-6") -> list[dict[st
 # 命令行运行器
 # ---------------------------------------------------------------------------
 
+def _fetch_rows_from_pg(*, limit: int | None) -> list[dict[str, Any]]:
+    sql = _PG_QUERY
+    if limit is not None:
+        sql = sql.rstrip().rstrip(";") + f"\n    LIMIT {int(limit)}"
+    with psycopg.connect(build_connection_string()) as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql)
+            return cur.fetchall()
+
+
 def run_extraction(
-    input_csv: str,
     output_jsonl: str,
     *,
     model: str = "claude-opus-4-6",
-    body_column: str = "body",
+    body_column: str = "thread_first_reply_text",
     dry_run: bool = False,
     limit: int | None = None,
 ) -> None:
-    df = pd.read_csv(input_csv)
-    if body_column not in df.columns:
-        available = list(df.columns)
-        raise ValueError(f"列 '{body_column}' 不存在，可用列：{available}")
+    load_dotenv(_PROJECT_ROOT / ".env")
+    rows = _fetch_rows_from_pg(limit=limit)
+    total = len(rows)
 
-    rows = df.iterrows()
-    total = len(df)
-    if limit:
-        import itertools
-        rows = itertools.islice(rows, limit)
-        total = min(total, limit)
+    if rows and body_column not in rows[0]:
+        available = list(rows[0].keys())
+        raise ValueError(f"列 '{body_column}' 不存在，可用列：{available}")
 
     out_path = Path(output_jsonl)
     extracted_count = 0
     email_count = 0
 
     with out_path.open("w", encoding="utf-8") as fout:
-        for idx, row in rows:
+        for idx, row in enumerate(rows):
             email_count += 1
             body = str(row.get(body_column, "") or "").strip()
             if not body or len(body) < 30:
@@ -422,17 +468,21 @@ def run_extraction(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="从邮件 CSV 中提取 ProMab RAG 知识库")
-    parser.add_argument("--input", default="sample_responses2.csv", help="输入 CSV 文件路径")
+    parser = argparse.ArgumentParser(
+        description="从 Postgres historical_threads 表中提取 ProMab RAG 知识库"
+    )
     parser.add_argument("--output", default="rag_facts.jsonl", help="输出 JSONL 文件路径")
     parser.add_argument("--model", default="claude-opus-4-6", help="Claude 模型 ID")
-    parser.add_argument("--body-column", default="body", help="包含邮件正文的 CSV 列名")
+    parser.add_argument(
+        "--body-column",
+        default="thread_first_reply_text",
+        help="送 LLM 的列名,可选:thread_first_reply_text / thread_first_inquiry",
+    )
     parser.add_argument("--limit", type=int, default=None, help="仅处理前 N 封邮件（用于测试）")
     parser.add_argument("--dry-run", action="store_true", help="仅显示将处理的内容，不调用 LLM")
     args = parser.parse_args()
 
     run_extraction(
-        args.input,
         args.output,
         model=args.model,
         body_column=args.body_column,
