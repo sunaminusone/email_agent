@@ -19,7 +19,7 @@ PRODUCT_DATA_FILES = {
     "car_t": BASE_DIR / "data" / "processed" / "CAR_T_products.xlsx",
     "mrna_lnp": BASE_DIR / "data" / "processed" / "mRNA_LNP_products.xlsx",
 }
-PRODUCT_REGISTRY_BACKEND = (os.getenv("OBJECTS_PRODUCT_REGISTRY_BACKEND") or "excel").strip().lower()
+PRODUCT_REGISTRY_BACKEND = (os.getenv("OBJECTS_PRODUCT_REGISTRY_BACKEND") or "auto").strip().lower()
 PRODUCT_REGISTRY_TABLE = os.getenv("OBJECTS_PRODUCT_REGISTRY_TABLE", "product_catalog")
 
 
@@ -239,32 +239,18 @@ class PostgresProductRegistrySource:
         query = f"""
             SELECT
                 catalog_no,
-                canonical_name,
+                name,
                 business_line,
+                record_type,
                 aliases,
                 target_antigen,
-                application_text,
-                species_reactivity_text,
-                format_or_size,
-                clone,
-                clonality,
-                isotype,
-                ig_class,
-                gene_id,
-                gene_accession,
-                swissprot,
-                costimulatory_domain,
-                construct,
+                applications,
+                species_reactivity,
+                format,
                 product_type,
-                group_name,
-                group_type,
-                group_subtype,
-                group_summary,
-                price_usd,
-                unit,
-                cell_number,
-                marker,
-                source_file,
+                price,
+                attributes,
+                source_file_path,
                 source_sheet
             FROM {self._table_name}
         """
@@ -278,8 +264,10 @@ class PostgresProductRegistrySource:
 
 def get_product_registry_source() -> ProductRegistrySource:
     backend = PRODUCT_REGISTRY_BACKEND
+    dsn = _postgres_dsn()
+    if backend == "auto":
+        return PostgresProductRegistrySource(dsn=dsn) if dsn else ExcelProductRegistrySource()
     if backend == "postgres":
-        dsn = _postgres_dsn()
         if not dsn:
             raise ValueError("OBJECTS_PRODUCT_REGISTRY_BACKEND is postgres but no PostgreSQL DSN is configured.")
         return PostgresProductRegistrySource(dsn=dsn)
@@ -355,23 +343,6 @@ def lookup_product_by_catalog_no(catalog_no: str) -> dict[str, Any] | None:
     return get_product_registry_payload()["by_catalog_no"].get(normalized)
 
 
-def iter_product_alias_records() -> list[tuple[str, str, str, str]]:
-    rows: list[tuple[str, str, str, str]] = []
-    for entry in load_product_registry():
-        catalog_no = _safe_text(entry.catalog_no)
-        if not catalog_no:
-            continue
-        for record in _alias_records_for_entry(entry):
-            alias_value = _safe_text(record.value)
-            if not alias_value:
-                continue
-            normalized = normalize_object_alias(alias_value)
-            if not normalized:
-                continue
-            rows.append((catalog_no, alias_value, normalized, record.alias_kind or ""))
-    return rows
-
-
 def canonicalize_product_name(value: str) -> str:
     cleaned = _safe_text(value)
     matches = lookup_products_by_alias(cleaned)
@@ -401,54 +372,59 @@ def _postgres_dsn() -> str:
 
 def _entry_payload(entry: ProductRegistryEntry) -> dict[str, Any]:
     payload = asdict(entry)
+    payload["name"] = entry.canonical_name
     payload["aliases"] = list(entry.aliases)
+    payload["synonyms"] = list(entry.synonyms)
     payload["applications"] = list(entry.applications)
     payload["alias_records"] = [asdict(record) for record in _alias_records_for_entry(entry)]
     return payload
 
 
 def _entry_from_record(record: dict[str, Any]) -> ProductRegistryEntry:
-    aliases = record.get("aliases", ())
-    if isinstance(aliases, str):
-        aliases = _split_aliases(aliases)
-    elif isinstance(aliases, list):
-        aliases = [clean_text(alias) for alias in aliases if clean_text(alias)]
-    synonyms = record.get("synonyms", ())
-    if isinstance(synonyms, str):
-        synonyms = _split_aliases(synonyms)
-    elif isinstance(synonyms, list):
-        synonyms = [clean_text(syn) for syn in synonyms if clean_text(syn)]
-    application_text = _safe_text(record.get("application_text"))
+    aliases = _coerce_text_list(record.get("aliases", ()))
+    applications = tuple(_coerce_text_list(record.get("applications", ())))
+    species_reactivity = tuple(_coerce_text_list(record.get("species_reactivity", ())))
+    attributes = _coerce_mapping(record.get("attributes"))
+    source_file_path = _safe_text(record.get("source_file_path"))
+    canonical_name = _safe_text(record.get("canonical_name") or record.get("name"))
+    application_text = ", ".join(applications)
+    species_reactivity_text = ", ".join(species_reactivity)
+    record_type = _safe_text(record.get("record_type"))
+
     return ProductRegistryEntry(
         catalog_no=_safe_text(record.get("catalog_no")),
-        canonical_name=_safe_text(record.get("canonical_name")),
+        canonical_name=canonical_name,
         business_line=_safe_text(record.get("business_line")),
         aliases=tuple(dedupe_preserve_order(list(aliases))),
-        synonyms=tuple(dedupe_preserve_order(list(synonyms))),
+        synonyms=tuple(
+            dedupe_preserve_order([
+                alias for alias in aliases if alias not in {canonical_name, _safe_text(record.get("catalog_no"))}
+            ])
+        ),
         target_antigen=_safe_text(record.get("target_antigen")),
         application_text=application_text,
-        applications=_normalize_application_tokens(application_text),
-        species_reactivity_text=_safe_text(record.get("species_reactivity_text")),
-        format_or_size=_safe_text(record.get("format_or_size")),
-        clone=_safe_text(record.get("clone")),
-        clonality=_safe_text(record.get("clonality")),
-        isotype=_normalize_isotype(record.get("isotype")),
-        ig_class=_safe_text(record.get("ig_class")),
-        gene_id=_safe_text(record.get("gene_id")),
-        gene_accession=_safe_text(record.get("gene_accession")),
-        swissprot=_safe_text(record.get("swissprot")),
-        costimulatory_domain=_safe_text(record.get("costimulatory_domain")),
-        construct=_safe_text(record.get("construct")),
+        applications=applications if applications else _normalize_application_tokens(application_text),
+        species_reactivity_text=species_reactivity_text,
+        format_or_size=_safe_text(record.get("format_or_size") or record.get("format")),
+        clone=_safe_text(attributes.get("clone")),
+        clonality=_infer_clonality_from_record_type(record_type),
+        isotype=_normalize_isotype(attributes.get("isotype")),
+        ig_class=_safe_text(attributes.get("ig_class")),
+        gene_id=_safe_text(attributes.get("gene_id")),
+        gene_accession=_safe_text(attributes.get("gene_accession")),
+        swissprot=_safe_text(attributes.get("swissprot")),
+        costimulatory_domain=_safe_text(attributes.get("costimulatory_domain")),
+        construct=_safe_text(attributes.get("construct")),
         product_type=_safe_text(record.get("product_type")),
-        group_name=_safe_text(record.get("group_name")),
-        group_type=_safe_text(record.get("group_type")),
-        group_subtype=_safe_text(record.get("group_subtype")),
-        group_summary=_safe_text(record.get("group_summary")),
-        price_usd=_safe_text(record.get("price_usd")),
-        unit=_safe_text(record.get("unit")),
-        cell_number=_safe_text(record.get("cell_number")),
-        marker=_safe_text(record.get("marker")),
-        source_file=_safe_text(record.get("source_file")),
+        group_name=_safe_text(attributes.get("group_name")),
+        group_type=_safe_text(attributes.get("group_type")),
+        group_subtype=_safe_text(attributes.get("group_subtype")),
+        group_summary=_safe_text(attributes.get("group_summary")),
+        price_usd=_safe_text(record.get("price_usd") or record.get("price")),
+        unit=_safe_text(attributes.get("unit")),
+        cell_number=_safe_text(attributes.get("cell_number")),
+        marker=_safe_text(attributes.get("marker")),
+        source_file=Path(source_file_path).name if source_file_path else "",
         source_sheet=_safe_text(record.get("source_sheet")),
     )
 
@@ -474,6 +450,31 @@ def _split_aliases(value: Any) -> list[str]:
         if alias:
             aliases.append(alias)
     return dedupe_preserve_order(aliases)
+
+
+def _coerce_text_list(value: Any) -> list[str]:
+    if isinstance(value, tuple):
+        value = list(value)
+    if isinstance(value, list):
+        return [clean_text(item) for item in value if clean_text(item)]
+    if isinstance(value, str):
+        return _split_aliases(value)
+    return []
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def _infer_clonality_from_record_type(record_type: str) -> str:
+    lowered = record_type.lower()
+    if "monoclonal" in lowered:
+        return "monoclonal"
+    if "polyclonal" in lowered:
+        return "polyclonal"
+    return ""
 
 
 _ISOTYPE_HEAVY_RE = re.compile(
@@ -831,56 +832,27 @@ def _dedupe_alias_records(records: list[ProductAliasRecord]) -> list[ProductAlia
 
 
 def _alias_records_for_entry(entry: ProductRegistryEntry) -> list[ProductAliasRecord]:
-    if entry.business_line == "antibody":
-        target_aliases = _extract_antibody_target_aliases(entry.canonical_name)
-        synonyms = list(entry.synonyms)
-        base_records = _build_alias_records(
-            ("canonical_name", entry.canonical_name),
-            ("catalog_no", entry.catalog_no),
-            *[("target_antigen", value) for value in target_aliases],
-            *[("synonym", syn) for syn in synonyms],
-        )
-        return _expand_antibody_alias_records(
-            base_records,
-            target_aliases=target_aliases,
-            synonyms=synonyms,
-            clonality=entry.clonality,
-        )
-    if entry.business_line == "car_t":
-        base_records = _build_alias_records(
-            ("canonical_name", entry.canonical_name),
-            ("catalog_no", entry.catalog_no),
-            ("target_antigen", entry.target_antigen),
-            ("group_name", entry.group_name),
-            ("construct", entry.construct),
-            ("marker", entry.marker),
-        )
-        return _expand_cart_alias_records(
-            base_records,
-            target_antigen=entry.target_antigen,
-            construct=entry.construct,
-        )
-    if entry.business_line == "mrna_lnp":
-        base_records = _build_alias_records(
-            ("canonical_name", entry.canonical_name),
-            ("catalog_no", entry.catalog_no),
-            ("product_type", entry.product_type),
-            ("format_or_size", entry.format_or_size),
-            ("platform", "mRNA-Lipid Nanoparticle"),
-        )
-        return _expand_mrna_lnp_alias_records(
-            base_records,
-            canonical_name=entry.canonical_name,
-        )
-    return _dedupe_alias_records(
-        _build_alias_records(
-            ("canonical_name", entry.canonical_name),
-            ("catalog_no", entry.catalog_no),
-            ("product_type", entry.product_type),
-            ("format_or_size", entry.format_or_size),
-            *[("synonym", alias) for alias in entry.aliases if alias not in {entry.canonical_name, entry.catalog_no, entry.product_type, entry.format_or_size}],
-        )
-    )
+    """Wrap entry.aliases as records with single 'alias' kind.
+
+    TODO: alias_kind taxonomy collapsed after PG aliases became source of
+    truth (Phase 4, 2026-04-29). Excel fallback's _expand_* path still
+    produces diverse kinds inside entry.aliases, but downstream callers
+    (get_product_registry_payload → extractor metadata → resolution.
+    _classify_ambiguity_kind) now see a flat 'alias' label, so the
+    kind→ambiguity_kind mapping in resolution.py degenerates to generic.
+    Re-design ambiguity classification from a different signal
+    (business_line / target_antigen overlap / shared_format detection)
+    before restoring kind diversity.
+    """
+    seen: set[str] = set()
+    records: list[ProductAliasRecord] = []
+    for alias in entry.aliases:
+        value = _safe_text(alias)
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        records.append(ProductAliasRecord(value=value, alias_kind="alias"))
+    return records
 
 
 def _infer_antibody_clonality(sheet_name: str, canonical_name: str) -> str:

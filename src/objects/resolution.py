@@ -335,6 +335,12 @@ def _decorate_ambiguous_set(ambiguous_set: AmbiguousObjectSet) -> AmbiguousObjec
 
 
 def _classify_ambiguity_kind(ambiguous_set: AmbiguousObjectSet) -> str:
+    # TODO: matched_alias_kinds 自 Phase 4 (2026-04-29) 后退化为单一 'alias'
+    # 标签(product_registry._alias_records_for_entry 已合并 kind 维度)。
+    # 下面的 format_or_size / target_antigen / construct ... 分支永远命不
+    # 中,实际全部 fall through 到 most_common → 返回 'alias'。需要从其他
+    # 信号(business_line / target_antigen 重合 / 共享 format)重新设计
+    # ambiguity 分类后,才能恢复有意义的 kind 区分。
     alias_kinds: list[str] = []
     for candidate in ambiguous_set.candidates:
         kinds = candidate.metadata.get("matched_alias_kinds", [])
