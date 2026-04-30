@@ -20,8 +20,8 @@ SERVICE_PAGE_SOURCE_DIRS = [
     BASE_DIR / "data" / "processed" / "rag_ready_files" / "cell-based-assays",
     BASE_DIR / "data" / "processed" / "rag_ready_files" / "protein-expression",
 ]
-SERVICE_REGISTRY_BACKEND = (os.getenv("OBJECTS_SERVICE_REGISTRY_BACKEND") or "files").strip().lower()
-SERVICE_REGISTRY_TABLE = os.getenv("OBJECTS_SERVICE_REGISTRY_TABLE", "service_registry")
+SERVICE_REGISTRY_BACKEND = (os.getenv("OBJECTS_SERVICE_REGISTRY_BACKEND") or "auto").strip().lower()
+SERVICE_REGISTRY_TABLE = os.getenv("OBJECTS_SERVICE_REGISTRY_TABLE", "service_catalog")
 SERVICE_PAGE_FILE_PATTERN = re.compile(r"promab_.*_rag_ready(?:_.*)?\.txt$", re.I)
 _KEY_VALUE_PATTERN = re.compile(r"^([A-Za-z0-9_ /()+&.-]+):\s*(.*)$")
 
@@ -232,8 +232,10 @@ class PostgresServiceRegistrySource:
 
 
 def get_service_registry_source() -> ServiceRegistrySource:
+    dsn = _postgres_dsn()
+    if SERVICE_REGISTRY_BACKEND == "auto":
+        return PostgresServiceRegistrySource(dsn=dsn) if dsn else FilesServiceRegistrySource()
     if SERVICE_REGISTRY_BACKEND == "postgres":
-        dsn = _postgres_dsn()
         if not dsn:
             raise ValueError("OBJECTS_SERVICE_REGISTRY_BACKEND is postgres but no PostgreSQL DSN is configured.")
         return PostgresServiceRegistrySource(dsn=dsn)

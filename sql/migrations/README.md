@@ -1,8 +1,19 @@
 # sql/migrations
 
 Numbered, idempotent SQL migration files applied in sequence on top of the
-RDS-truth schema. Files in `sql/*.sql` (catalog_schema.sql etc.) are stale
-historical DDL — do not use them as source of truth.
+RDS-truth schema.
+
+## What lives where
+
+- `sql/*.sql` — **standalone schemas** for first-time table creation
+  (`service_registry_schema.sql`, `service_documents_schema.sql`, etc.).
+  Idempotent (`CREATE TABLE IF NOT EXISTS`), apply once when bootstrapping
+  a fresh database. Older files like `catalog_schema.sql` are stale historical
+  DDL — the live `product_catalog` shape is in RDS, not in any sql/ file.
+- `sql/migrations/NNN_*.sql` — **incremental migrations** that mutate an
+  existing table (add columns / indexes / constraints, rename, backfill).
+  Apply in numbered order, every file wrapped in `BEGIN; … COMMIT;` and
+  guarded by `IF NOT EXISTS` / `IF EXISTS` so re-runs are no-ops.
 
 ## Apply order
 

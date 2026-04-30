@@ -9,6 +9,10 @@ from src.objects.registries.product_registry import (
 )
 
 
+def _product_name(match: dict[str, object], fallback: str) -> str:
+    return str(match.get("name") or match.get("canonical_name") or fallback)
+
+
 def extract_product_candidates(ingestion_bundle: IngestionBundle) -> ExtractorOutput:
     parser_entities = ingestion_bundle.turn_signals.parser_signals.entities
     deterministic = ingestion_bundle.turn_signals.deterministic_signals
@@ -42,12 +46,13 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
 
     if len(matches) == 1:
         match = matches[0]
+        product_name = _product_name(match, span.text)
         return [
             ObjectCandidate(
                 object_type="product",
                 raw_value=span.text,
-                canonical_value=match.get("canonical_name", "") or span.text,
-                display_name=match.get("canonical_name", "") or span.text,
+                canonical_value=product_name,
+                display_name=product_name,
                 identifier=match.get("catalog_no", ""),
                 identifier_type="catalog_no" if match.get("catalog_no") else "",
                 business_line=match.get("business_line", ""),
@@ -94,8 +99,8 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
             ObjectCandidate(
                 object_type="product",
                 raw_value=span.text,
-                canonical_value=match.get("canonical_name", "") or span.text,
-                display_name=match.get("canonical_name", "") or span.text,
+                canonical_value=_product_name(match, span.text),
+                display_name=_product_name(match, span.text),
                 identifier=match.get("catalog_no", ""),
                 identifier_type="catalog_no" if match.get("catalog_no") else "",
                 business_line=match.get("business_line", ""),
@@ -177,8 +182,8 @@ def _extract_catalog_number_candidate(
     return ObjectCandidate(
         object_type="product",
         raw_value=catalog_no,
-        canonical_value=match.get("canonical_name", "") or catalog_no,
-        display_name=match.get("canonical_name", "") or catalog_no,
+        canonical_value=_product_name(match, catalog_no),
+        display_name=_product_name(match, catalog_no),
         identifier=match.get("catalog_no", "") or catalog_no,
         identifier_type="catalog_no",
         business_line=match.get("business_line", ""),
