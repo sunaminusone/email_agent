@@ -5,16 +5,17 @@ from typing import Any
 from .normalization import DEFAULT_LIMIT, clean_text, extract_catalog_numbers
 from .ranking import rank_catalog_matches
 from src.objects.registries.product_registry import lookup_product_by_catalog_no, lookup_products_by_alias
-from .retrieval import alias_lookup, catalog_number_lookup, direct_alias_lookup, fuzzy_lookup
+from .retrieval import catalog_number_lookup, direct_alias_lookup, fuzzy_lookup
 from .retrieval.shared import build_connection_string, psycopg
 
 
 def _registry_match(entry: dict[str, Any], *, retrieval_mode: str, score: float, rank: int) -> dict[str, Any]:
+    product_name = entry.get("name") or entry.get("canonical_name") or ""
     return {
         "id": entry.get("catalog_no") or "",
         "catalog_no": entry.get("catalog_no") or "",
-        "name": entry.get("canonical_name") or "",
-        "display_name": entry.get("canonical_name") or "",
+        "name": product_name,
+        "display_name": product_name,
         "business_line": entry.get("business_line") or "",
         "target_antigen": entry.get("target_antigen") or "",
         "application_text": entry.get("application_text") or "",
@@ -147,18 +148,6 @@ def _tier_two_lookup(
         targets=targets,
     ):
         return [], ""
-
-    matches = alias_lookup(
-        conn,
-        query=query,
-        product_names=product_names,
-        service_names=service_names,
-        targets=targets,
-        business_line_hint=business_line_hint,
-        limit=top_k,
-    )
-    if matches:
-        return matches, "alias_lookup"
 
     matches = direct_alias_lookup(
         conn,

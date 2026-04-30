@@ -23,21 +23,21 @@ PRODUCT_SELECT_SQL = """
         p.id,
         p.catalog_no,
         p.name,
-        p.display_name,
+        p.name AS display_name,
         p.business_line,
         p.record_type,
         p.price,
-        p.price_text,
+        p.price::text AS price_text,
         p.lead_time_text,
         p.currency,
-        p.also_known_as,
+        array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.aliases)), ', ') AS also_known_as,
         p.target_antigen,
-        p.application_text,
-        p.species_reactivity_text,
-        p.construct,
+        array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.applications)), ', ') AS application_text,
+        array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.species_reactivity)), ', ') AS species_reactivity_text,
+        p.attributes->>'construct' AS construct,
         p.product_type,
         p.format,
-        p.unit
+        p.attributes->>'unit' AS unit
 """
 
 BUSINESS_LINE_MATCH_SQL = "POSITION(LOWER(REPLACE(%s, '-', '_')) IN LOWER(REPLACE({field}, '-', '_'))) > 0"

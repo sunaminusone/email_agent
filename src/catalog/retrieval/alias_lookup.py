@@ -86,6 +86,16 @@ def direct_alias_lookup(
     business_line_hint: str = "",
     limit: int = DEFAULT_LIMIT,
 ) -> list[dict[str, Any]]:
+    """Exact normalized alias membership against product_catalog.aliases_normalized.
+
+    Uses GIN(jsonb_ops) on aliases_normalized + ?| operator → bitmap index
+    scan, supports many-to-many natively (one normalized alias hits all
+    products that registered it).
+
+    Multi-token customer phrases like 'Anti-CD19' miss this layer by
+    design — they require either explicit alias materialization (the
+    expand pass for CAR-T/mRNA) or trigram fallback in fuzzy_lookup.
+    """
     aliases = candidate_aliases(
         query=query,
         product_names=product_names,
@@ -95,13 +105,19 @@ def direct_alias_lookup(
     if not aliases:
         return []
 
-    regex_conditions = []
-    params: list[Any] = []
-    for alias in aliases[:5]:
-        regex_conditions.append("coalesce(p.also_known_as, '') ~* %s")
-        params.append(token_regex(alias))
+    normalized_aliases: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases:
+        n = normalize_object_alias(alias)
+        if not n or n in seen:
+            continue
+        seen.add(n)
+        normalized_aliases.append(n)
+    if not normalized_aliases:
+        return []
 
-    conditions = [f"({' OR '.join(regex_conditions)})", "p.is_active = TRUE"]
+    conditions = ["p.aliases_normalized ?| %s", "p.is_active = TRUE"]
+    params: list[Any] = [normalized_aliases]
     normalized_business_line = normalize_business_line_hint(business_line_hint)
     if normalized_business_line:
         conditions.append(BUSINESS_LINE_MATCH_SQL.format(field="p.business_line"))
@@ -112,8 +128,8 @@ def direct_alias_lookup(
         {PRODUCT_SELECT_SQL},
         0.95 AS score,
         160 AS match_rank,
-        'also_known_as' AS matched_field,
-        p.also_known_as AS matched_value
+        'normalized_alias' AS matched_field,
+        array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.aliases)), ', ') AS matched_value
         FROM product_catalog p
         WHERE {" AND ".join(conditions)}
         ORDER BY p.catalog_no

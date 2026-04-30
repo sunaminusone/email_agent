@@ -56,6 +56,31 @@ def fuzzy_lookup(
     species_like = like_pattern(species_token) if species_token else "%"
     format_like = like_pattern(format_token) if format_token else "%"
     business_filter_sql = ""
+    application_expr = (
+        "coalesce(array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.applications)), ', '), '')"
+    )
+    species_expr = (
+        "coalesce(array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.species_reactivity)), ', '), '')"
+    )
+    search_text_expr = """
+        lower(
+            concat_ws(
+                ' ',
+                p.catalog_no,
+                p.name,
+                p.business_line,
+                p.record_type,
+                p.target_antigen,
+                p.product_type,
+                p.format,
+                array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.applications)), ', '),
+                array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.species_reactivity)), ', '),
+                p.attributes->>'construct',
+                p.attributes->>'group_name',
+                p.attributes->>'group_type'
+            )
+        )
+    """
 
     normalized_business_line = normalize_business_line_hint(business_line_hint)
     if normalized_business_line:
@@ -63,21 +88,21 @@ def fuzzy_lookup(
 
     sql = f"""
         {PRODUCT_SELECT_SQL},
-            similarity(search_text, normalize_catalog_text(%s)) AS score,
+            similarity({search_text_expr}, lower(%s)) AS score,
             CASE
                 WHEN p.catalog_no ILIKE %s THEN 40
-                WHEN coalesce(p.name, '') ~* %s OR coalesce(p.display_name, '') ~* %s THEN 30
+                WHEN coalesce(p.name, '') ~* %s THEN 30
                 WHEN coalesce(p.target_antigen, '') ~* %s THEN 25
-                WHEN coalesce(p.name, '') ILIKE %s OR coalesce(p.display_name, '') ILIKE %s THEN 20
-                WHEN similarity(p.search_text, normalize_catalog_text(%s)) >= %s THEN 10
+                WHEN coalesce(p.name, '') ILIKE %s THEN 20
+                WHEN similarity({search_text_expr}, lower(%s)) >= %s THEN 10
                 ELSE 1
             END
             + CASE
-                WHEN %s <> '' AND coalesce(p.application_text, '') ILIKE %s THEN 4
+                WHEN %s <> '' AND {application_expr} ILIKE %s THEN 4
                 ELSE 0
             END
             + CASE
-                WHEN %s <> '' AND coalesce(p.species_reactivity_text, '') ILIKE %s THEN 4
+                WHEN %s <> '' AND {species_expr} ILIKE %s THEN 4
                 ELSE 0
             END
             + CASE
@@ -92,9 +117,8 @@ def fuzzy_lookup(
           AND (
               p.catalog_no ILIKE %s
               OR coalesce(p.name, '') ILIKE %s
-              OR coalesce(p.display_name, '') ILIKE %s
               OR coalesce(p.target_antigen, '') ILIKE %s
-              OR similarity(p.search_text, normalize_catalog_text(%s)) >= %s
+              OR similarity({search_text_expr}, lower(%s)) >= %s
           )
         ORDER BY match_rank DESC, score DESC, p.catalog_no NULLS LAST
         LIMIT %s
@@ -105,8 +129,6 @@ def fuzzy_lookup(
         like_value,
         regex_value,
         regex_value,
-        regex_value,
-        like_value,
         like_value,
         normalized_query,
         DEFAULT_SIMILARITY_THRESHOLD,
@@ -121,7 +143,6 @@ def fuzzy_lookup(
     if normalized_business_line:
         base_params.append(normalized_business_line)
     base_params.extend([
-        like_value,
         like_value,
         like_value,
         like_value,
