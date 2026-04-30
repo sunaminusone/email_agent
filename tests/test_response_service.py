@@ -514,7 +514,7 @@ def test_no_customer_constraints_when_none() -> None:
 
 
 def test_csr_draft_marks_ungrounded_when_no_references_exist() -> None:
-    with patch("src.responser.renderers.csr_draft.get_llm", return_value=_FakeStructuredLLM("Please share more project details.")):
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=_FakeStructuredLLM("Please share more project details.")):
         response = render_csr_draft_response(
             ResponseInput(
                 query="We need a monoclonal antibody against a membrane protein. What do you need for a quote?",
@@ -585,7 +585,7 @@ def test_csr_draft_surfaces_structured_reference_blocks_when_grounded() -> None:
         ),
     )
 
-    with patch("src.responser.renderers.csr_draft.get_llm", return_value=_FakeStructuredLLM("We can help with stable cell line development. Please share the target and host system.")):
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=_FakeStructuredLLM("We can help with stable cell line development. Please share the target and host system.")):
         response = render_csr_draft_response(
             ResponseInput(
                 query="We need a stable cell line quote.",
@@ -647,7 +647,7 @@ def test_csr_draft_surfaces_live_pricing_records_from_pricing_lookup_tool() -> N
     )
 
     with patch(
-        "src.responser.renderers.csr_draft.get_llm",
+        "src.responser.csr.draft_llm.get_llm",
         return_value=_FakeStructuredLLM(
             "CD45 mAb (20081) is $350 USD per 100 ug, currently in stock."
         ),
