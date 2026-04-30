@@ -35,10 +35,9 @@ object resolution, not inside ingestion.
 - Normalizers (query cleanup, conversation history, attachments)
 - Deterministic signals (regex-based identifier extraction)
 - Reference signals (referential language detection)
-- Stateful anchors (prior-state constraint exposure)
 - EntitySpan model (text + raw + normalized_value + attribution)
 - Attachment signals
-- IngestionBundle top-level structure (turn_core / turn_signals / stateful_anchors)
+- IngestionBundle top-level structure (turn_core / turn_signals / memory_context). Note: the standalone `stateful_anchors` field has been removed; prior-state sub-memories are now exposed via `IngestionBundle.thread_memory` / `clarification_memory` property accessors that proxy onto `memory_context.snapshot`.
 
 ### Key design decision: why the parser does NOT output IntentGroup
 
@@ -64,7 +63,7 @@ Instead, `IntentGroup` assembly uses deterministic rules that are explicit, test
 | `normalizers.py` | Turn normalization | Unchanged |
 | `deterministic_signals.py` | Regex identifier + context extraction | Unchanged |
 | `reference_signals.py` | Referential language detection | Unchanged |
-| `stateful_anchors.py` | Prior-state anchor extraction | Unchanged |
+| ~~`stateful_anchors.py`~~ | (v2/v3) Prior-state anchor extraction | **Removed** — prior state is now read directly via `IngestionBundle.thread_memory` / `clarification_memory` |
 
 ### What works well
 
@@ -76,7 +75,7 @@ Instead, `IntentGroup` assembly uses deterministic rules that are explicit, test
 
 4. **Deterministic signals** — regex-based extraction of catalog/order/invoice numbers provides reliable non-LLM signals that correct parser mistakes.
 
-5. **Stateful anchors** — clean separation of prior-state constraints from current-turn evidence.
+5. **Prior state separation** — prior-turn state stays cleanly separated from current-turn evidence. In v4 this is achieved by exposing sub-memories (`thread_memory`, `clarification_memory`) via `IngestionBundle` property accessors onto `MemoryContext.snapshot`, rather than copying them into a separate `StatefulAnchors` wrapper.
 
 ### What's insufficient for v3
 
@@ -568,7 +567,9 @@ def build_core_pipeline():
             **state,
             "route_decision": route_v3(
                 build_routing_input(state["ingestion_bundle"], state["resolved_object_state"]),
-                stateful_anchors=state["ingestion_bundle"].stateful_anchors,
+                # Prior-state inputs reach routing through ingestion_bundle.thread_memory /
+                # clarification_memory (proxies onto memory_context.snapshot.*); no separate
+                # stateful_anchors argument is needed.
             ),
         }
     )
@@ -654,7 +655,10 @@ All other ingestion models remain unchanged:
 - `TurnCore`, `TurnSignals`, `IngestionBundle`
 - `EntitySpan`, `SourceAttribution`, `ValueSignal`
 - `DeterministicSignals`, `ReferenceSignals`, `AttachmentSignals`
-- `StatefulAnchors`
+
+### Removed models
+
+- ~~`StatefulAnchors`~~ — prior-state exposure now goes through `IngestionBundle.thread_memory` / `clarification_memory` property accessors that proxy onto `MemoryContext.snapshot`. See `MEMORY_DESIGN_V4.md`.
 
 ## Integration With Downstream Modules
 

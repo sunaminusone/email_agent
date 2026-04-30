@@ -27,7 +27,7 @@ This is the "agent-like" behavior — memory has perception (what's relevant?), 
 ### What changes in v3
 
 1. **Two-phase memory lifecycle** — explicit `recall()` and `reflect()` entry points replace ad-hoc load/build-update patterns
-2. **MemoryContext replaces raw StatefulAnchors as downstream input** — richer, prioritized context including prior IntentGroups, conversation trajectory, and object relevance
+2. **MemoryContext is the single downstream input** — replaces both raw snapshot reads and the previous StatefulAnchors wrapper. Prioritized fields (active_object, scored recent objects, trajectory, prior IntentGroups) are surfaced directly; the original `MemorySnapshot` is exposed via `MemoryContext.snapshot` for modules that need raw sub-memory access (`thread_memory`, `clarification_memory`, etc.). The `StatefulAnchors` wrapper has been removed.
 3. **IntentGroup continuity** — prior turn's `list[IntentGroup]` stored in memory, enabling multi-turn follow-up ("tell me more about the second thing")
 4. **Distributed memory update** — each layer can emit a partial `MemoryContribution`, the Reflect phase merges them instead of one giant `_build_memory_update()` in service.py
 5. **Object salience scoring** — recent objects carry `turn_age`, `interaction_count`, and `base_weight`; salience formula determines whether they're surfaced as active context or just retained as history. High-interaction foundational objects (e.g., a specific protein ID) survive long gaps without mention
@@ -50,7 +50,7 @@ This is the "agent-like" behavior — memory has perception (what's relevant?), 
 
 | File | Role | v3 status |
 | --- | --- | --- |
-| `models.py` | MemorySnapshot, MemoryUpdate, StatefulAnchors, sub-memories | **Extend** — add IntentMemory, object turn_age, MemoryContext |
+| `models.py` | MemorySnapshot, MemoryUpdate, sub-memories, MemoryContext, IntentMemory | **Extend** — added IntentMemory, object turn_age, MemoryContext; **removed** StatefulAnchors wrapper |
 | `store.py` | load / apply / serialize / snapshot_to_route_state | **Refactor** — recall/reflect entry points |
 | `session_store.py` | Redis-backed session management | Unchanged |
 | `adapters/redis_store.py` | Redis adapter | Unchanged |
@@ -64,7 +64,7 @@ This is the "agent-like" behavior — memory has perception (what's relevant?), 
 
 | File | Memory role | v3 status |
 | --- | --- | --- |
-| `ingestion/stateful_anchors.py` | Extracts StatefulAnchors from prior state | **Absorb into recall** |
+| `ingestion/stateful_anchors.py` | (v2/v3) Extracts StatefulAnchors from prior state | **Removed** — downstream now reads prior state directly via `IngestionBundle.thread_memory` / `clarification_memory` (proxies onto `MemoryContext.snapshot`) |
 | `app/service.py: _build_memory_update()` | Builds MemoryUpdate from all layer outputs | **Replace with reflect()** |
 | `response/planner.py: _build_memory_update()` | Response-layer memory contribution | **Emit MemoryContribution instead** |
 
@@ -78,11 +78,9 @@ This is the "agent-like" behavior — memory has perception (what's relevant?), 
 
 4. **Soft reset semantics** — `soft_reset_current_topic` clears active context (object, clarification) while preserving history (recent_objects, response_topics). Enables clean topic transitions.
 
-5. **ValueSignal attribution** — StatefulAnchors wrap memory values in `ValueSignal` with `recency="CONTEXTUAL"` and `source_type="stateful_anchor"`. Downstream modules know these are prior-state constraints, not fresh evidence.
-
 ### What's insufficient for v3
 
-1. **Memory is passive.** `load_memory_snapshot()` returns a raw snapshot. `extract_stateful_anchors()` mechanically reads fields. Neither analyzes whether the memory content is relevant to the current query or whether it's stale.
+1. **Memory was passive.** In v2/v3, `load_memory_snapshot()` returned a raw snapshot and downstream modules either read sub-memories directly or went through a `StatefulAnchors` wrapper that mechanically copied fields. Neither analyzed whether memory content was relevant to the current query or whether it was stale.
 
 2. **No IntentGroup continuity.** The ingestion v3 design identified "multi-turn group continuity" as a known gap. Memory doesn't store prior IntentGroups, so "tell me more about the second thing" loses the group structure from the prior turn.
 
@@ -132,12 +130,10 @@ Recall runs at the beginning of each turn. It loads the prior snapshot, analyzes
 #### What Recall does
 
 1. **Load snapshot** — rehydrate `MemorySnapshot` from Redis session or prior state dict
-2. **Extract stateful anchors** — wrap active object, business line, clarification state as `ValueSignal`-attributed constraints (absorbs current `stateful_anchors.py` logic)
-3. **Surface prior IntentGroups** — if the prior turn produced IntentGroups, include them for assembly continuity
-4. **Compute conversation trajectory** — what phase are we in? (fresh start / mid-topic / clarification loop / follow-up chain / topic switch)
-5. **Score object salience** — compute `salience = (base_weight × interaction_count) / max(turn_age, 1)` for all recent objects, classify into high/medium/low relevance
-6. **Detect intent drift** — compare current query signals against prior IntentGroups; if drift exceeds threshold, downgrade `continuity_confidence`
-7. **Produce MemoryContext** — a typed, prioritized view of everything downstream might need
+2. **Compute conversation trajectory** — what phase are we in? (fresh start / mid-topic / clarification loop / follow-up chain / topic switch)
+3. **Score object salience** — compute `salience = (base_weight × interaction_count) / max(turn_age, 1)` for all recent objects, classify into high/medium/low relevance
+4. **Detect intent drift** — compare current query signals against prior IntentGroups; if drift exceeds threshold, downgrade `continuity_confidence`
+5. **Produce MemoryContext** — a typed, prioritized view that exposes prioritized fields directly (`active_object`, `recent_objects_by_relevance`, `trajectory`, `prior_intent_groups`, response/demand history) and makes the raw `MemorySnapshot` available via `MemoryContext.snapshot` for modules that need direct sub-memory access (`thread_memory`, `clarification_memory`)
 
 #### MemoryContext contract
 
@@ -147,11 +143,11 @@ class MemoryContext(BaseModel):
     Produced by recall(), consumed by all downstream modules."""
     model_config = ConfigDict(extra="forbid")
 
-    # Snapshot reference (for modules that need raw access)
+    # Snapshot reference. Downstream modules read prior-state sub-memories
+    # directly off `snapshot.thread_memory` / `snapshot.clarification_memory`
+    # (typically via `IngestionBundle.thread_memory` / `clarification_memory`
+    # property accessors). Replaces the legacy `StatefulAnchors` wrapper.
     snapshot: MemorySnapshot
-
-    # Stateful anchors (backward-compatible with current integration)
-    stateful_anchors: StatefulAnchors
 
     # Prior turn's IntentGroups (for assembly continuity)
     # Filtered by intent drift detection: stale groups are removed before surfacing
@@ -173,6 +169,10 @@ class MemoryContext(BaseModel):
     # Response context (for repetition avoidance)
     revealed_attributes: list[str] = Field(default_factory=list)
     last_response_topics: list[str] = Field(default_factory=list)
+
+    # Demand-profile continuity (carried across turns for stable routing)
+    prior_demand_type: str = "general"
+    prior_demand_flags: list[str] = Field(default_factory=list)
 ```
 
 ```python
@@ -251,42 +251,42 @@ def recall(
     *,
     thread_id: str,
     user_query: str,
-    prior_state: dict | MemorySnapshot | None = None,
-    prior_intent_groups: list[IntentGroup] | None = None,
+    prior_state: Any | None = None,
 ) -> MemoryContext:
     """Phase 1: Load and contextualize memory for the current turn."""
 
     # 1. Load snapshot
     snapshot = load_memory_snapshot(prior_state, thread_id=thread_id)
 
-    # 2. Extract stateful anchors (absorbs stateful_anchors.py logic)
-    anchors = _extract_stateful_anchors(snapshot)
+    # 2. Compute trajectory
+    trajectory = _compute_trajectory(snapshot)
 
-    # 3. Compute trajectory
-    trajectory = _compute_trajectory(snapshot, user_query)
+    # 3. Score object salience
+    scored_objects = _score_recent_objects(snapshot)
 
-    # 4. Score object salience
-    scored_objects = _score_recent_objects(snapshot.object_memory)
-
-    # 5. Detect intent drift and resolve prior IntentGroups
-    prior_groups = prior_intent_groups or _load_prior_intent_groups(snapshot)
-    intent_drift = _detect_intent_drift(
+    # 4. Detect intent drift and resolve prior IntentGroups
+    prior_groups = list(snapshot.intent_memory.prior_intent_groups)
+    drift = _detect_intent_drift(
         user_query=user_query,
         prior_groups=prior_groups,
         trajectory=trajectory,
     )
 
-    # 6. Assemble MemoryContext
+    # 5. Assemble MemoryContext. Prior-state fields that older designs wrapped
+    # in StatefulAnchors are now reached via snapshot sub-memories
+    # (snapshot.thread_memory.active_route, snapshot.clarification_memory.*),
+    # exposed conveniently by IngestionBundle property accessors downstream.
     return MemoryContext(
         snapshot=snapshot,
-        stateful_anchors=anchors,
-        prior_intent_groups=intent_drift.resolved_groups,
-        intent_continuity_confidence=intent_drift.continuity_confidence,
+        prior_intent_groups=drift.resolved_groups,
+        intent_continuity_confidence=drift.continuity_confidence,
         trajectory=trajectory,
         active_object=snapshot.object_memory.active_object,
         recent_objects_by_relevance=scored_objects,
-        revealed_attributes=snapshot.response_memory.revealed_attributes,
-        last_response_topics=snapshot.response_memory.last_response_topics,
+        revealed_attributes=list(snapshot.response_memory.revealed_attributes),
+        last_response_topics=list(snapshot.response_memory.last_response_topics),
+        prior_demand_type=snapshot.response_memory.last_demand_type,
+        prior_demand_flags=list(snapshot.response_memory.last_demand_flags),
     )
 ```
 
@@ -629,7 +629,7 @@ Turn 1: "Check my order #12345 and explain the CAR-T construct mechanism"
 Turn 2: "Tell me more about the second thing"
   → Recall surfaces prior_intent_groups
   → Reference signals detect "the second thing" as index reference
-  → Object resolution: stateful_anchors has CAR-T as secondary context
+  → Object resolution: MemoryContext.recent_objects_by_relevance carries CAR-T as scored secondary context
   → Assembly: produces IntentGroup(technical_question, CAR-T) with continuity
 ```
 
@@ -954,12 +954,14 @@ class IntentDriftResult(BaseModel):
 
 
 class MemoryContext(BaseModel):
-    """Enriched memory view produced by recall(). 
-    Single entry point for all downstream modules."""
+    """Enriched memory view produced by recall().
+    Single entry point for all downstream modules.
+    Sub-memory access (e.g., thread_memory.active_route,
+    clarification_memory.pending_candidate_options) goes through
+    `MemoryContext.snapshot`, not a separate StatefulAnchors wrapper."""
     model_config = ConfigDict(extra="forbid")
 
     snapshot: MemorySnapshot
-    stateful_anchors: StatefulAnchors
     prior_intent_groups: list[IntentGroup] = Field(default_factory=list)
     intent_continuity_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     trajectory: ConversationTrajectory = Field(default_factory=ConversationTrajectory)
@@ -967,6 +969,8 @@ class MemoryContext(BaseModel):
     recent_objects_by_relevance: list[ScoredObjectRef] = Field(default_factory=list)
     revealed_attributes: list[str] = Field(default_factory=list)
     last_response_topics: list[str] = Field(default_factory=list)
+    prior_demand_type: str = "general"
+    prior_demand_flags: list[str] = Field(default_factory=list)
 
 
 class MemoryContribution(BaseModel):
@@ -1022,30 +1026,30 @@ class ObjectRef(BaseModel):
 - `ClarificationMemory` — fields unchanged
 - `ResponseMemory` — fields unchanged
 - `MemoryUpdate` — fields unchanged (IntentMemory updates go through the new Reflect path)
-- `StatefulAnchors` — fields unchanged (wrapped by MemoryContext, not replaced)
+- ~~`StatefulAnchors`~~ — **removed**. Sub-memory state is now reached through `MemoryContext.snapshot.thread_memory` / `MemoryContext.snapshot.clarification_memory` (typically via the `IngestionBundle.thread_memory` / `clarification_memory` property accessors).
 
 ## Integration With Other Modules
 
 ### Memory → Ingestion
 
-**What memory provides**: `MemoryContext.stateful_anchors` + `MemoryContext.trajectory`
+**What memory provides**: `MemoryContext.snapshot.thread_memory` + `MemoryContext.snapshot.clarification_memory` + `MemoryContext.trajectory`
 
 **How ingestion uses it**:
-- `stateful_anchors` → reference signal detection (`requires_active_context_for_safe_resolution`)
+- `snapshot.thread_memory.active_route` / `active_business_line` → reference signal detection (`requires_active_context_for_safe_resolution`)
+- `snapshot.clarification_memory.pending_clarification_type` / `pending_candidate_options` → parser can resolve a user's selection answer when a clarification loop is open
 - `trajectory.phase` → if `clarification_loop`, ingestion can adjust parser behavior (expect a disambiguation answer, not a new query)
 - `trajectory.phase` → if `follow_up`, reference signals are more aggressive about accepting pronoun resolution
 
-**Contract**: `recall()` produces `MemoryContext`. Ingestion reads `memory_context.stateful_anchors` exactly as it reads `StatefulAnchors` today. Zero breaking change.
+**Contract**: `recall()` produces `MemoryContext`. The ingestion bundle exposes the relevant sub-memories directly via property accessors, so downstream code reads them as plain attributes:
 
 ```python
-# v2 (current)
-stateful_anchors = extract_stateful_anchors(prior_state)
-ingestion_bundle = build_ingestion_bundle(prior_state=prior_state, ...)
-
-# v3
 memory_context = recall(thread_id=thread_id, user_query=query, prior_state=prior_state)
 ingestion_bundle = build_ingestion_bundle(memory_context=memory_context, ...)
-# internally, pipeline reads memory_context.stateful_anchors
+
+# Downstream callers read prior state through bundle properties, e.g.:
+#   ingestion_bundle.thread_memory.active_route
+#   ingestion_bundle.clarification_memory.pending_candidate_options
+# Both proxy onto memory_context.snapshot.* — no separate StatefulAnchors wrapper.
 ```
 
 **What ingestion contributes back**: `MemoryContribution(source="ingestion", reason="...")` — minimal, mainly debug context.
@@ -1057,7 +1061,7 @@ ingestion_bundle = build_ingestion_bundle(memory_context=memory_context, ...)
 **How objects uses it**:
 - `active_object` → if user says "this product", resolve to the active object from memory
 - `recent_objects_by_relevance` → if user says "the other one", the objects layer can check recent history for alternatives
-- `stateful_anchors.pending_candidate_options` → if we're in a clarification loop, the user's answer selects from the pending candidates
+- `snapshot.clarification_memory.pending_candidate_options` → if we're in a clarification loop, the user's answer selects from the pending candidates (typically read via `IngestionBundle.clarification_memory`)
 
 **What objects contributes back**:
 ```python
@@ -1087,7 +1091,7 @@ MemoryContribution(
 
 ### Memory → Routing
 
-**What memory provides**: `MemoryContext.trajectory` + `MemoryContext.stateful_anchors.active_route`
+**What memory provides**: `MemoryContext.trajectory` + `MemoryContext.snapshot.thread_memory.active_route`
 
 **How routing uses it**:
 - `trajectory.has_pending_clarification` → if True and user provides new input, routing can decide whether this is a clarification answer or a topic switch
@@ -1291,11 +1295,11 @@ Memory is the **first** and **last** step in the chain. Every other step runs be
 ### Step 3: Implement recall() (medium risk, new entry point)
 
 1. Create `src/memory/recall.py` with `recall()` function
-2. Absorb `extract_stateful_anchors()` logic (keep original function as internal call)
+2. Drop the `StatefulAnchors` wrapper. Downstream prior-state reads switch to `MemoryContext.snapshot.thread_memory` / `snapshot.clarification_memory`, exposed via `IngestionBundle.thread_memory` / `clarification_memory` property accessors.
 3. Add trajectory detection logic
 4. Add salience scoring (`_score_recent_objects` with `BASE_WEIGHT_MAP`)
 5. Add intent drift detection (`_detect_intent_drift`, `_compute_overlap_signals`)
-6. Test: verify `recall()` produces equivalent StatefulAnchors to current `extract_stateful_anchors()`
+6. Test: verify modules previously consuming `StatefulAnchors` continue to work against the new sub-memory accessors with no behavioral change.
 7. Test: verify salience scoring ranks multi-referenced objects higher than one-shot mentions
 8. Test: verify drift detection correctly classifies preserve/merge/stack/clear scenarios
 
@@ -1315,7 +1319,7 @@ Memory is the **first** and **last** step in the chain. Every other step runs be
 
 ### Step 6: Wire recall/reflect into service.py (behavioral change)
 
-1. Replace `load_memory_snapshot()` + `extract_stateful_anchors()` with `recall()`
+1. Replace `load_memory_snapshot()` + the prior `extract_stateful_anchors()` step with a single `recall()` call. Downstream reads of prior state move to `IngestionBundle.thread_memory` / `clarification_memory`.
 2. Replace `_build_memory_update()` + `apply_memory_update()` with layer contributions + `reflect()`
 3. Run full test suite
 4. Verify Redis persistence produces equivalent snapshots
@@ -1323,7 +1327,7 @@ Memory is the **first** and **last** step in the chain. Every other step runs be
 ### Step 7: Deprecate view.py SimpleNamespace helpers (cleanup)
 
 1. Modules that used `active_entity_from_memory_snapshot()` switch to `memory_context.active_object`
-2. Modules that used `pending_clarification_from_memory_snapshot()` switch to `memory_context.stateful_anchors`
+2. Modules that used `pending_clarification_from_memory_snapshot()` switch to `memory_context.snapshot.clarification_memory` (most call sites read this through `IngestionBundle.clarification_memory`)
 3. Keep view.py functions for backward compatibility during migration, mark as deprecated
 
 ### Step 8: Remove route_state dual persistence (cleanup)
