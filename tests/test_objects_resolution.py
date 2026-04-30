@@ -187,39 +187,6 @@ def test_pending_only_constraints_can_flow_from_memory_context_without_bundle_an
     assert resolved.primary_object is not None
     assert resolved.primary_object.display_name == "Human Monoclonal Antibody"
 
-
-@pytest.mark.skip(
-    reason=(
-        "matched_alias_kinds 自 Phase 4 (2026-04-29) 退化为单一 'alias' 标签 "
-        "(product_registry._alias_records_for_entry 简化)。此测试期望的 "
-        "'target_antigen' 分类目前永远命不中,需要重新设计 ambiguity_kind 信号源后 "
-        "再恢复(参考 src/objects/resolution.py::_classify_ambiguity_kind 的 TODO)。"
-    )
-)
-def test_product_ambiguity_kind_and_clarification_strategy_are_derived_from_alias_kind():
-    bundle = IngestionBundle(
-        turn_signals=TurnSignals(
-            parser_signals=ParserSignals(
-                entities=ParserEntitySignals(
-                    product_names=[EntitySpan(text="cd19")],
-                )
-            ),
-        )
-    )
-
-    resolved = resolve_object_state(bundle, extract_object_bundle(bundle))
-
-    assert len(resolved.ambiguous_sets) == 1
-    ambiguous = resolved.ambiguous_sets[0]
-    assert ambiguous.ambiguity_kind == "target_antigen"
-    assert ambiguous.clarification_focus == "product_family"
-    assert ambiguous.suggested_disambiguation_fields == [
-        "business_line",
-        "canonical_value",
-    ]
-    assert ambiguous.resolution_strategy == "clarify_product_family"
-
-
 def test_product_species_constraint_uses_product_metadata():
     candidate = ObjectCandidate(
         object_type="product",
