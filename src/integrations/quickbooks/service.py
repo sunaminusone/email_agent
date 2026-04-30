@@ -4,8 +4,9 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .auth import QuickBooksAuthManager, QuickBooksConfigError
-from .matching import dedupe_matches, extract_customer_matches, extract_transaction_matches, rank_customer_candidates
-from .repository import QuickBooksRepository
+from .client import QuickBooksQueryClient
+from .ranking import dedupe_matches, rank_customer_candidates
+from .serializers import extract_customer_matches, extract_transaction_matches
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 class QuickBooksClient:
     def __init__(self) -> None:
         self.auth = QuickBooksAuthManager()
-        self.repository = QuickBooksRepository(self.auth)
+        self.client = QuickBooksQueryClient(self.auth)
 
     def is_configured(self) -> bool:
         return self.auth.is_configured()
@@ -64,7 +65,7 @@ class QuickBooksClient:
             searched_entities.append(entity)
             for doc_number in order_numbers:
                 try:
-                    response = self.repository.query_transaction_by_doc_number(
+                    response = self.client.query_transaction_by_doc_number(
                         token_data=token_data,
                         entity=entity,
                         doc_number=doc_number,
@@ -82,7 +83,7 @@ class QuickBooksClient:
 
             for customer_name in customer_names:
                 try:
-                    response = self.repository.query_transaction_by_customer_name(
+                    response = self.client.query_transaction_by_customer_name(
                         token_data=token_data,
                         entity=entity,
                         customer_name=customer_name,
@@ -181,7 +182,7 @@ class QuickBooksClient:
         matches: List[Dict[str, Any]] = []
         for field in ["DisplayName", "CompanyName", "FullyQualifiedName"]:
             try:
-                response = self.repository.query_customer_by_field(
+                response = self.client.query_customer_by_field(
                     token_data=token_data,
                     field=field,
                     customer_name=customer_name,
@@ -210,7 +211,7 @@ class QuickBooksClient:
         errors: List[str] | None = None,
     ) -> List[Dict[str, Any]]:
         try:
-            response = self.repository.query_customer_scan(token_data=token_data, max_results=max_results)
+            response = self.client.query_customer_scan(token_data=token_data, max_results=max_results)
         except requests.RequestException as exc:
             logger.warning("QuickBooks customer scan failed: %s", exc)
             searched_queries.append({"entity": "Customer", "mode": "local_fuzzy_scan_error", "value": customer_name})

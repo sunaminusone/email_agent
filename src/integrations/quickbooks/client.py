@@ -5,7 +5,7 @@ import requests
 from .auth import QuickBooksAuthManager, QuickBooksConfigError
 
 
-class QuickBooksRepository:
+class QuickBooksQueryClient:
     def __init__(self, auth: QuickBooksAuthManager) -> None:
         self.auth = auth
 
