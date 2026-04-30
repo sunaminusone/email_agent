@@ -1,26 +1,25 @@
 from __future__ import annotations
 
-import csv
+import logging
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+
+from src.services.service_documents import (
+    SERVICE_CATALOG_TABLE,
+    SERVICE_DOCUMENTS_TABLE,
+    build_connection_string,
+    generate_presigned_document_url,
+)
+
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:  # pragma: no cover - psycopg is required at runtime
+    psycopg = None
+    dict_row = None
 
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DOCUMENT_ROOT = _PROJECT_ROOT / "data" / "raw" / "pdf"
-DOCUMENT_CATALOG_PATH = _PROJECT_ROOT / "data" / "processed" / "document_catalog.csv"
-IGNORED_NAMES = {".DS_Store"}
-IGNORED_PARTS = {".ipynb_checkpoints"}
-
-
-def document_url(path: Path) -> str:
-    relative_path = path.relative_to(DOCUMENT_ROOT).as_posix()
-    return f"/documents/{quote(relative_path, safe='/')}"
-
-
-def relative_document_url(relative_path: str) -> str:
-    return f"/documents/{quote(relative_path, safe='/')}"
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -31,91 +30,69 @@ def document_catalog_inventory(
     tokenize,
     normalize_business_line,
 ) -> list[dict[str, Any]]:
+    """Read service-document metadata from Postgres.
+
+    Returns one entry per active service_documents row, joined to its
+    parent service_catalog row for canonical_name + business_line.
+    Rows lacking storage_url are skipped — presigned URLs are minted
+    later by the caller, only for top-ranked matches.
+    """
+    if psycopg is None:
+        return []
+
+    sql = f"""
+        SELECT
+            sd.file_name,
+            sd.title,
+            sd.document_type,
+            sd.storage_url,
+            sd.metadata,
+            sc.canonical_name AS service_name,
+            sc.business_line
+        FROM {SERVICE_DOCUMENTS_TABLE} sd
+        JOIN {SERVICE_CATALOG_TABLE} sc ON sd.service_id = sc.id
+        WHERE sd.is_active = TRUE
+    """
+
+    try:
+        with psycopg.connect(build_connection_string()) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(sql)
+                rows = cur.fetchall()
+    except Exception as exc:
+        logger.warning("document_catalog_inventory PG query failed: %s", exc)
+        return []
+
     inventory: list[dict[str, Any]] = []
-    if not DOCUMENT_CATALOG_PATH.exists():
-        return inventory
-
-    with DOCUMENT_CATALOG_PATH.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for raw_row in reader:
-            row = {key: (value or "").strip() for key, value in raw_row.items()}
-            relative_path = row.get("relative_path", "")
-            if not relative_path:
-                continue
-            source_path = DOCUMENT_ROOT / relative_path
-            if not source_path.exists():
-                continue
-
-            document_type = row.get("document_type", "") or infer_document_type(row.get("file_name", ""))
-            business_line = row.get("business_line", "")
-            title = row.get("title", "") or Path(relative_path).stem
-            product_name = row.get("product_name", "")
-            catalog_no = row.get("catalog_no", "").upper()
-            product_scope = row.get("product_scope", "")
-            search_blob = " ".join(
-                part
-                for part in [
-                    row.get("file_name", ""),
-                    title,
-                    product_name,
-                    business_line,
-                    document_type,
-                    product_scope,
-                    row.get("notes", ""),
-                    catalog_no,
-                ]
-                if part
-            )
-            inventory.append(
-                {
-                    "file_name": row.get("file_name", Path(relative_path).name),
-                    "relative_path": relative_path,
-                    "source_path": str(source_path),
-                    "document_url": relative_document_url(relative_path),
-                    "document_type": document_type,
-                    "business_line": business_line,
-                    "normalized_business_line": normalize_business_line(business_line),
-                    "title": title,
-                    "product_scope": product_scope,
-                    "product_name": product_name,
-                    "catalog_no": catalog_no,
-                    "notes": row.get("notes", ""),
-                    "normalized_name": normalize_text(search_blob),
-                    "tokens": tokenize(search_blob),
-                }
-            )
-    return inventory
-
-
-@lru_cache(maxsize=1)
-def document_inventory(
-    *,
-    infer_document_type,
-    normalize_text,
-    tokenize,
-) -> list[dict[str, Any]]:
-    inventory: list[dict[str, Any]] = []
-    if not DOCUMENT_ROOT.exists():
-        return inventory
-
-    for path in DOCUMENT_ROOT.rglob("*"):
-        if not path.is_file():
+    for row in rows:
+        storage_url = (row.get("storage_url") or "").strip()
+        if not storage_url:
             continue
-        if path.name in IGNORED_NAMES:
-            continue
-        if any(part in IGNORED_PARTS for part in path.parts):
-            continue
-        if path.suffix.lower() != ".pdf":
-            continue
+
+        file_name = (row.get("file_name") or "").strip()
+        title = (row.get("title") or "").strip() or file_name
+        document_type = (row.get("document_type") or "").strip() or infer_document_type(file_name)
+        business_line = (row.get("business_line") or "").strip()
+        service_name = (row.get("service_name") or "").strip()
+
+        search_blob = " ".join(
+            part for part in [file_name, title, service_name, business_line, document_type] if part
+        )
 
         inventory.append(
             {
-                "file_name": path.name,
-                "source_path": str(path),
-                "document_url": document_url(path),
-                "document_type": infer_document_type(path.name),
-                "normalized_name": normalize_text(path.stem),
-                "tokens": tokenize(path.stem),
+                "file_name": file_name,
+                "source_path": storage_url,
+                "storage_url": storage_url,
+                "document_type": document_type,
+                "business_line": business_line,
+                "normalized_business_line": normalize_business_line(business_line),
+                "title": title,
+                "product_scope": "service_line",
+                "product_name": service_name,
+                "catalog_no": "",
+                "normalized_name": normalize_text(search_blob),
+                "tokens": tokenize(search_blob),
             }
         )
     return inventory

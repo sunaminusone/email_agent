@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from src.services.service_documents import generate_presigned_document_url
 
 from .normalization import (
     business_line_matches,
@@ -12,7 +15,10 @@ from .normalization import (
     tokenize,
 )
 from .ranking import rank_document_matches
-from .retrieval import document_catalog_inventory, document_inventory
+from .retrieval import document_catalog_inventory
+
+
+logger = logging.getLogger(__name__)
 
 
 def run_document_selection(
@@ -27,16 +33,11 @@ def run_document_selection(
     catalog_numbers = [value.upper() for value in (catalog_numbers or []) if value]
     product_names = product_names or []
     document_names = document_names or []
-    catalog_inventory = document_catalog_inventory(
+    inventory = document_catalog_inventory(
         infer_document_type=infer_document_type_from_name,
         normalize_text=normalize_text,
         tokenize=tokenize,
         normalize_business_line=normalize_business_line,
-    )
-    inventory = catalog_inventory or document_inventory(
-        infer_document_type=infer_document_type_from_name,
-        normalize_text=normalize_text,
-        tokenize=tokenize,
     )
     requested_document_types = detect_requested_document_types(query, document_names)
     normalized_business_line_hint = normalize_business_line(business_line_hint)
@@ -48,18 +49,12 @@ def run_document_selection(
     )
 
     matches: list[dict[str, Any]] = []
-    retrieval_mode = "document_catalog_csv" if catalog_inventory else "filesystem"
 
     for item in inventory:
         score = 0
         strong_match = False
         matched_tokens = sorted(query_tokens.intersection(item["tokens"]))
         score += len(matched_tokens) * 2
-
-        item_catalog_no = item.get("catalog_no", "").upper()
-        if catalog_numbers and item_catalog_no and item_catalog_no in catalog_numbers:
-            score += 24
-            strong_match = True
 
         if document_type_matches(item["document_type"], requested_document_types):
             score += 8
@@ -78,12 +73,6 @@ def run_document_selection(
             score += 6
             strong_match = True
 
-        if requested_document_types and item.get("product_scope") == "business_line":
-            score += 1
-
-        if catalog_numbers and not item_catalog_no and item.get("product_scope") == "business_line":
-            score += 3
-
         if score <= 0:
             continue
 
@@ -94,7 +83,7 @@ def run_document_selection(
             {
                 "file_name": item["file_name"],
                 "source_path": item["source_path"],
-                "document_url": item["document_url"],
+                "storage_url": item["storage_url"],
                 "document_type": item["document_type"],
                 "business_line": item.get("business_line", ""),
                 "product_scope": item.get("product_scope", ""),
@@ -107,8 +96,16 @@ def run_document_selection(
         )
 
     top_matches = rank_document_matches(matches, top_k=top_k)
+
+    for match in top_matches:
+        try:
+            match["document_url"] = generate_presigned_document_url(match["storage_url"])
+        except Exception as exc:
+            logger.warning("Failed to mint presigned URL for %s: %s", match.get("storage_url"), exc)
+            match["document_url"] = ""
+
     return {
-        "lookup_mode": retrieval_mode,
+        "lookup_mode": "service_documents_pg",
         "requested_document_types": requested_document_types,
         "catalog_numbers": catalog_numbers,
         "business_line_hint": business_line_hint,

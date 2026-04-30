@@ -12,7 +12,6 @@ from src.app.service import run_email_agent
 from src.api_models import AgentPrototypeResponse, AgentRequest
 from src.conversations import ConversationStore
 from src.integrations import QuickBooksClient, QuickBooksConfigError
-from src.documents.service import DOCUMENT_ROOT
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -62,8 +61,6 @@ add_routes(
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
-if DOCUMENT_ROOT.exists():
-    app.mount("/documents", StaticFiles(directory=DOCUMENT_ROOT), name="documents")
 
 
 @app.get("/", include_in_schema=False)
