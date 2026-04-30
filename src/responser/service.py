@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.responser.blocks import build_content_blocks
-from src.responser.composer import compose_final_response
+from src.responser.csr.composer import render_csr_draft_response
 from src.responser.models import (
     ComposedResponse,
     ContentBlock,
@@ -10,7 +10,6 @@ from src.responser.models import (
     ResponsePlan,
 )
 from src.responser.planner import build_response_plan
-from src.responser.renderers.csr_draft import render_csr_draft_response
 
 
 def plan_response(response_input: ResponseInput) -> tuple[ResponsePlan, list[ContentBlock]]:
@@ -20,15 +19,14 @@ def plan_response(response_input: ResponseInput) -> tuple[ResponsePlan, list[Con
 
 
 def compose_response(response_input: ResponseInput) -> tuple[ComposedResponse, ResponsePlan]:
-    response_plan, _ = plan_response(response_input)
-    draft = _render_response(response_input, response_plan)
-    return compose_final_response(draft, response_plan, locale=response_input.locale), response_plan
+    # Compatibility wrapper for tests and older call sites that only need
+    # the composed response plus its plan, not the derived bundle metadata.
+    bundle = build_response_bundle(response_input)
+    return bundle.composed_response, bundle.response_plan
 
 
 def build_response_bundle(response_input: ResponseInput) -> ResponseBundle:
-    response_plan, content_blocks = plan_response(response_input)
-    draft = _render_response(response_input, response_plan)
-    composed_response = compose_final_response(draft, response_plan, locale=response_input.locale)
+    response_plan, content_blocks, composed_response = _build_response_artifacts(response_input)
     response_path = str(composed_response.debug_info.get("response_path", "csr_renderer_direct"))
 
     # Topic derivation: answer_focus already encodes both control topics
@@ -52,8 +50,18 @@ def build_response_bundle(response_input: ResponseInput) -> ResponseBundle:
     )
 
 
+def _build_response_artifacts(
+    response_input: ResponseInput,
+) -> tuple[ResponsePlan, list[ContentBlock], ComposedResponse]:
+    response_plan, content_blocks = plan_response(response_input)
+    composed_response = _render_response(response_input, response_plan)
+    return response_plan, content_blocks, composed_response
+
+
 def _render_response(
     response_input: ResponseInput,
     response_plan: ResponsePlan,
 ) -> ComposedResponse:
-    return render_csr_draft_response(response_input, response_plan)
+    composed_response = render_csr_draft_response(response_input, response_plan)
+    composed_response.debug_info.setdefault("response_path", "csr_renderer_direct")
+    return composed_response

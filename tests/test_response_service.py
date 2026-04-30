@@ -14,7 +14,7 @@ from src.objects.models import ObjectCandidate, ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
 from src.responser import ResponseInput, build_response_bundle, compose_response
-from src.responser.renderers.csr_draft import render_csr_draft_response
+from src.responser.csr.composer import render_csr_draft_response
 from src.responser.models import ResponsePlan, build_response_memory_contribution
 
 
