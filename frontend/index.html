@@ -43,20 +43,21 @@
     </aside>
 
     <section class="main-column">
-      <header class="hero-panel">
-        <div class="hero-copy">
-          <p class="eyebrow">Internal CSR Tool · Drafts Only</p>
-          <h2>Draft inbound replies with grounded context</h2>
-          <p class="hero-subtitle">
-            Paste an incoming customer inquiry — the agent retrieves similar past sales replies and
-            relevant documentation, then drafts a reply for you to review and edit before sending.
+      <header class="workspace-header">
+        <div class="workspace-header-copy">
+          <p class="eyebrow">Internal CSR Workspace</p>
+          <h2>Customer Reply Desk</h2>
+          <p class="workspace-subtitle">
+            Review inbound requests, pull supporting evidence, and send back a cleaner draft with the right files attached.
           </p>
         </div>
-        <div class="hero-orbit" aria-hidden="true">
-          <div class="orbit-glow"></div>
-          <div class="orbit-card">
+        <div class="workspace-header-status">
+          <div class="workspace-status-card">
             <span class="status-dot"></span>
-            <p>RAG + LLM active</p>
+            <div>
+              <p class="workspace-status-label">Workspace status</p>
+              <strong>RAG + LLM active</strong>
+            </div>
           </div>
         </div>
       </header>
@@ -69,7 +70,7 @@
               <h3>CSR Drafting Workspace</h3>
               <p id="session_hint" class="session-hint">Session ready</p>
             </div>
-            <div class="status-pill">Internal · drafts only</div>
+            <div class="status-pill">Internal · collaborative draft mode</div>
           </div>
 
           <div id="chat_history" class="chat-history">
@@ -100,65 +101,71 @@
     </section>
 
     <aside class="inspector">
-      <section class="inspector-card">
+      <section class="inspector-card inspector-tabs-shell">
         <div class="section-heading">
-          <span>Retrieval Trust</span>
+          <span>Context Panel</span>
         </div>
-        <div id="trust_summary" class="signal-summary">
-          <p class="signal-state">Submit a query to see retrieval confidence.</p>
+        <div class="inspector-tab-row">
+          <button type="button" class="inspector-tab inspector-tab-active" data-panel-target="docs_panel">Docs</button>
+          <button type="button" class="inspector-tab" data-panel-target="history_panel">History</button>
+          <button type="button" class="inspector-tab" data-panel-target="signals_panel">Signals</button>
+          <button type="button" class="inspector-tab" data-panel-target="blocks_panel">Blocks</button>
         </div>
-      </section>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>AI Routing Note</span>
-        </div>
-        <div id="routing_note_summary" class="signal-summary compact-summary">
-          <p class="signal-state">No routing flag yet.</p>
-        </div>
-      </section>
+        <div id="docs_panel" class="inspector-panel inspector-panel-active">
+          <div class="section-heading">
+            <span>Relevant Documents</span>
+          </div>
+          <div id="document_results" class="signal-summary">
+            <p class="signal-state">等待输入...</p>
+          </div>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Similar Past Inquiries</span>
+          <div class="section-heading">
+            <span>Technical Retrieval Detail</span>
+          </div>
+          <div id="technical_results" class="signal-summary">
+            <p class="signal-state">等待输入...</p>
+          </div>
         </div>
-        <div id="historical_results" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
-      </section>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Relevant Documents</span>
+        <div id="history_panel" class="inspector-panel">
+          <div class="section-heading">
+            <span>Similar Past Inquiries</span>
+          </div>
+          <div id="historical_results" class="signal-summary">
+            <p class="signal-state">等待输入...</p>
+          </div>
         </div>
-        <div id="document_results" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
-      </section>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Technical Retrieval Detail</span>
-        </div>
-        <div id="technical_results" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
-      </section>
+        <div id="signals_panel" class="inspector-panel">
+          <div class="section-heading">
+            <span>Retrieval Trust</span>
+          </div>
+          <div id="trust_summary" class="signal-summary">
+            <p class="signal-state">Submit a query to see retrieval confidence.</p>
+          </div>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Content Blocks</span>
-        </div>
-        <div id="response_content_blocks" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
-      </section>
+          <div class="section-heading">
+            <span>AI Routing Note</span>
+          </div>
+          <div id="routing_note_summary" class="signal-summary compact-summary">
+            <p class="signal-state">No routing flag yet.</p>
+          </div>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Workflow Steps</span>
+          <div class="section-heading">
+            <span>Workflow Steps</span>
+          </div>
+          <ul id="workflow" class="workflow-list"></ul>
         </div>
-        <ul id="workflow" class="workflow-list"></ul>
+
+        <div id="blocks_panel" class="inspector-panel">
+          <div class="section-heading">
+            <span>Content Blocks</span>
+          </div>
+          <div id="response_content_blocks" class="signal-summary">
+            <p class="signal-state">等待输入...</p>
+          </div>
+        </div>
       </section>
 
       <details class="inspector-card debug-card">

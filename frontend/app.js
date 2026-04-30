@@ -21,6 +21,8 @@ const historyNav = document.getElementById("history_nav");
 const sessionHint = document.getElementById("session_hint");
 const questionSamples = document.getElementById("question_samples");
 const refreshSamplesButton = document.getElementById("refresh-samples-btn");
+const inspectorTabs = Array.from(document.querySelectorAll("[data-panel-target]"));
+const inspectorPanels = Array.from(document.querySelectorAll(".inspector-panel"));
 
 const CHAT_SESSIONS_STORAGE_KEY = "email_agent.chat_sessions";
 const THREAD_STORAGE_KEY = "email_agent.thread_id";
@@ -98,6 +100,8 @@ const SAMPLE_CATEGORY_LABELS = {
 let messages = [];
 let threadId = "";
 let sessions = {};
+let editingThreadId = "";
+let editingThreadTitleDraft = "";
 
 function escapeHtml(value) {
   return String(value)
@@ -106,6 +110,76 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function buildDownloadLabel(label, fileName) {
+  const preferred = String(label || fileName || "").trim();
+  if (!preferred) {
+    return "Download files";
+  }
+  return `Download ${preferred}`;
+}
+
+function closeAllHistoryMenus() {
+  document.querySelectorAll(".history-menu").forEach((menu) => {
+    menu.classList.remove("history-menu-open");
+  });
+}
+
+function startInlineThreadRename(targetThreadId) {
+  const session = sessions[targetThreadId];
+  if (!targetThreadId || !session) {
+    return;
+  }
+  editingThreadId = targetThreadId;
+  editingThreadTitleDraft = String(session.title || buildSessionTitle(session.messages || []) || "New conversation");
+  closeAllHistoryMenus();
+  renderHistoryNav();
+
+  window.requestAnimationFrame(() => {
+    const input = historyNav.querySelector(`[data-inline-rename-input="${CSS.escape(targetThreadId)}"]`);
+    if (!input) {
+      return;
+    }
+    input.focus();
+    input.select();
+  });
+}
+
+function cancelInlineThreadRename() {
+  editingThreadId = "";
+  editingThreadTitleDraft = "";
+  renderHistoryNav();
+}
+
+async function commitInlineThreadRename(targetThreadId, nextTitle) {
+  const normalizedTitle = String(nextTitle || "").trim();
+  if (!targetThreadId || !normalizedTitle) {
+    cancelInlineThreadRename();
+    return;
+  }
+
+  // A7: same logic as delete — if backend rename fails, do NOT mutate
+  // localStorage, otherwise a refresh refetches the old title and the
+  // user sees their rename "revert" without any error feedback.
+  try {
+    await renameThreadInBackend(targetThreadId, normalizedTitle);
+  } catch (error) {
+    sessionHint.textContent = `Rename failed (${error.message || "backend error"}); title unchanged.`;
+    cancelInlineThreadRename();
+    return;
+  }
+
+  ensureSessionRecord(targetThreadId);
+  sessions[targetThreadId] = {
+    ...(sessions[targetThreadId] || {}),
+    title: normalizedTitle,
+    updated_at: new Date().toISOString(),
+  };
+  saveStoredSessions();
+  editingThreadId = "";
+  editingThreadTitleDraft = "";
+  renderHistoryNav();
 }
 
 function formatSlackInline(escaped) {
@@ -143,6 +217,16 @@ function createThreadId() {
   return `thread-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function activateInspectorPanel(panelId) {
+  inspectorTabs.forEach((button) => {
+    const isActive = button.dataset.panelTarget === panelId;
+    button.classList.toggle("inspector-tab-active", isActive);
+  });
+  inspectorPanels.forEach((panel) => {
+    panel.classList.toggle("inspector-panel-active", panel.id === panelId);
+  });
+}
+
 function ensureThreadId() {
   if (!threadId) {
     threadId = window.localStorage.getItem(THREAD_STORAGE_KEY) || createThreadId();
@@ -161,6 +245,84 @@ function loadStoredSessions() {
   if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
     sessions = {};
   }
+}
+
+async function loadSessionsFromBackend() {
+  try {
+    const response = await fetch("/api/conversations");
+    if (!response.ok) {
+      throw new Error(`Failed to load conversations: ${response.status}`);
+    }
+    const payload = await response.json();
+    const nextSessions = {};
+    for (const thread of payload.threads || []) {
+      const key = String(thread.thread_key || "");
+      if (!key) {
+        continue;
+      }
+      nextSessions[key] = {
+        thread_id: key,
+        title: thread.title || "New conversation",
+        updated_at: thread.updated_at || "",
+        messages: [],
+        message_count: Number(thread.message_count || 0),
+        preview: String(thread.preview || ""),
+      };
+    }
+    sessions = nextSessions;
+    saveStoredSessions();
+  } catch (_error) {
+    loadStoredSessions();
+  }
+}
+
+async function loadThreadMessagesFromBackend(id) {
+  const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load thread: ${response.status}`);
+  }
+  const payload = await response.json();
+  const loadedMessages = (payload.messages || []).map((message) => ({
+    role: message.role || "user",
+    content: message.content || "",
+    metadata: message.metadata || {},
+  }));
+  ensureSessionRecord(id);
+  sessions[id] = {
+    ...(sessions[id] || {}),
+    thread_id: id,
+    messages: loadedMessages,
+    updated_at: sessions[id]?.updated_at || new Date().toISOString(),
+    title: sessions[id]?.title || buildSessionTitle(loadedMessages),
+    message_count: loadedMessages.length,
+    preview: String(loadedMessages.find((m) => m.role === "assistant")?.content || loadedMessages[0]?.content || ""),
+  };
+  saveStoredSessions();
+  return loadedMessages;
+}
+
+async function deleteThreadFromBackend(id) {
+  const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to delete thread: ${response.status}`);
+  }
+  return response.json();
+}
+
+async function renameThreadInBackend(id, title) {
+  const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to rename thread: ${response.status}`);
+  }
+  return response.json();
 }
 
 function saveStoredSessions() {
@@ -198,6 +360,8 @@ function syncCurrentSession() {
     messages: [...messages],
     updated_at: new Date().toISOString(),
     title: buildSessionTitle(messages),
+    message_count: messages.length,
+    preview: String(messages.find((message) => message.role === "assistant")?.content || messages[0]?.content || ""),
   };
   saveStoredSessions();
 }
@@ -283,6 +447,7 @@ function renderChatHistory() {
     const isAssistant = message.role === "assistant";
     const roleClass = isAssistant ? "chat-message-assistant" : "chat-message-user";
     const roleLabel = isAssistant ? "Assistant" : "CSR";
+    const avatarLabel = isAssistant ? "AI" : "CSR";
     const metaParts = [];
 
     if (message.metadata?.response_type) {
@@ -296,8 +461,9 @@ function renderChatHistory() {
       ? `<div class="chat-meta">${escapeHtml(metaParts.join(" | "))}</div>`
       : "";
     const documentLinks = (message.metadata?.documents || []).map((doc) => `
-      <a class="document-link" href="${escapeHtml(doc.document_url || "")}" target="_blank" rel="noopener noreferrer">Open document</a>
-      <a class="document-link" href="${escapeHtml(doc.document_url || "")}" download>Download document</a>
+      <a class="download-file-btn" href="${escapeHtml(doc.document_url || "")}" target="_blank" rel="noopener noreferrer" download>
+        ${escapeHtml(buildDownloadLabel(doc.label, doc.file_name))}
+      </a>
     `).join("");
     const documentSection = documentLinks
       ? `<div class="document-actions chat-document-actions">${documentLinks}</div>`
@@ -308,11 +474,16 @@ function renderChatHistory() {
       : escapeHtml(message.content || "");
 
     return `
-      <div class="chat-message ${roleClass}">
-        <strong>${roleLabel}</strong>
-        ${body}
-        ${documentSection}
-        ${metaLine}
+      <div class="chat-message-row ${roleClass}">
+        <div class="chat-avatar">${avatarLabel}</div>
+        <div class="chat-message ${roleClass}">
+          <div class="chat-message-header">
+            <strong>${roleLabel}</strong>
+          </div>
+          ${body}
+          ${documentSection}
+          ${metaLine}
+        </div>
       </div>
     `;
   }).join("");
@@ -332,28 +503,203 @@ function renderHistoryNav() {
   historyNav.innerHTML = entries.map((entry) => {
     const sessionMessages = entry.messages || [];
     const title = entry.title || buildSessionTitle(sessionMessages);
+    const previewSource = entry.preview
+      || sessionMessages.find((message) => message.role === "assistant")?.content
+      || sessionMessages.find((message) => message.role === "user")?.content
+      || "";
+    const preview = String(previewSource).replace(/\s+/g, " ").trim();
     const updated = String(entry.updated_at || "").replace("T", " ").slice(0, 16) || "No activity yet";
     const isActive = entry.thread_id === ensureThreadId();
+    const messageCount = Number(entry.message_count || sessionMessages.length || 0);
+    const isEditing = entry.thread_id === editingThreadId;
+    const titleMarkup = isEditing
+      ? `
+        <input
+          type="text"
+          class="history-inline-edit-input"
+          value="${escapeHtml(editingThreadTitleDraft || title)}"
+          data-inline-rename-input="${escapeHtml(entry.thread_id || "")}"
+          aria-label="Rename thread"
+        />
+      `
+      : `<p class="history-item-title">${escapeHtml(title)}</p>`;
     return `
-      <button type="button" class="history-item ${isActive ? "history-item-active" : ""}" data-thread-id="${escapeHtml(entry.thread_id || "")}">
-        <p class="history-item-title">${escapeHtml(title)}</p>
-        <p class="history-item-meta">${escapeHtml(updated)}</p>
-      </button>
+      <div class="history-row ${isActive ? "history-row-active" : ""}">
+        <button type="button" class="history-item ${isActive ? "history-item-active" : ""}" data-thread-id="${escapeHtml(entry.thread_id || "")}">
+          <div class="history-item-marker-wrap">
+            <span class="history-item-marker">${isActive ? "●" : "#"}<\/span>
+            <div class="history-item-copy">
+              <div class="history-item-topline">
+                ${titleMarkup}
+                <span class="history-item-time">${escapeHtml(updated.slice(5))}</span>
+              </div>
+              <p class="history-item-preview">${escapeHtml(preview.slice(0, 72) || "No messages yet.")}</p>
+              <p class="history-item-meta">${messageCount} msg · ${escapeHtml(entry.thread_id.slice(0, 12))}</p>
+            </div>
+          </div>
+        </button>
+        <div class="history-actions">
+          <button
+            type="button"
+            class="history-menu-btn"
+            data-menu-thread-id="${escapeHtml(entry.thread_id || "")}"
+            aria-label="Thread actions"
+            title="Thread actions"
+          >
+            ...
+          </button>
+          <div class="history-menu" data-menu-for-thread-id="${escapeHtml(entry.thread_id || "")}">
+            <button type="button" class="history-menu-item" data-rename-thread-id="${escapeHtml(entry.thread_id || "")}">
+              Rename
+            </button>
+            <button type="button" class="history-menu-item history-menu-item-danger" data-delete-thread-id="${escapeHtml(entry.thread_id || "")}">
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
     `;
   }).join("");
 
   historyNav.querySelectorAll("[data-thread-id]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const nextThreadId = button.dataset.threadId || "";
-      if (!nextThreadId || nextThreadId === threadId) {
+      if (!nextThreadId || nextThreadId === threadId || editingThreadId) {
         return;
       }
-      syncCurrentSession();
-      loadThreadSession(nextThreadId);
-      renderChatHistory();
+      try {
+        syncCurrentSession();
+        messages = await loadThreadMessagesFromBackend(nextThreadId);
+        loadThreadSession(nextThreadId);
+        renderChatHistory();
+        renderHistoryNav();
+        renderSessionHint();
+        resetInspectorPanels("Loaded prior conversation. Submit a new message to continue this thread.");
+      } catch (_error) {
+        loadThreadSession(nextThreadId);
+        renderChatHistory();
+        renderHistoryNav();
+        renderSessionHint();
+        resetInspectorPanels("Loaded prior conversation from local cache.");
+      }
+    });
+  });
+
+  historyNav.querySelectorAll("[data-menu-thread-id]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const targetId = button.dataset.menuThreadId || "";
+      historyNav.querySelectorAll(".history-menu").forEach((menu) => {
+        const shouldOpen = menu.dataset.menuForThreadId === targetId;
+        menu.classList.toggle("history-menu-open", shouldOpen && !menu.classList.contains("history-menu-open"));
+        if (!shouldOpen) {
+          menu.classList.remove("history-menu-open");
+        }
+      });
+    });
+  });
+
+  historyNav.querySelectorAll("[data-rename-thread-id]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const renameThreadId = button.dataset.renameThreadId || "";
+      if (!renameThreadId) {
+        return;
+      }
+      startInlineThreadRename(renameThreadId);
+    });
+  });
+
+  historyNav.querySelectorAll("[data-inline-rename-input]").forEach((input) => {
+    const inputEl = input;
+    const targetThreadId = inputEl.dataset.inlineRenameInput || "";
+    let hasCommitted = false;
+
+    inputEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+
+    inputEl.addEventListener("input", () => {
+      editingThreadTitleDraft = inputEl.value;
+    });
+
+    inputEl.addEventListener("keydown", async (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        hasCommitted = true;
+        await commitInlineThreadRename(targetThreadId, inputEl.value);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        hasCommitted = true;
+        cancelInlineThreadRename();
+      }
+    });
+
+    inputEl.addEventListener("blur", async () => {
+      if (hasCommitted) {
+        return;
+      }
+      await commitInlineThreadRename(targetThreadId, inputEl.value);
+    });
+  });
+
+  historyNav.querySelectorAll("[data-delete-thread-id]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const deleteThreadId = button.dataset.deleteThreadId || "";
+      if (!deleteThreadId) {
+        return;
+      }
+      const confirmed = window.confirm("Delete this thread?");
+      if (!confirmed) {
+        return;
+      }
+      // A7: do not delete localStorage if backend write fails — otherwise a
+      // refresh re-fetches the row from PG and the thread "comes back",
+      // confusing the CSR. Surface the error and bail.
+      try {
+        await deleteThreadFromBackend(deleteThreadId);
+      } catch (error) {
+        sessionHint.textContent = `Delete failed (${error.message || "backend error"}); thread kept.`;
+        return;
+      }
+      delete sessions[deleteThreadId];
+      saveStoredSessions();
+
+      if (deleteThreadId === threadId) {
+        // A4: pick the most recently updated remaining thread, not Object.keys[0]
+        // which is insertion-order and unrelated to recency.
+        const remainingThreadId =
+          Object.values(sessions)
+            .filter((s) => s && s.thread_id && s.thread_id !== deleteThreadId)
+            .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")))
+            .map((s) => s.thread_id)[0]
+          || createThreadId();
+        if (!sessions[remainingThreadId]) {
+          sessions[remainingThreadId] = {
+            thread_id: remainingThreadId,
+            messages: [],
+            updated_at: new Date().toISOString(),
+            title: "New conversation",
+            message_count: 0,
+            preview: "",
+          };
+          saveStoredSessions();
+        }
+        threadId = remainingThreadId;
+        window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
+        try {
+          messages = await loadThreadMessagesFromBackend(threadId);
+        } catch (_error) {
+          loadThreadSession(threadId);
+        }
+        renderChatHistory();
+        renderSessionHint();
+        resetInspectorPanels("Thread deleted.");
+      }
+
       renderHistoryNav();
-      renderSessionHint();
-      resetInspectorPanels("Loaded prior conversation. Submit a new message to continue this thread.");
     });
   });
 }
@@ -393,7 +739,21 @@ function normalizeAssistantMessage(output) {
     .map((match) => ({
       file_name: match.file_name || "",
       document_url: match.document_url || "",
+      label: match.file_name || "Document",
+      source: "document_lookup",
     }));
+  const servicePrimaryDocuments = (output.response_content_blocks || [])
+    .filter((block) => block.kind === "service_primary_document")
+    .map((block) => ({
+      file_name: block.data?.file_name || "",
+      document_url: block.data?.presigned_url || "",
+      label: block.data?.title || block.data?.file_name || "Download files",
+      source: "service_primary_document",
+    }))
+    .filter((doc) => doc.document_url);
+  const mergedDocuments = [...servicePrimaryDocuments, ...documents].filter(
+    (doc, index, all) => all.findIndex((item) => item.document_url === doc.document_url) === index,
+  );
   const baseMessage = output.assistant_message || {
     role: "assistant",
     content: output.final_response?.message || output.reply_preview || "",
@@ -409,18 +769,39 @@ function normalizeAssistantMessage(output) {
       response_type: baseMessage.metadata?.response_type || output.final_response?.response_type || "answer",
       response_topic: baseMessage.metadata?.response_topic || output.response_topic || "",
       response_path: baseMessage.metadata?.response_path || output.response_path || "",
-      documents,
+      documents: mergedDocuments,
     },
   };
 }
 
-loadStoredSessions();
-ensureThreadId();
-loadThreadSession(threadId);
-renderSessionHint();
-renderChatHistory();
-renderHistoryNav();
-renderQuestionSamples();
+async function initializeWorkspace() {
+  await loadSessionsFromBackend();
+  ensureThreadId();
+  try {
+    messages = await loadThreadMessagesFromBackend(threadId);
+  } catch (_error) {
+    loadThreadSession(threadId);
+  }
+  renderSessionHint();
+  renderChatHistory();
+  renderHistoryNav();
+  renderQuestionSamples();
+  activateInspectorPanel("docs_panel");
+
+  inspectorTabs.forEach((button) => {
+    button.addEventListener("click", () => {
+      activateInspectorPanel(button.dataset.panelTarget || "docs_panel");
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".history-actions")) {
+      closeAllHistoryMenus();
+    }
+  });
+}
+
+initializeWorkspace();
 
 function renderWorkflow(items) {
   workflow.innerHTML = "";
@@ -627,12 +1008,32 @@ function renderResponseContentBlocks(output) {
 
   responseContentBlocks.innerHTML = `
     <div class="content-block-list">
-      ${blocks.map((block, index) => `
-        <div class="content-block-item">
-          <p class="content-block-title">${index + 1}. ${escapeHtml(block.kind || "unknown")}</p>
-          <p class="content-block-text">${escapeHtml(block.text || "")}</p>
-        </div>
-      `).join("")}
+      ${blocks.map((block, index) => {
+        if (block.kind === "service_primary_document") {
+          const title = block.data?.title || block.data?.file_name || "Primary service document";
+          const fileName = block.data?.file_name || "";
+          const url = block.data?.presigned_url || "";
+          return `
+            <div class="content-block-item content-block-item-download">
+              <p class="content-block-title">${index + 1}. ${escapeHtml(block.kind || "unknown")}</p>
+              <p class="content-block-text">${escapeHtml(title)}</p>
+              ${fileName ? `<p class="content-block-text">${escapeHtml(fileName)}</p>` : ""}
+              ${url ? `
+                <a class="download-file-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" download>
+                  ${escapeHtml(buildDownloadLabel(title, fileName))}
+                </a>
+              ` : ""}
+            </div>
+          `;
+        }
+
+        return `
+          <div class="content-block-item">
+            <p class="content-block-title">${index + 1}. ${escapeHtml(block.kind || "unknown")}</p>
+            <p class="content-block-text">${escapeHtml(block.text || "")}</p>
+          </div>
+        `;
+      }).join("")}
     </div>
   `;
 }

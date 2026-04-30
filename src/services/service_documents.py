@@ -15,6 +15,7 @@ Runtime requirements:
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -108,13 +109,28 @@ def generate_presigned_document_url(storage_url: str, *, expires_in: int = 3600)
     )
 
 
+# TTL cache for presigned-link lookups: each entry is (link_dict, expires_at_epoch).
+# We expire 5 min before the URL itself does, so an in-flight CSR draft never
+# hands out a link about to die. Process-local — survives across turns within
+# one Python process, dropped on restart.
+_LINK_CACHE_SAFETY_MARGIN_S = 300
+_link_cache: dict[str, tuple[dict[str, Any], float]] = {}
+
+
 def get_primary_service_document_link(service_name: str, *, expires_in: int = 3600) -> dict[str, Any] | None:
+    cached = _link_cache.get(service_name)
+    if cached is not None and cached[1] > time.time():
+        return cached[0]
+
     record = get_primary_service_document(service_name)
     if not record:
         return None
     presigned_url = generate_presigned_document_url(record["storage_url"], expires_in=expires_in)
-    return {
+    link = {
         **record,
         "presigned_url": presigned_url,
         "expires_in": expires_in,
     }
+    expires_at = time.time() + max(1, expires_in - _LINK_CACHE_SAFETY_MARGIN_S)
+    _link_cache[service_name] = (link, expires_at)
+    return link

@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.common.execution_models import ExecutedToolCall
 from src.config import get_llm
+from src.services.service_documents import get_primary_service_document_link
 from src.responser.models import ComposedResponse, ContentBlock, ResponseInput, ResponsePlan
 
 _HISTORICAL_STRONG_MATCH = 0.75
@@ -105,6 +106,9 @@ def render_csr_draft_response(
     operational_records = _extract_operational_records(buckets["operational"])
     retrieval_confidence = _extract_retrieval_confidence(buckets["technical_docs"])
     routing_notes = _collect_routing_notes(response_input)
+    primary_service_document, primary_service_document_error = _resolve_primary_service_document(
+        response_input
+    )
 
     trust_signal = _build_trust_signal(
         raw_historical_threads=raw_historical_threads,
@@ -122,6 +126,7 @@ def render_csr_draft_response(
         structured_records=structured_records,
         operational_records=operational_records,
         trust_signal=trust_signal,
+        primary_service_document=primary_service_document,
     )
 
     sections: list[str] = []
@@ -133,6 +138,8 @@ def render_csr_draft_response(
     sections.append(_format_documents_section(document_matches, trust_signal=trust_signal))
     if document_files:
         sections.append(_format_document_files_section(document_files))
+    if primary_service_document:
+        sections.append(_format_service_document_section(primary_service_document))
     if operational_records:
         sections.append(_format_operational_section(operational_records))
     if routing_notes:
@@ -197,6 +204,15 @@ def render_csr_draft_response(
                 data={"files": document_files},
             )
         )
+    if primary_service_document:
+        content_blocks.append(
+            ContentBlock(
+                block_type="service_primary_document",
+                title="Primary service document",
+                body=_format_service_document_section(primary_service_document),
+                data=primary_service_document,
+            )
+        )
     if operational_records:
         content_blocks.append(
             ContentBlock(
@@ -227,6 +243,8 @@ def render_csr_draft_response(
             "historical_threads_raw": len(raw_historical_threads),
             "document_matches_returned": len(document_matches),
             "document_files_returned": len(document_files),
+            "primary_service_document_found": bool(primary_service_document),
+            "primary_service_document_error": primary_service_document_error,
             "structured_records_returned": len(structured_records),
             "operational_records_returned": len(operational_records),
             "unrouted_tool_calls": [
@@ -355,6 +373,50 @@ def _collect_routing_notes(response_input: ResponseInput) -> list[str]:
     return notes
 
 
+def _requests_documentation(response_input: ResponseInput) -> bool:
+    demand_profile = response_input.demand_profile
+    if demand_profile is not None and "needs_documentation" in demand_profile.active_request_flags:
+        return True
+    for outcome in response_input.group_outcomes:
+        scoped_demand = getattr(outcome, "scoped_demand", None)
+        if scoped_demand is not None and "needs_documentation" in getattr(scoped_demand, "request_flags", []):
+            return True
+    return False
+
+
+def _resolved_service_name(response_input: ResponseInput) -> str:
+    resolved = response_input.resolved_object_state
+    if resolved is None:
+        return ""
+    for candidate in (
+        resolved.primary_object,
+        resolved.active_object,
+        *resolved.secondary_objects,
+    ):
+        if candidate is not None and candidate.object_type == "service":
+            return str(
+                candidate.display_name
+                or candidate.canonical_value
+                or candidate.identifier
+                or ""
+            ).strip()
+    return ""
+
+
+def _resolve_primary_service_document(
+    response_input: ResponseInput,
+) -> tuple[dict[str, Any] | None, str]:
+    if not _requests_documentation(response_input):
+        return None, ""
+    service_name = _resolved_service_name(response_input)
+    if not service_name:
+        return None, ""
+    try:
+        return get_primary_service_document_link(service_name), ""
+    except Exception as exc:
+        return None, str(exc)
+
+
 def _filter_historical_threads(threads: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not threads:
         return []
@@ -453,6 +515,7 @@ def _generate_draft(
     structured_records: list[dict[str, Any]],
     operational_records: list[dict[str, Any]],
     trust_signal: dict[str, Any],
+    primary_service_document: dict[str, Any] | None,
 ) -> str:
     if not query.strip():
         return ""
@@ -496,6 +559,21 @@ def _generate_draft(
     else:
         parts.append("\nRELEVANT DOCUMENTATION CHUNKS: (none retrieved)")
 
+    if primary_service_document:
+        parts.append("\nPRIMARY SERVICE DOCUMENT AVAILABLE:")
+        parts.append(
+            _render_record_for_llm(
+                {
+                    "title": primary_service_document.get("title", ""),
+                    "document_type": primary_service_document.get("document_type", ""),
+                    "file_name": primary_service_document.get("file_name", ""),
+                    "presigned_url": primary_service_document.get("presigned_url", ""),
+                }
+            )
+        )
+    else:
+        parts.append("\nPRIMARY SERVICE DOCUMENT AVAILABLE: (none)")
+
     if operational_records:
         parts.append(
             "\nOPERATIONAL RECORDS (orders / invoices / shipping / customer — AUTHORITATIVE):"
@@ -537,6 +615,14 @@ Additional rule for this turn:
 - You may borrow tone and structure from retrieved material, but avoid
   overcommitting on specific technical or commercial details unless they are
   explicitly present in the inputs.
+"""
+        if primary_service_document:
+            system_prompt += """
+
+Also for this turn:
+- A primary service document link is available.
+- If the customer is asking for documentation, naturally mention that the flyer/brochure/report is attached or included via link.
+- Do not paste raw long URLs into the prose unless necessary; refer to it as the attached or linked document.
 """
         result = llm.invoke([
             ("system", system_prompt),
@@ -705,6 +791,25 @@ def _format_document_files_section(files: list[dict[str, Any]]) -> str:
         lines.append(f"   *[{i}]* {title}{suffix}")
         if path:
             lines.append(f"      • path: `{path}`")
+    return "\n".join(lines)
+
+
+def _format_service_document_section(document: dict[str, Any]) -> str:
+    title = str(document.get("title") or document.get("file_name") or "Primary service document").strip()
+    file_name = str(document.get("file_name") or "").strip()
+    document_type = str(document.get("document_type") or "").strip()
+    presigned_url = str(document.get("presigned_url") or "").strip()
+    storage_url = str(document.get("storage_url") or "").strip()
+
+    lines = ["*🔗 Primary service document*"]
+    suffix = f" ({document_type})" if document_type else ""
+    lines.append(f"   • title: `{title}`{suffix}")
+    if file_name:
+        lines.append(f"   • file: `{file_name}`")
+    if presigned_url:
+        lines.append(f"   • temporary link: `{presigned_url}`")
+    elif storage_url:
+        lines.append(f"   • storage: `{storage_url}`")
     return "\n".join(lines)
 
 

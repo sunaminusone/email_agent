@@ -9,6 +9,10 @@ from src.api_models import AgentPrototypeResponse, AgentRequest, FinalResponsePa
 from src.common.messages import get_message
 from src.common.models import DemandProfile, IntentGroup
 from src.common.execution_models import ExecutionResult
+from src.conversations import ConversationStore
+
+# Module-level singleton — see src/main.py for rationale (warm to_regclass cache).
+_conversation_store = ConversationStore()
 from src.ingestion import build_demand_profile
 from src.ingestion.models import build_ingestion_memory_contribution
 from src.routing.intent_assembly import assemble_intent_groups
@@ -296,6 +300,10 @@ def _persist_session_state(
             "memory_snapshot": serialize_memory_snapshot(updated_snapshot),
         },
     }
+    thread_title = (user_query or "").strip()[:120]
+    assistant_message["metadata"]["documents"] = _extract_persisted_documents(
+        assistant_message["metadata"],
+    )
     session_store.append_turns(
         thread_id,
         [
@@ -304,7 +312,34 @@ def _persist_session_state(
         ],
     )
     session_store.persist_memory_snapshot(thread_id, updated_snapshot)
+    _conversation_store.persist_turn(
+        thread_key=thread_id,
+        thread_title=thread_title,
+        user_message={"role": "user", "content": user_query, "metadata": {}},
+        assistant_message=assistant_message,
+    )
     return assistant_message
+
+
+def _extract_persisted_documents(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    documents: list[dict[str, Any]] = []
+    for block in list(metadata.get("content_blocks") or []):
+        if str(block.get("kind", "")) != "service_primary_document":
+            continue
+        data = dict(block.get("data") or {})
+        presigned_url = str(data.get("presigned_url", "") or "").strip()
+        if not presigned_url:
+            continue
+        documents.append(
+            {
+                "label": str(data.get("title") or data.get("file_name") or "Download files"),
+                "file_name": str(data.get("file_name", "") or ""),
+                "document_url": presigned_url,
+                "storage_url": str(data.get("storage_url", "") or ""),
+                "document_type": str(data.get("document_type", "") or ""),
+            }
+        )
+    return documents
 
 
 def _assemble_agent_response(

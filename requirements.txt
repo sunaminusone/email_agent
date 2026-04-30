@@ -4,6 +4,7 @@ pydantic
 python-dotenv
 python-multipart
 requests
+boto3
 redis
 pandas
 openpyxl
