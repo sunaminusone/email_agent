@@ -98,10 +98,19 @@ def _can_execute_without_object(
     if scoped_demand.demand_confidence < 0.3:
         return False
 
-    return (
+    if (
         scoped_demand.primary_demand == "technical"
         or "technical" in scoped_demand.secondary_demands
-    )
+    ):
+        return True
+
+    # Timeline inquiries (e.g. "how long does protein expression take?")
+    # can fall back to RAG generic process answers even without a
+    # resolved object — pricing/quote/customization cannot.
+    if "needs_timeline" in scoped_demand.request_flags:
+        return True
+
+    return False
 
 
 def _determine_action(
