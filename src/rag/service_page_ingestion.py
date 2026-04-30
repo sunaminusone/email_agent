@@ -9,12 +9,14 @@ from langchain_core.documents import Document
 from src.rag.ingestion_config import IngestionSection, build_chunk_metadata, build_embedding_string, normalize_tags
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_RAG_READY_ROOT = _PROJECT_ROOT / "data" / "processed" / "rag_ready_files"
 SERVICE_PAGE_SOURCE_DIRS = [
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk"),
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp"),
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody"),
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays"),
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/protein-expression"),
+    _RAG_READY_ROOT / "car-t:car-nk",
+    _RAG_READY_ROOT / "mrna-lnp",
+    _RAG_READY_ROOT / "antibody",
+    _RAG_READY_ROOT / "cell-based-assays",
+    _RAG_READY_ROOT / "protein-expression",
 ]
 # Backward-compatible alias for older imports; the retriever now reads from all
 # directories listed in SERVICE_PAGE_SOURCE_DIRS.

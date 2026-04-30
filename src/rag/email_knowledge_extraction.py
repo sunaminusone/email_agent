@@ -30,9 +30,8 @@ from langchain_core.documents import Document
 from src.objects.registries.service_registry import KNOWN_BUSINESS_LINES
 from .ingestion_config import build_chunk_metadata, build_embedding_string
 
-EMAIL_KNOWLEDGE_JSONL_PATH = Path(
-    "/Users/promab/anaconda_projects/email_agent/data/processed/rag_email_facts.jsonl"
-)
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+EMAIL_KNOWLEDGE_JSONL_PATH = _PROJECT_ROOT / "data" / "processed" / "rag_email_facts.jsonl"
 
 # ---------------------------------------------------------------------------
 # 提取提示词

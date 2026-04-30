@@ -17,7 +17,8 @@ from src.config import get_embeddings
 from src.rag.email_knowledge_extraction import load_email_knowledge_documents
 from src.rag.service_page_ingestion import load_service_page_documents
 
-CHROMA_DIR = Path("/Users/promab/anaconda_projects/email_agent/data/processed/chroma_rag_service_pages")
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CHROMA_DIR = _PROJECT_ROOT / "data" / "processed" / "chroma_rag_service_pages"
 COLLECTION_NAME = "email_agent_rag_v7_service_pages_only"
 INDEX_MANIFEST_PATH = CHROMA_DIR / "index_manifest.json"
 INDEX_SCHEMA_VERSION = "rag_index_v1"

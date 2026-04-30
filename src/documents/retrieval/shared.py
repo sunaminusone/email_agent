@@ -7,8 +7,9 @@ from typing import Any
 from urllib.parse import quote
 
 
-DOCUMENT_ROOT = Path("/Users/promab/anaconda_projects/email_agent/data/raw/pdf")
-DOCUMENT_CATALOG_PATH = Path("/Users/promab/anaconda_projects/email_agent/data/processed/document_catalog.csv")
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DOCUMENT_ROOT = _PROJECT_ROOT / "data" / "raw" / "pdf"
+DOCUMENT_CATALOG_PATH = _PROJECT_ROOT / "data" / "processed" / "document_catalog.csv"
 IGNORED_NAMES = {".DS_Store"}
 IGNORED_PARTS = {".ipynb_checkpoints"}
 

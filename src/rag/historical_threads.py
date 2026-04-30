@@ -32,7 +32,8 @@ def _decode_attachments(raw: Any) -> list[dict[str, Any]]:
         return [dict(entry) for entry in decoded if isinstance(entry, dict)]
     return []
 
-CHROMA_DIR = Path("/Users/promab/anaconda_projects/email_agent/data/processed/chroma_historical_threads")
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CHROMA_DIR = _PROJECT_ROOT / "data" / "processed" / "chroma_historical_threads"
 COLLECTION_NAME = "historical_threads_v1"
 
 
