@@ -104,6 +104,16 @@ def extract_operational_records(calls: list[ExecutedToolCall]) -> list[dict[str,
     return out[:8]
 
 
+PAYMENT_STATUS_VOCABULARY = """\
+- `paid` — balance is 0
+- `open` / `partial` — balance > 0, no due date on file
+- `open · due in N day(s)` / `partial · due in N day(s)` — due in the future
+- `due today` / `partial — due today`
+- `overdue (N day(s))` / `partial — overdue (N day(s))` — past due
+Any value may be suffixed `(not sent)` when `email_status` is `NeedToSend`
+(QB has the document queued but it has never been emailed)."""
+
+
 def _derive_payment_status(record: dict[str, Any]) -> None:
     """Add `payment_status` / `days_past_due` to QuickBooks Invoice records.
 
@@ -113,9 +123,9 @@ def _derive_payment_status(record: dict[str, Any]) -> None:
     arithmetic in their head. SalesReceipts are paid at point of sale, so
     we skip them.
 
-    Output mirrors QBO's badge: paid / partial / partial — overdue (N days) /
-    overdue (N days) / due today / open · due in N days, optionally suffixed
-    with "(not sent)" when EmailStatus == NeedToSend.
+    The vocabulary of values produced lives in ``PAYMENT_STATUS_VOCABULARY``
+    above — that constant is also spliced into the draft LLM system prompt,
+    so any change here must be reflected there (single source of truth).
     """
     if (record.get("entity") or "") != "Invoice":
         return

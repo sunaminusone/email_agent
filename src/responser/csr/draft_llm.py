@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from textwrap import indent
 from typing import Any, Iterator
 
 from pydantic import BaseModel, ConfigDict
 
 from src.config import get_llm
+from src.responser.csr.extractors import PAYMENT_STATUS_VOCABULARY
 
 _DRAFT_SYSTEM_PROMPT = """\
 You are drafting a customer-service reply for a customer-service representative
@@ -45,13 +47,23 @@ Rules:
   * `email_status: NotSet` / `print_status: NotSet` mean the document was
     NEVER sent via QuickBooks email / print — not "we have no record".
     `EmailSent` means it was sent but QB does not store the timestamp.
-    Neither status carries a send DATE.
+    `NeedToSend` means it's queued / marked to be sent but has not actually
+    been emailed yet (this drives the `(not sent)` suffix on payment_status).
+    None of these statuses carry a send DATE.
   * `txn_date` is when the document was CREATED in QuickBooks (issue date),
     NOT when it was sent / delivered to the customer.
   * `due_date` is the payment due date, not a send or delivery date.
   * `ship_date` is the goods-shipped date, not the document-sent date.
-  * `balance: 0.00` with `payment_status: paid` confirms full payment;
-    do NOT volunteer payment status unless the customer asked about it.
+  * `last_updated_at` is the most recent edit timestamp on the QB record —
+    NOT a send / delivery / payment date.
+  * `balance` is the still-unpaid amount; `total_amt` is the invoice's full
+    value. `balance == 0` confirms full payment.
+  * On Customer records, `balance` / `open_balance` are the customer's TOTAL
+    outstanding amount across all their invoices, not a per-invoice figure.
+  * `payment_status` is derived from balance / due_date / email_status
+    (Invoice records only — SalesReceipts skip this). Possible values:
+__PAYMENT_STATUS_VOCABULARY__
+    Do NOT volunteer payment status unless the customer asked about it.
 - Lean on past sales replies for TONE and STRUCTURE — how our team talks to
   customers — but not for specific numbers when live data exists.
 - Use documentation chunks to cite technical specs and process details only
@@ -63,7 +75,10 @@ Rules:
 - Reply in the same language as the customer inquiry (English by default).
 - Do NOT add headers like "Draft:" — the wrapper takes care of that.
 - Keep it concise; the CSR will expand if needed.
-"""
+""".replace(
+    "__PAYMENT_STATUS_VOCABULARY__",
+    indent(PAYMENT_STATUS_VOCABULARY, "    "),
+)
 
 
 _UNGROUNDED_RULE = """
