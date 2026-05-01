@@ -55,7 +55,6 @@ def _pricing_record(match: dict[str, object]) -> dict[str, object]:
         "name": match.get("name"),
         "price": match.get("price"),
         "currency": match.get("currency"),
-        "size": match.get("size"),
-        "lead_time": match.get("lead_time"),
+        "lead_time_text": match.get("lead_time_text"),
         "business_line": match.get("business_line"),
     }

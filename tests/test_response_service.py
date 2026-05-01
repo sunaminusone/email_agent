@@ -646,8 +646,7 @@ def test_csr_draft_surfaces_live_pricing_records_from_pricing_lookup_tool() -> N
                     "name": "Anti-CD45 mAb",
                     "price": 350.0,
                     "currency": "USD",
-                    "lead_time": "in stock",
-                    "size": "100 ug",
+                    "lead_time_text": "in stock",
                     "business_line": "antibody",
                 }
             ],
@@ -660,8 +659,7 @@ def test_csr_draft_surfaces_live_pricing_records_from_pricing_lookup_tool() -> N
                         "name": "Anti-CD45 mAb",
                         "price": 350.0,
                         "currency": "USD",
-                        "lead_time": "in stock",
-                        "size": "100 ug",
+                        "lead_time_text": "in stock",
                         "business_line": "antibody",
                     }
                 ],
@@ -704,6 +702,62 @@ def test_csr_draft_surfaces_live_pricing_records_from_pricing_lookup_tool() -> N
     assert response.debug_info["structured_records_returned"] == 1
     trust_block = next(b for b in response.content_blocks if b.block_type == "trust_signal")
     assert trust_block.data["has_live_data"] is True
+
+
+def test_csr_draft_marks_missing_price_explicitly_for_llm() -> None:
+    """When PG returns a catalog row with a NULL price, the extractor must
+    surface "(not on file)" rather than letting render_record_for_llm
+    silently drop the field — otherwise the draft LLM cannot tell the
+    field is missing and substitutes an adjacent one (the bug that
+    produced "available in USD" for catalog 20001)."""
+    pricing_call = ExecutedToolCall(
+        call_id="price-missing",
+        tool_name="pricing_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="pricing_lookup_tool", query="20001"),
+        result=ToolResult(
+            tool_name="pricing_lookup_tool",
+            status="ok",
+            primary_records=[
+                {
+                    "catalog_no": "20001",
+                    "name": "Mouse Monoclonal antibody to Nucleophosmin",
+                    "price": None,
+                    "currency": "USD",
+                    "lead_time_text": None,
+                    "business_line": "Antibody",
+                }
+            ],
+            structured_facts={
+                "query": "20001",
+                "match_status": "ok",
+                "pricing_records": [
+                    {
+                        "catalog_no": "20001",
+                        "name": "Mouse Monoclonal antibody to Nucleophosmin",
+                        "price": None,
+                        "currency": "USD",
+                        "lead_time_text": None,
+                        "business_line": "Antibody",
+                    }
+                ],
+                "match_count": 1,
+            },
+        ),
+    )
+
+    capturing = _PromptCapturingLLM("placeholder draft")
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=capturing):
+        render_csr_draft_response(
+            ResponseInput(
+                query="What's the price of catalog #20001?",
+                execution_result=_empty_execution_result(executed_calls=[pricing_call]),
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    assert "price: (not on file)" in capturing.last_human
+    assert "lead_time_text: (not on file)" in capturing.last_human
 
 
 # ---------------------------------------------------------------------------

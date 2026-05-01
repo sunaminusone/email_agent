@@ -74,6 +74,27 @@ def extract_document_files(calls: list[ExecutedToolCall]) -> list[dict[str, Any]
     return out[:5]
 
 
+_STRUCTURED_ANSWERABLE_FIELDS: tuple[str, ...] = ("price", "lead_time_text")
+_MISSING_FIELD_SENTINEL = "(not on file)"
+
+
+def _materialize_missing_answerable_fields(record: dict[str, Any]) -> None:
+    """For pricing/catalog records, replace `None` on the fields a customer
+    is most likely to ask about (price, lead_time) with an explicit
+    "(not on file)" sentinel.
+
+    Why: ``render_record_for_llm`` filters None/empty values, which means
+    the draft LLM cannot distinguish "this catalog row has no price on
+    file" from "price is not a field on this record type". Without the
+    sentinel the LLM tends to substitute an adjacent field (e.g.
+    answering a price question with the currency) rather than admitting
+    the gap, even though the system prompt tells it to say so.
+    """
+    for field in _STRUCTURED_ANSWERABLE_FIELDS:
+        if record.get(field) is None:
+            record[field] = _MISSING_FIELD_SENTINEL
+
+
 def extract_structured_records(calls: list[ExecutedToolCall]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for call in calls:
@@ -86,6 +107,7 @@ def extract_structured_records(calls: list[ExecutedToolCall]) -> list[dict[str, 
                 continue
             annotated = dict(record)
             annotated["_source_tool"] = call.tool_name
+            _materialize_missing_answerable_fields(annotated)
             out.append(annotated)
     return out[:8]
 
