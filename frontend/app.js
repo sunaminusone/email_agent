@@ -497,7 +497,13 @@ function playChatStageTransition() {
   chatStage.classList.add("chat-stage-switching");
 }
 
-function renderChatHistory() {
+function renderChatHistory(options = {}) {
+  const { forceScroll = false } = options;
+  const autoScrollThreshold = 48;
+  const shouldStickToBottom =
+    forceScroll
+    || (chatHistory.scrollHeight - chatHistory.scrollTop - chatHistory.clientHeight <= autoScrollThreshold);
+
   syncChatStageLayout();
 
   if (!messages.length) {
@@ -515,6 +521,18 @@ function renderChatHistory() {
     const isStreaming = Boolean(message.metadata?.streaming);
     const roleClass = isAssistant ? "chat-message-assistant" : "chat-message-user";
     const roleLabel = isAssistant ? "Assistant" : "CSR";
+    const plainContent = String(message.content || "");
+    const normalizedUserLength = plainContent.replace(/\s+/g, " ").trim().length;
+    let userBubbleSizeClass = "";
+    if (!isAssistant) {
+      if (normalizedUserLength <= 24) {
+        userBubbleSizeClass = "chat-message-user-compact";
+      } else if (normalizedUserLength <= 72) {
+        userBubbleSizeClass = "chat-message-user-medium";
+      } else {
+        userBubbleSizeClass = "chat-message-user-wide";
+      }
+    }
     const streamingIndicator = isStreaming
       ? `
         <div class="chat-streaming-indicator" aria-hidden="true">
@@ -558,7 +576,7 @@ function renderChatHistory() {
     return `
       <div class="chat-message-row ${roleClass}">
         ${isAssistant ? "" : `
-          <div class="chat-message ${roleClass}">
+          <div class="chat-message ${roleClass} ${userBubbleSizeClass}">
             <div class="chat-message-header">
               <strong>${roleLabel}</strong>
             </div>
@@ -582,7 +600,9 @@ function renderChatHistory() {
     `;
   }).join("");
 
-  chatHistory.scrollTop = chatHistory.scrollHeight;
+  if (shouldStickToBottom) {
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+  }
 }
 
 function renderHistoryNav() {
@@ -662,14 +682,14 @@ function renderHistoryNav() {
         syncCurrentSession();
         messages = await loadThreadMessagesFromBackend(nextThreadId);
         loadThreadSession(nextThreadId);
-        renderChatHistory();
+        renderChatHistory({ forceScroll: true });
         playChatStageTransition();
         renderHistoryNav();
         renderSessionHint();
         resetInspectorPanels("Loaded prior conversation. Submit a new message to continue this thread.");
       } catch (_error) {
         loadThreadSession(nextThreadId);
-        renderChatHistory();
+        renderChatHistory({ forceScroll: true });
         playChatStageTransition();
         renderHistoryNav();
         renderSessionHint();
@@ -780,7 +800,7 @@ function renderHistoryNav() {
         } else {
           messages = [];
         }
-        renderChatHistory();
+        renderChatHistory({ forceScroll: true });
         renderSessionHint();
         resetInspectorPanels("Thread deleted.");
       }
@@ -868,7 +888,7 @@ async function initializeWorkspace() {
   window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
   messages = [];
   renderSessionHint();
-  renderChatHistory();
+  renderChatHistory({ forceScroll: true });
   playChatStageTransition();
   renderHistoryNav();
   activateInspectorPanel("docs_panel");
@@ -1194,7 +1214,7 @@ form.addEventListener("submit", async (event) => {
     messages = [...messages, placeholderAssistant];
     const placeholderIndex = messages.length - 1;
     syncCurrentSession();
-    renderChatHistory();
+    renderChatHistory({ forceScroll: true });
     renderHistoryNav();
     trustSummary.innerHTML = '<p class="signal-state">Retrieving similar threads + docs…</p>';
     routingNoteSummary.innerHTML = '<p class="signal-state">Routing in progress…</p>';
@@ -1307,7 +1327,7 @@ document.getElementById("user_query").addEventListener("keydown", (event) => {
 
 newChatButton.addEventListener("click", () => {
   createAndSwitchToNewThread();
-  renderChatHistory();
+  renderChatHistory({ forceScroll: true });
   playChatStageTransition();
   renderHistoryNav();
   renderSessionHint();
