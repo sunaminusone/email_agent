@@ -97,12 +97,14 @@ def run_document_selection(
 
     top_matches = rank_document_matches(matches, top_k=top_k)
 
+    url_failures: list[str] = []
     for match in top_matches:
         try:
             match["document_url"] = generate_presigned_document_url(match["storage_url"])
         except Exception as exc:
             logger.warning("Failed to mint presigned URL for %s: %s", match.get("storage_url"), exc)
             match["document_url"] = ""
+            url_failures.append(f"{match.get('storage_url', '')}: {exc}")
 
     return {
         "lookup_mode": "service_documents_pg",
@@ -112,4 +114,5 @@ def run_document_selection(
         "query_tokens": sorted(query_tokens),
         "documents_found": len(top_matches),
         "matches": top_matches,
+        "url_failures": url_failures,
     }
