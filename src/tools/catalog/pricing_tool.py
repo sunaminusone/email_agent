@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.catalog.service import lookup_catalog_products
+from src.rag.flyer_pricing import lookup_flyer_pricing
 from src.tools.models import ToolRequest, ToolResult
 from src.tools.result_builders import empty_result, error_result, ok_result, partial_result
 
@@ -14,11 +15,16 @@ def execute_pricing_lookup_tool(request: ToolRequest) -> ToolResult:
     match_status = output.get("match_status")
 
     pricing_records = [_pricing_record(match) for match in matches]
+    flyer_records = lookup_flyer_pricing(query=request.query, top_k=3)
+    pricing_records.extend(flyer_records)
+
     facts = {
         "query": request.query,
         "match_status": match_status or "",
         "pricing_records": pricing_records,
         "match_count": len(pricing_records),
+        "pg_match_count": len(matches),
+        "flyer_match_count": len(flyer_records),
     }
 
     if pricing_records:

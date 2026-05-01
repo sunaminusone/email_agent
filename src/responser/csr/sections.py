@@ -5,7 +5,14 @@ from typing import Any
 _STRUCTURED_FIELD_ORDER: tuple[tuple[str, str], ...] = (
     ("catalog_no", "catalog #"),
     ("price", "price"),
+    ("price_min", "price (min)"),
+    ("price_max", "price (max)"),
     ("currency", "currency"),
+    ("pricing_tier", "pricing tier"),
+    ("unit_price", "unit price"),
+    ("setup_fee", "setup fee"),
+    ("unit", "unit"),
+    ("price_note", "price note"),
     ("lead_time_text", "lead time"),
     ("business_line", "business line"),
     ("record_type", "record type"),
@@ -15,8 +22,9 @@ _STRUCTURED_FIELD_ORDER: tuple[tuple[str, str], ...] = (
     ("species_reactivity_text", "species reactivity"),
     ("construct", "construct"),
     ("format", "format"),
-    ("unit", "unit"),
     ("also_known_as", "also known as"),
+    ("source_section", "source section"),
+    ("source_excerpt", "source excerpt"),
 )
 
 # `name` / `display_name` already in the header line; `price_text` is the
@@ -24,7 +32,7 @@ _STRUCTURED_FIELD_ORDER: tuple[tuple[str, str], ...] = (
 # debug fields (score / match_rank / matched_field / matched_value) are
 # implementation noise CSR doesn't need.
 _STRUCTURED_HIDDEN_KEYS = frozenset({
-    "name", "display_name", "price_text", "id", "raw",
+    "name", "display_name", "service_name", "price_text", "id", "raw",
     "score", "match_rank", "matched_field", "matched_value",
 })
 
@@ -128,6 +136,7 @@ def format_structured_section(records: list[dict[str, Any]]) -> str:
             label = (
                 record.get("display_name")
                 or record.get("name")
+                or record.get("service_name")
                 or record.get("catalog_no")
                 or f"record {i}"
             )
