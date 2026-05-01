@@ -8,15 +8,9 @@ from typing import Any
 
 from src.config.settings import BASE_DIR
 from src.data_sources.hubspot.service import (
-    CONTACT_INQUIRY_PROPERTIES,
-    CONTACT_PROPERTIES,
     HubSpotClient,
     _clean_text,
-    _compose_name,
-    _extract_latest_email_reply,
-    _is_inbound_email,
     _parse_dt,
-    _split_attachment_ids,
 )
 
 try:
@@ -28,6 +22,7 @@ except ImportError:  # pragma: no cover - depends on local environment
 
 
 DEFAULT_SYNC_STATE_PATH = BASE_DIR / "data" / "processed" / "hubspot_incremental_sync_state.json"
+DEFAULT_FORM_GUID = "7fcd4b55-c78d-4401-b9b3-0f7a30456c0d"
 
 THREAD_COLUMNS = [
     "thread_id",
@@ -65,15 +60,6 @@ MESSAGE_COLUMNS = [
     "attachments",
     "external_message_id",
 ]
-
-SYNC_CONTACT_PROPERTIES = sorted(
-    {
-        *CONTACT_PROPERTIES,
-        *CONTACT_INQUIRY_PROPERTIES,
-        "lastmodifieddate",
-    }
-)
-
 
 def jsonb(value: Any) -> Any:
     if Jsonb is None:
@@ -127,6 +113,18 @@ def _save_state(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _submission_sort_key(submission: dict[str, Any]) -> tuple[datetime, str]:
+    submitted_at = str(submission.get("submitted_at", "") or "").strip()
+    submission_id = str(submission.get("submission_id", "") or "").strip()
+    if not submitted_at:
+        submitted_at = "1970-01-01T00:00:00+00:00"
+    return (_parse_dt(submitted_at), submission_id)
+
+
+def _submission_id(submission: dict[str, Any]) -> str:
+    return str(submission.get("submission_id", "") or "").strip()
+
+
 def upsert_threads(conn: psycopg.Connection[Any], rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
@@ -170,13 +168,17 @@ def replace_messages(conn: psycopg.Connection[Any], rows_by_thread: dict[str, li
 
 @dataclass(slots=True)
 class SyncSummary:
-    contacts_scanned: int
+    submissions_synced: int
     threads_prepared: int
     messages_prepared: int
     applied: bool
     since: str
     next_cursor: str
     state_path: str
+    submission_summaries: list[dict[str, Any]]
+    empty_thread_samples: list[dict[str, Any]]
+    thread_type_counts: dict[str, int]
+    cursor_submission_ids: list[str]
 
 
 class HubSpotIncrementalSync:
@@ -194,10 +196,9 @@ class HubSpotIncrementalSync:
         *,
         database_url: str | None = None,
         since: str | None = None,
-        contact_limit: int = 200,
+        form_guid: str = DEFAULT_FORM_GUID,
+        submission_limit: int = 200,
         per_contact_email_limit: int = 100,
-        per_contact_thread_limit: int = 50,
-        per_thread_message_limit: int = 100,
         apply: bool = False,
         persist_state: bool = True,
     ) -> SyncSummary:
@@ -206,32 +207,70 @@ class HubSpotIncrementalSync:
 
         state = _load_state(self.state_path)
         effective_since = str(since or state.get("last_sync_at") or "").strip()
-        contacts = self._fetch_updated_contacts(
+        processed_ids_at_cursor = {
+            str(value).strip()
+            for value in (state.get("last_submission_ids_at_cursor") or [])
+            if str(value).strip()
+        }
+        submissions = self.client.export_form_inquiries(
+            form_guid=form_guid,
             since=effective_since or None,
-            limit=contact_limit,
+            progress=False,
         )
+        submissions = self._filter_already_processed_submissions(
+            submissions,
+            since=effective_since,
+            processed_ids_at_cursor=processed_ids_at_cursor,
+        )
+        submissions.sort(key=_submission_sort_key)
+        if submission_limit is not None:
+            submissions = submissions[:submission_limit]
 
         thread_rows: list[dict[str, Any]] = []
         message_rows_by_thread: dict[str, list[dict[str, Any]]] = {}
+        submission_summaries: list[dict[str, Any]] = []
         next_cursor = effective_since
+        cursor_submission_ids: list[str] = []
 
-        for contact in contacts:
-            properties = dict(contact.get("properties") or {})
-            last_modified = str(properties.get("lastmodifieddate") or "").strip()
-            if last_modified and (not next_cursor or _parse_dt(last_modified) > _parse_dt(next_cursor)):
-                next_cursor = last_modified
+        for submission in submissions:
+            submitted_at = str(submission.get("submitted_at", "") or "").strip()
+            submission_id = _submission_id(submission)
+            if submitted_at and (not next_cursor or _parse_dt(submitted_at) > _parse_dt(next_cursor)):
+                next_cursor = submitted_at
+                cursor_submission_ids = [submission_id] if submission_id else []
+            elif submitted_at and next_cursor and _parse_dt(submitted_at) == _parse_dt(next_cursor):
+                if submission_id:
+                    cursor_submission_ids.append(submission_id)
 
-            for thread_row, message_rows in self._build_contact_threads(
-                contact,
+            built_threads = self._build_submission_threads(
+                submission,
                 per_contact_email_limit=per_contact_email_limit,
-                per_contact_thread_limit=per_contact_thread_limit,
-                per_thread_message_limit=per_thread_message_limit,
-            ):
+            )
+            submission_summaries.append(self._summarize_submission_threads(submission, built_threads))
+            for thread_row, message_rows in built_threads:
                 thread_id = str(thread_row["thread_id"])
-                thread_rows.append(thread_row)
                 message_rows_by_thread[thread_id] = message_rows
+                existing_index = next(
+                    (
+                        index
+                        for index, existing in enumerate(thread_rows)
+                        if str(existing.get("thread_id", "") or "") == thread_id
+                    ),
+                    None,
+                )
+                if existing_index is None:
+                    thread_rows.append(thread_row)
+                else:
+                    thread_rows[existing_index] = thread_row
 
         total_messages = sum(len(rows) for rows in message_rows_by_thread.values())
+        empty_thread_samples = self._build_empty_thread_samples(thread_rows, message_rows_by_thread)
+        thread_type_counts = self._build_thread_type_counts(thread_rows)
+        final_cursor_ids = sorted(
+            set(cursor_submission_ids) if cursor_submission_ids else (
+                processed_ids_at_cursor if next_cursor == effective_since else set()
+            )
+        )
 
         if apply and thread_rows:
             if psycopg is None:
@@ -247,193 +286,117 @@ class HubSpotIncrementalSync:
                 self.state_path,
                 {
                     "last_sync_at": next_cursor or effective_since or "",
+                    "last_submission_ids_at_cursor": final_cursor_ids,
                     "last_run_at": _iso_utc_now(),
-                    "last_contacts_scanned": len(contacts),
+                    "last_submissions_synced": len(submissions),
                     "last_threads_prepared": len(thread_rows),
                     "last_messages_prepared": total_messages,
                 },
             )
 
         return SyncSummary(
-            contacts_scanned=len(contacts),
+            submissions_synced=len(submissions),
             threads_prepared=len(thread_rows),
             messages_prepared=total_messages,
             applied=apply,
             since=effective_since,
             next_cursor=next_cursor or effective_since,
             state_path=str(self.state_path),
+            submission_summaries=submission_summaries,
+            empty_thread_samples=empty_thread_samples,
+            thread_type_counts=thread_type_counts,
+            cursor_submission_ids=final_cursor_ids,
         )
 
-    def _fetch_updated_contacts(
+    def _filter_already_processed_submissions(
         self,
+        submissions: list[dict[str, Any]],
         *,
-        since: str | None,
-        limit: int,
+        since: str,
+        processed_ids_at_cursor: set[str],
     ) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        after: str | None = None
+        if not since or not processed_ids_at_cursor:
+            return list(submissions)
 
-        while len(results) < limit:
-            batch_limit = min(100, limit - len(results))
-            payload: dict[str, Any] = {
-                "properties": SYNC_CONTACT_PROPERTIES,
-                "sorts": [{"propertyName": "lastmodifieddate", "direction": "ASCENDING"}],
-                "limit": batch_limit,
-            }
-            if since:
-                payload["filterGroups"] = [
-                    {
-                        "filters": [
-                            {
-                                "propertyName": "lastmodifieddate",
-                                "operator": "GTE",
-                                "value": since,
-                            }
-                        ]
-                    }
-                ]
-            else:
-                payload["filterGroups"] = []
-            if after:
-                payload["after"] = after
+        filtered: list[dict[str, Any]] = []
+        cursor_dt = _parse_dt(since)
+        for submission in submissions:
+            submitted_at = str(submission.get("submitted_at", "") or "").strip()
+            submission_id = _submission_id(submission)
+            if not submitted_at or not submission_id:
+                filtered.append(submission)
+                continue
+            if _parse_dt(submitted_at) == cursor_dt and submission_id in processed_ids_at_cursor:
+                continue
+            filtered.append(submission)
+        return filtered
 
-            response = self.client._request(  # noqa: SLF001
-                "POST",
-                "/crm/v3/objects/contacts/search",
-                json_payload=payload,
-            )
-            batch = response.get("results", []) or []
-            results.extend(batch)
-            paging = response.get("paging", {}) or {}
-            next_after = ((paging.get("next") or {}).get("after") or "").strip()
-            if not batch or not next_after:
-                break
-            after = next_after
-
-        return results[:limit]
-
-    def _build_contact_threads(
+    def _build_submission_threads(
         self,
-        contact: dict[str, Any],
+        submission: dict[str, Any],
         *,
         per_contact_email_limit: int,
-        per_contact_thread_limit: int,
-        per_thread_message_limit: int,
     ) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-        properties = dict(contact.get("properties") or {})
-        contact_id = str(contact.get("id", "") or "").strip()
-        contact_email = str(properties.get("email", "") or "").strip()
+        contact_id = str(submission.get("contact_id", "") or "").strip()
+        contact_email = str(submission.get("email", "") or "").strip()
         if not contact_id or not contact_email:
             return []
 
-        results: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
-
-        email_rows = self._build_email_engagement_rows(
-            contact_id=contact_id,
+        message_rows = self._build_submission_message_rows(
+            submission=submission,
             contact_email=contact_email,
-            properties=properties,
             limit=per_contact_email_limit,
         )
-        if email_rows:
-            thread_id = f"hubspot-email-{contact_id}"
-            results.append((self._build_thread_row(thread_id, properties, email_rows, form_name="hubspot_email_sync"), email_rows))
+        if not message_rows:
+            return []
+        thread_id = f"hubspot-form-{submission.get('submission_id', contact_id)}"
+        thread_row = self._build_submission_thread_row(thread_id, submission, message_rows)
+        return [(thread_row, message_rows)]
 
-        thread_ids = self.client._fetch_conversation_thread_ids(  # noqa: SLF001
-            email=contact_email,
-            limit=per_contact_thread_limit,
-        )
-        for raw_thread_id in thread_ids:
-            conversation_rows = self._build_conversation_rows(
-                contact_id=contact_id,
-                contact_email=contact_email,
-                properties=properties,
-                raw_thread_id=raw_thread_id,
-                limit=per_thread_message_limit,
-            )
-            if not conversation_rows:
-                continue
-            thread_id = f"hubspot-conversation-{raw_thread_id}"
-            results.append((self._build_thread_row(thread_id, properties, conversation_rows, form_name="hubspot_conversation_sync"), conversation_rows))
-
-        return results
-
-    def _build_email_engagement_rows(
+    def _build_submission_message_rows(
         self,
         *,
-        contact_id: str,
+        submission: dict[str, Any],
         contact_email: str,
-        properties: dict[str, Any],
         limit: int,
     ) -> list[dict[str, Any]]:
-        messages = self.client._fetch_email_engagements(contact_id, limit)  # noqa: SLF001
         rows: list[dict[str, Any]] = []
-        for message in sorted(messages, key=lambda item: str((item.get("properties") or {}).get("hs_timestamp") or "")):
-            msg_props = dict(message.get("properties") or {})
-            direction = str(msg_props.get("hs_email_direction", "") or "")
-            sender_email = str(msg_props.get("hs_email_from_email", "") or "")
-            body = _extract_latest_email_reply(
-                msg_props.get("hs_email_text") or msg_props.get("hs_email_html") or ""
-            )
-            if not body:
-                continue
-            role = "customer" if _is_inbound_email(
-                direction=direction,
-                sender_email=sender_email,
-                contact_email=contact_email,
-            ) else "sales"
+        original_message = _clean_scalar(submission.get("message"))
+        submitted_at = str(submission.get("submitted_at", "") or "").strip() or None
+        sender_name = _clean_scalar(submission.get("sender_name")) or None
+        if original_message:
             rows.append(
                 {
-                    "role": role,
-                    "source": "hubspot_email_engagement",
-                    "timestamp": str(msg_props.get("hs_timestamp", "") or "") or None,
-                    "sender_name": _compose_name(
-                        msg_props.get("hs_email_from_firstname"),
-                        msg_props.get("hs_email_from_lastname"),
-                    ) or _compose_name(properties.get("firstname"), properties.get("lastname")) or None,
-                    "sender_email": sender_email or None,
-                    "subject": str(msg_props.get("hs_email_subject", "") or "") or None,
-                    "direction": direction or None,
-                    "body": body,
-                    "attachments": jsonb(_split_attachment_ids(msg_props.get("hs_attachment_ids", ""))),
-                    "external_message_id": str(message.get("id", "") or "") or None,
+                    "role": "customer",
+                    "source": "form_submission",
+                    "timestamp": submitted_at,
+                    "sender_name": sender_name,
+                    "sender_email": contact_email or None,
+                    "subject": None,
+                    "direction": None,
+                    "body": original_message,
+                    "attachments": jsonb([]),
+                    "external_message_id": None,
                 }
             )
-        return self._finalize_message_rows(rows)
-
-    def _build_conversation_rows(
-        self,
-        *,
-        contact_id: str,
-        contact_email: str,
-        properties: dict[str, Any],
-        raw_thread_id: str,
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        messages = self.client._fetch_conversation_messages(raw_thread_id, limit)  # noqa: SLF001
-        rows: list[dict[str, Any]] = []
-        for message in sorted(messages, key=lambda item: str(item.get("createdAt", "") or "")):
+        thread_messages = list(submission.get("thread_messages") or [])[:limit]
+        for message in sorted(thread_messages, key=lambda item: str(item.get("timestamp", "") or "")):
             body = _clean_text(message.get("text", ""))
             if not body:
                 continue
-            sender = dict(message.get("sender") or {})
-            actor_id = str(sender.get("actorId", "") or "")
-            role = "customer" if actor_id.startswith("V-") else "sales"
+            role = str(message.get("role", "") or "").strip() or "sales"
             rows.append(
                 {
                     "role": role,
-                    "source": "hubspot_conversation",
-                    "timestamp": str(message.get("createdAt", "") or "") or None,
-                    "sender_name": (
-                        _compose_name(properties.get("firstname"), properties.get("lastname"))
-                        if role == "customer"
-                        else None
-                    ),
-                    "sender_email": contact_email if role == "customer" else None,
-                    "subject": None,
-                    "direction": None,
+                    "source": str(message.get("source", "") or "hubspot_email_engagement"),
+                    "timestamp": str(message.get("timestamp", "") or "") or None,
+                    "sender_name": _clean_scalar(message.get("sender_name")) or (sender_name if role == "customer" else None),
+                    "sender_email": _clean_scalar(message.get("sender_email")) or (contact_email if role == "customer" else None),
+                    "subject": _clean_scalar(message.get("subject")) or None,
+                    "direction": _clean_scalar(message.get("direction")) or None,
                     "body": body,
-                    "attachments": jsonb([]),
-                    "external_message_id": str(message.get("id", "") or "") or None,
+                    "attachments": jsonb(list(message.get("attachment_ids") or [])),
+                    "external_message_id": str(message.get("message_id", "") or "") or None,
                 }
             )
         return self._finalize_message_rows(rows)
@@ -450,19 +413,14 @@ class HubSpotIncrementalSync:
             )
         return finalized
 
-    def _build_thread_row(
+    def _build_submission_thread_row(
         self,
         thread_id: str,
-        properties: dict[str, Any],
+        submission: dict[str, Any],
         message_rows: list[dict[str, Any]],
-        *,
-        form_name: str,
     ) -> dict[str, Any]:
         for row in message_rows:
             row["thread_id"] = thread_id
-
-        sender_name = _compose_name(properties.get("firstname"), properties.get("lastname")) or None
-        sender_email = str(properties.get("email", "") or "").strip() or None
 
         customer_messages = [row for row in message_rows if row.get("role") == "customer"]
         sales_messages = [row for row in message_rows if row.get("role") == "sales"]
@@ -474,23 +432,92 @@ class HubSpotIncrementalSync:
 
         return {
             "thread_id": thread_id,
-            "submission_id": thread_id,
-            "contact_id": str(properties.get("hs_object_id", "") or "").strip() or None,
+            "submission_id": str(submission.get("submission_id", "") or "").strip() or thread_id,
+            "contact_id": str(submission.get("contact_id", "") or "").strip() or None,
             "submitted_at": submitted_at,
-            "sender_name": sender_name,
-            "sender_email": sender_email,
-            "institution": _clean_scalar(properties.get("company")) or None,
-            "phone": _clean_scalar(properties.get("phone")) or None,
-            "service_of_interest": _clean_scalar(properties.get("service_of_interest")) or None,
-            "products_of_interest": _clean_scalar(properties.get("products_of_interest")) or None,
-            "how_did_you_hear": _clean_scalar(properties.get("how_did_you_hera_about_us_")) or None,
-            "lifecycle_stage": _clean_scalar(properties.get("lifecyclestage")) or None,
-            "form_name": form_name,
-            "contact_owner_id": _clean_scalar(properties.get("hubspot_owner_id")) or None,
-            "contact_owner_name": None,
+            "sender_name": _clean_scalar(submission.get("sender_name")) or None,
+            "sender_email": _clean_scalar(submission.get("email")) or None,
+            "institution": _clean_scalar(submission.get("institution")) or None,
+            "phone": _clean_scalar(submission.get("phone")) or None,
+            "service_of_interest": _clean_scalar(submission.get("service_of_interest")) or None,
+            "products_of_interest": _clean_scalar(submission.get("products_of_interest")) or None,
+            "how_did_you_hear": _clean_scalar(submission.get("how_did_you_hear")) or None,
+            "lifecycle_stage": _clean_scalar(submission.get("lifecycle_stage")) or None,
+            "form_name": _clean_scalar(submission.get("form_name")) or "hubspot_form_sync",
+            "contact_owner_id": _clean_scalar(submission.get("contact_owner_id")) or None,
+            "contact_owner_name": _clean_scalar(submission.get("contact_owner_name")) or None,
             "original_message": original_message,
             "message_count": len(message_rows),
             "first_reply_at": first_reply_at,
             "last_message_at": last_message_at,
         }
 
+    def _summarize_submission_threads(
+        self,
+        submission: dict[str, Any],
+        built_threads: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+    ) -> dict[str, Any]:
+        email = str(submission.get("email", "") or "").strip()
+        contact_id = str(submission.get("contact_id", "") or "").strip()
+        form_threads = 0
+        thread_count = 0
+        message_count = 0
+        empty_threads = 0
+
+        for thread_row, message_rows in built_threads:
+            thread_count += 1
+            message_count += len(message_rows)
+            if not message_rows:
+                empty_threads += 1
+            thread_id = str(thread_row.get("thread_id", "") or "")
+            if thread_id.startswith("hubspot-form-"):
+                form_threads += 1
+
+        return {
+            "contact_id": contact_id,
+            "email": email,
+            "submitted_at": str(submission.get("submitted_at", "") or "").strip(),
+            "thread_count": thread_count,
+            "message_count": message_count,
+            "form_threads": form_threads,
+            "empty_threads": empty_threads,
+        }
+
+    def _build_empty_thread_samples(
+        self,
+        thread_rows: list[dict[str, Any]],
+        message_rows_by_thread: dict[str, list[dict[str, Any]]],
+        *,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        samples: list[dict[str, Any]] = []
+        for thread_row in thread_rows:
+            thread_id = str(thread_row.get("thread_id", "") or "")
+            message_rows = message_rows_by_thread.get(thread_id, [])
+            if message_rows:
+                continue
+            samples.append(
+                {
+                    "thread_id": thread_id,
+                    "contact_id": thread_row.get("contact_id"),
+                    "sender_email": thread_row.get("sender_email"),
+                    "form_name": thread_row.get("form_name"),
+                }
+            )
+            if len(samples) >= limit:
+                break
+        return samples
+
+    def _build_thread_type_counts(self, thread_rows: list[dict[str, Any]]) -> dict[str, int]:
+        counts = {"form": 0, "email": 0, "conversation": 0, "other": 0}
+        for thread_row in thread_rows:
+            thread_id = str(thread_row.get("thread_id", "") or "")
+            if thread_id.startswith("hubspot-form-"):
+                counts["form"] += 1
+            elif thread_id.startswith("hubspot-email-"):
+                counts["email"] += 1
+            elif thread_id.startswith("hubspot-conversation-"):
+                counts["conversation"] += 1
+            else:
+                counts["other"] += 1
+        return counts

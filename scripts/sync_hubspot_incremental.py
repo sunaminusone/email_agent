@@ -9,12 +9,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data_sources.hubspot.sync import DEFAULT_SYNC_STATE_PATH, HubSpotIncrementalSync
+from src.data_sources.hubspot.sync import DEFAULT_FORM_GUID, DEFAULT_SYNC_STATE_PATH, HubSpotIncrementalSync
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Incrementally sync updated HubSpot contacts, email engagements, and conversations into PostgreSQL historical thread tables."
+        description="Incrementally sync recent HubSpot form submissions and their reply chains into PostgreSQL historical thread tables."
     )
     parser.add_argument(
         "--since",
@@ -32,28 +32,21 @@ def parse_args() -> argparse.Namespace:
         help="Path to the sync state JSON file.",
     )
     parser.add_argument(
-        "--contact-limit",
+        "--form-guid",
+        default=DEFAULT_FORM_GUID,
+        help="HubSpot form GUID to sync from.",
+    )
+    parser.add_argument(
+        "--submission-limit",
         type=int,
         default=200,
-        help="Maximum updated contacts to scan in one run.",
+        help="Maximum form submissions to process in one run.",
     )
     parser.add_argument(
         "--email-limit",
         type=int,
         default=100,
-        help="Maximum email engagements fetched per contact.",
-    )
-    parser.add_argument(
-        "--thread-limit",
-        type=int,
-        default=50,
-        help="Maximum conversation threads fetched per contact.",
-    )
-    parser.add_argument(
-        "--message-limit",
-        type=int,
-        default=100,
-        help="Maximum conversation messages fetched per thread.",
+        help="Maximum reply-chain messages retained per submission.",
     )
     parser.add_argument(
         "--apply",
@@ -69,22 +62,73 @@ def main() -> None:
     summary = syncer.sync_to_postgres(
         database_url=args.database_url,
         since=args.since,
-        contact_limit=args.contact_limit,
+        form_guid=args.form_guid,
+        submission_limit=args.submission_limit,
         per_contact_email_limit=args.email_limit,
-        per_contact_thread_limit=args.thread_limit,
-        per_thread_message_limit=args.message_limit,
         apply=args.apply,
         persist_state=True,
     )
 
     print(f"State path       : {summary.state_path}")
-    print(f"Since            : {summary.since or '(full contact scan within limit)'}")
+    print(f"Since            : {summary.since or '(full form submission scan within limit)'}")
     print(f"Next cursor      : {summary.next_cursor or '(unchanged)'}")
-    print(f"Contacts scanned : {summary.contacts_scanned}")
+    print(f"Submissions synced: {summary.submissions_synced}")
     print(f"Threads prepared : {summary.threads_prepared}")
     print(f"Messages prepared: {summary.messages_prepared}")
+    print(
+        "Thread types     : "
+        f"form={summary.thread_type_counts.get('form', 0)} "
+        f"email={summary.thread_type_counts.get('email', 0)} "
+        f"conversation={summary.thread_type_counts.get('conversation', 0)} "
+        f"other={summary.thread_type_counts.get('other', 0)}"
+    )
     print(f"Applied          : {summary.applied}")
     if not args.apply:
+        if summary.submission_summaries:
+            print()
+            print("Top submissions by thread count:")
+            for item in sorted(
+                summary.submission_summaries,
+                key=lambda row: (int(row.get("thread_count", 0)), int(row.get("message_count", 0))),
+                reverse=True,
+            )[:10]:
+                print(
+                    "  "
+                    f"{item.get('email') or '(no email)'} "
+                    f"[contact_id={item.get('contact_id') or '-'}] "
+                    f"threads={item.get('thread_count', 0)} "
+                    f"messages={item.get('message_count', 0)} "
+                    f"form_threads={item.get('form_threads', 0)}"
+                )
+        sparse_submissions = [
+            item for item in summary.submission_summaries if item.get("thread_count", 0) > item.get("message_count", 0)
+        ]
+        if sparse_submissions:
+            print()
+            print("Submissions with more threads than messages:")
+            for item in sorted(
+                sparse_submissions,
+                key=lambda row: (int(row.get("thread_count", 0)) - int(row.get("message_count", 0))),
+                reverse=True,
+            )[:10]:
+                print(
+                    "  "
+                    f"{item.get('email') or '(no email)'} "
+                    f"threads={item.get('thread_count', 0)} "
+                    f"messages={item.get('message_count', 0)} "
+                    f"empty_threads={item.get('empty_threads', 0)}"
+                )
+        if summary.empty_thread_samples:
+            print()
+            print("Empty thread samples:")
+            for item in summary.empty_thread_samples[:10]:
+                print(
+                    "  "
+                    f"{item.get('thread_id')} "
+                    f"contact_id={item.get('contact_id') or '-'} "
+                    f"sender_email={item.get('sender_email') or '-'} "
+                    f"source={item.get('form_name') or '-'}"
+                )
         print("Dry run only. Re-run with --apply to write to PostgreSQL and persist the new cursor.")
 
 

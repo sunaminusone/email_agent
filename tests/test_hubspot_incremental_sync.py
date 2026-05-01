@@ -16,87 +16,125 @@ def _unwrap_attachments(value):
 
 
 class _FakeHubSpotClient:
-    def __init__(self) -> None:
-        self._contacts_response = {
-            "results": [
-                {
-                    "id": "42",
-                    "properties": {
-                        "email": "customer@example.com",
-                        "firstname": "Ada",
-                        "lastname": "Lovelace",
-                        "hs_object_id": "42",
-                        "company": "Analytical Engines",
-                        "phone": "123-456",
-                        "service_of_interest": "Antibody production",
-                        "products_of_interest": "Human IgG1",
-                        "hubspot_owner_id": "owner-1",
-                        "lastmodifieddate": "2026-04-30T12:00:00+00:00",
-                    },
-                }
-            ]
-        }
-
     def is_configured(self) -> bool:
         return True
 
-    def _request(self, method: str, path: str, *, params=None, json_payload=None):  # noqa: ANN001
-        assert method == "POST"
-        assert path == "/crm/v3/objects/contacts/search"
-        return self._contacts_response
-
-    def _fetch_email_engagements(self, contact_id: str, limit: int):  # noqa: ANN001
-        assert contact_id == "42"
-        assert limit == 10
+    def export_form_inquiries(self, *, form_guid: str, since: str | None, progress: bool):
+        assert form_guid == "test-form-guid"
+        assert since == "2026-04-29T00:00:00+00:00"
+        assert progress is False
         return [
             {
-                "id": "email-1",
-                "properties": {
-                    "hs_timestamp": "2026-04-29T09:00:00Z",
-                    "hs_email_direction": "INCOMING_EMAIL",
-                    "hs_email_subject": "Need a quote",
-                    "hs_email_text": "Can you quote 5mg antibody production?",
-                    "hs_email_from_email": "customer@example.com",
-                    "hs_email_from_firstname": "Ada",
-                    "hs_email_from_lastname": "Lovelace",
-                    "hs_attachment_ids": "att-1;att-2",
-                },
-            },
-            {
-                "id": "email-2",
-                "properties": {
-                    "hs_timestamp": "2026-04-29T10:00:00Z",
-                    "hs_email_direction": "EMAIL",
-                    "hs_email_subject": "Re: Need a quote",
-                    "hs_email_text": "We can help with that.",
-                    "hs_email_from_email": "sales@promab.com",
-                    "hs_email_from_firstname": "Tim",
-                    "hs_email_from_lastname": "Nguyen",
-                    "hs_attachment_ids": "",
-                },
-            },
+                "contact_id": "42",
+                "submission_id": "sub-1",
+                "submitted_at": "2026-04-30T12:00:00+00:00",
+                "form_id": "test-form-guid",
+                "form_name": "Contact Us",
+                "sender_name": "Ada Lovelace",
+                "email": "customer@example.com",
+                "institution": "Analytical Engines",
+                "phone": "123-456",
+                "message": "Can you quote 5mg antibody production?",
+                "products_of_interest": "Human IgG1",
+                "service_of_interest": "Antibody production",
+                "how_did_you_hear": "Google",
+                "lifecycle_stage": "lead",
+                "contact_owner_id": "owner-1",
+                "contact_owner_name": "Tim Nguyen",
+                "thread_messages": [
+                    {
+                        "message_id": "email-2",
+                        "timestamp": "2026-04-30T13:00:00Z",
+                        "role": "sales",
+                        "source": "hubspot_email_engagement",
+                        "subject": "Re: Need a quote",
+                        "text": "We can help with that.",
+                        "sender_name": "Tim Nguyen",
+                        "sender_email": "sales@promab.com",
+                        "direction": "EMAIL",
+                        "owner_id": "owner-1",
+                        "attachment_ids": ["att-1", "att-2"],
+                    },
+                    {
+                        "message_id": "email-3",
+                        "timestamp": "2026-04-30T14:00:00Z",
+                        "role": "customer",
+                        "source": "hubspot_email_engagement",
+                        "subject": "Re: Need a quote",
+                        "text": "Please also share your lead time.",
+                        "sender_name": "Ada Lovelace",
+                        "sender_email": "customer@example.com",
+                        "direction": "INCOMING_EMAIL",
+                        "owner_id": "",
+                        "attachment_ids": [],
+                    },
+                ],
+            }
         ]
 
-    def _fetch_conversation_thread_ids(self, *, email: str, limit: int):  # noqa: ANN001
-        assert email == "customer@example.com"
-        assert limit == 5
-        return ["thread-9"]
 
-    def _fetch_conversation_messages(self, thread_id: str, limit: int):  # noqa: ANN001
-        assert thread_id == "thread-9"
-        assert limit == 20
+class _CursorBoundaryHubSpotClient:
+    def is_configured(self) -> bool:
+        return True
+
+    def export_form_inquiries(self, *, form_guid: str, since: str | None, progress: bool):
+        assert form_guid == "test-form-guid"
+        assert since == "2026-04-30T12:00:00+00:00"
+        assert progress is False
         return [
             {
-                "id": "conv-1",
-                "createdAt": "2026-04-29T11:00:00Z",
-                "text": "Hi, how can we help?",
-                "sender": {"actorId": "A-123"},
+                "contact_id": "old-processed",
+                "submission_id": "sub-processed",
+                "submitted_at": "2026-04-30T12:00:00+00:00",
+                "form_name": "Contact Us",
+                "sender_name": "Old Customer",
+                "email": "old@example.com",
+                "institution": "",
+                "phone": "",
+                "message": "already synced",
+                "products_of_interest": "",
+                "service_of_interest": "",
+                "how_did_you_hear": "",
+                "lifecycle_stage": "",
+                "contact_owner_id": "",
+                "contact_owner_name": "",
+                "thread_messages": [],
             },
             {
-                "id": "conv-2",
-                "createdAt": "2026-04-29T11:05:00Z",
-                "text": "Please also share your lead time.",
-                "sender": {"actorId": "V-456"},
+                "contact_id": "new-same-ts",
+                "submission_id": "sub-new-same-ts",
+                "submitted_at": "2026-04-30T12:00:00+00:00",
+                "form_name": "Contact Us",
+                "sender_name": "Boundary Customer",
+                "email": "boundary@example.com",
+                "institution": "",
+                "phone": "",
+                "message": "same timestamp, new submission",
+                "products_of_interest": "",
+                "service_of_interest": "",
+                "how_did_you_hear": "",
+                "lifecycle_stage": "",
+                "contact_owner_id": "",
+                "contact_owner_name": "",
+                "thread_messages": [],
+            },
+            {
+                "contact_id": "newer",
+                "submission_id": "sub-newer",
+                "submitted_at": "2026-04-30T13:00:00+00:00",
+                "form_name": "Contact Us",
+                "sender_name": "Newer Customer",
+                "email": "newer@example.com",
+                "institution": "",
+                "phone": "",
+                "message": "newer submission",
+                "products_of_interest": "",
+                "service_of_interest": "",
+                "how_did_you_hear": "",
+                "lifecycle_stage": "",
+                "contact_owner_id": "",
+                "contact_owner_name": "",
+                "thread_messages": [],
             },
         ]
 
@@ -120,18 +158,23 @@ def test_incremental_sync_dry_run_builds_historical_threads(monkeypatch, tmp_pat
     )
     summary = syncer.sync_to_postgres(
         since="2026-04-29T00:00:00+00:00",
-        contact_limit=1,
+        form_guid="test-form-guid",
+        submission_limit=1,
         per_contact_email_limit=10,
-        per_contact_thread_limit=5,
-        per_thread_message_limit=20,
         apply=False,
         persist_state=False,
     )
 
-    assert summary.contacts_scanned == 1
-    assert summary.threads_prepared == 2
-    assert summary.messages_prepared == 4
+    assert summary.submissions_synced == 1
+    assert summary.threads_prepared == 1
+    assert summary.messages_prepared == 3
     assert summary.next_cursor == "2026-04-30T12:00:00+00:00"
+    assert summary.thread_type_counts == {"form": 1, "email": 0, "conversation": 0, "other": 0}
+    assert summary.empty_thread_samples == []
+    assert summary.submission_summaries[0]["thread_count"] == 1
+    assert summary.submission_summaries[0]["message_count"] == 3
+    assert summary.submission_summaries[0]["form_threads"] == 1
+    assert summary.cursor_submission_ids == ["sub-1"]
     assert captured_threads == []
     assert captured_messages == {}
 
@@ -176,37 +219,58 @@ def test_incremental_sync_apply_writes_rows_and_persists_state(monkeypatch, tmp_
     summary = syncer.sync_to_postgres(
         database_url="postgresql://example",
         since="2026-04-29T00:00:00+00:00",
-        contact_limit=1,
+        form_guid="test-form-guid",
+        submission_limit=1,
         per_contact_email_limit=10,
-        per_contact_thread_limit=5,
-        per_thread_message_limit=20,
         apply=True,
         persist_state=True,
     )
 
     assert summary.applied is True
-    assert len(captured_threads) == 2
-    assert set(captured_messages.keys()) == {
-        "hubspot-email-42",
-        "hubspot-conversation-thread-9",
-    }
+    assert len(captured_threads) == 1
+    assert set(captured_messages.keys()) == {"hubspot-form-sub-1"}
 
-    email_thread = next(row for row in captured_threads if row["thread_id"] == "hubspot-email-42")
-    assert email_thread["sender_email"] == "customer@example.com"
-    assert email_thread["original_message"] == "Can you quote 5mg antibody production?"
-    assert email_thread["first_reply_at"] == "2026-04-29T10:00:00Z"
-    assert email_thread["message_count"] == 2
+    thread = captured_threads[0]
+    assert thread["sender_email"] == "customer@example.com"
+    assert thread["original_message"] == "Can you quote 5mg antibody production?"
+    assert thread["first_reply_at"] == "2026-04-30T13:00:00Z"
+    assert thread["message_count"] == 3
+    assert thread["submission_id"] == "sub-1"
 
-    email_messages = captured_messages["hubspot-email-42"]
-    assert [row["role"] for row in email_messages] == ["customer", "sales"]
-    assert _unwrap_attachments(email_messages[0]["attachments"]) == ["att-1", "att-2"]
-    assert email_messages[1]["body"] == "We can help with that."
-
-    conversation_messages = captured_messages["hubspot-conversation-thread-9"]
-    assert [row["role"] for row in conversation_messages] == ["sales", "customer"]
-    assert conversation_messages[1]["body"] == "Please also share your lead time."
+    messages = captured_messages["hubspot-form-sub-1"]
+    assert [row["role"] for row in messages] == ["customer", "sales", "customer"]
+    assert _unwrap_attachments(messages[1]["attachments"]) == ["att-1", "att-2"]
+    assert messages[2]["body"] == "Please also share your lead time."
 
     assert saved_state["path"] == tmp_path / "hubspot-sync-state.json"
     assert saved_state["payload"]["last_sync_at"] == "2026-04-30T12:00:00+00:00"
-    assert saved_state["payload"]["last_threads_prepared"] == 2
-    assert saved_state["payload"]["last_messages_prepared"] == 4
+    assert saved_state["payload"]["last_submission_ids_at_cursor"] == ["sub-1"]
+    assert saved_state["payload"]["last_threads_prepared"] == 1
+    assert saved_state["payload"]["last_messages_prepared"] == 3
+    assert summary.thread_type_counts == {"form": 1, "email": 0, "conversation": 0, "other": 0}
+    assert summary.cursor_submission_ids == ["sub-1"]
+
+
+def test_incremental_sync_filters_already_processed_ids_at_cursor(monkeypatch, tmp_path):
+    state_path = tmp_path / "hubspot-sync-state.json"
+    state_path.write_text(
+        '{"last_sync_at":"2026-04-30T12:00:00+00:00","last_submission_ids_at_cursor":["sub-processed"]}',
+        encoding="utf-8",
+    )
+
+    syncer = HubSpotIncrementalSync(
+        client=_CursorBoundaryHubSpotClient(),
+        state_path=state_path,
+    )
+    summary = syncer.sync_to_postgres(
+        form_guid="test-form-guid",
+        submission_limit=1,
+        per_contact_email_limit=10,
+        apply=False,
+        persist_state=False,
+    )
+
+    assert summary.submissions_synced == 1
+    assert summary.next_cursor == "2026-04-30T12:00:00+00:00"
+    assert summary.cursor_submission_ids == ["sub-new-same-ts"]
+    assert summary.submission_summaries[0]["email"] == "boundary@example.com"

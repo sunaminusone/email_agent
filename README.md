@@ -12,6 +12,8 @@ This project combines typed Python service layers, retrieval systems, LLM-based 
 
 For the full design set, start with [docs/AGENT_ARCHITECTURE_V4.md](/Users/promab/anaconda_projects/email_agent/docs/AGENT_ARCHITECTURE_V4.md) (current source of truth) and the [reading order](/Users/promab/anaconda_projects/email_agent/docs/ARCHITECTURE_READING_ORDER.md).
 
+For HubSpot incremental intake and the future "new email -> sync -> draft job -> CSR delivery" path, see [docs/HUBSPOT_SYNC_DESIGN_V1.md](/Users/promab/anaconda_projects/email_agent/docs/HUBSPOT_SYNC_DESIGN_V1.md).
+
 ## What This Project Does
 
 The agent serves CSRs and sales reps in two directions:

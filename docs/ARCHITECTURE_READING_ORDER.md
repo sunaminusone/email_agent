@@ -31,6 +31,7 @@ The primary design document is:
 5. [EXECUTOR_DESIGN_V4.md](EXECUTOR_DESIGN_V4.md) — reasoning loop + tool dispatch; v4 adds the always-include rule for retrieval tools
 6. [TOOL_CONTRACT_DESIGN_V4.md](TOOL_CONTRACT_DESIGN_V4.md) — tool contracts (v3 framework reused; new `historical_thread_tool` registers via the same API)
 7. [PARSER_HELDOUT_SCHEMA_V4.md](PARSER_HELDOUT_SCHEMA_V4.md) — parser benchmark schema (v3 reused; field roles reinterpreted for v4)
+8. [HUBSPOT_SYNC_DESIGN_V1.md](HUBSPOT_SYNC_DESIGN_V1.md) — incremental HubSpot intake into `historical_threads`, scheduling guidance, and the planned handoff to future draft jobs
 
 ## Responsibility Matrix (v4)
 

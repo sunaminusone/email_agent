@@ -10,6 +10,7 @@ from src.data_sources.hubspot.service import (
     _clean_text,
     _extract_latest_email_reply,
     _is_inbound_email,
+    _normalize_form_submission,
 )
 
 
@@ -96,3 +97,26 @@ def test_build_training_examples_from_conversation_messages_keeps_customer_queri
         {"role": "user", "content": "Can you quote 5mg antibody production?"},
         {"role": "assistant", "content": "Sure, what species do you need?"},
     ]
+
+
+def test_normalize_form_submission_maps_values_and_timestamp():
+    raw = {
+        "conversionId": "conv-1",
+        "submittedAt": 1760185647207,
+        "pageUrl": "https://www.promab.com/contact-us",
+        "values": [
+            {"name": "firstname", "value": "Giulia", "objectTypeId": "0-1"},
+            {"name": "lastname", "value": "Cazzaniga", "objectTypeId": "0-1"},
+            {"name": "email", "value": "giulia@example.com", "objectTypeId": "0-1"},
+            {"name": "message", "value": "Need a quote", "objectTypeId": "0-1"},
+        ],
+    }
+
+    normalized = _normalize_form_submission(raw, form_guid="form-123")
+
+    assert normalized["submission_id"] == "conv-1"
+    assert normalized["submitted_at"] == "2025-10-11T12:27:27.207Z"
+    assert normalized["form_id"] == "form-123"
+    assert normalized["email"] == "giulia@example.com"
+    assert normalized["sender_name"] == "Giulia Cazzaniga"
+    assert normalized["values"]["message"] == "Need a quote"

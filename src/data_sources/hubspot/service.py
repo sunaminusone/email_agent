@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -447,68 +447,102 @@ class HubSpotClient:
         return payload.get("results", []) or []
 
     def _fetch_form_submissions(self, *, form_guid: str, since: str | None) -> list[dict[str, Any]]:
-        query = {
-            "filterGroups": [
-                {
-                    "filters": [
-                        {
-                            "propertyName": "hs_form_id",
-                            "operator": "EQ",
-                            "value": form_guid,
-                        }
-                    ]
-                }
-            ],
-            "properties": CONTACT_INQUIRY_PROPERTIES,
-            "sorts": [{"propertyName": "createdate", "direction": "DESCENDING"}],
-            "limit": 200,
-        }
-        payload = self._request("POST", "/crm/v3/objects/contacts/search", json_payload=query)
-        results = payload.get("results", []) or []
-        if not since:
-            return results
+        results: list[dict[str, Any]] = []
+        offset: str | None = None
+        threshold = _parse_dt(since) if since else None
 
-        threshold = _parse_dt(since)
-        filtered: list[dict[str, Any]] = []
-        for record in results:
-            created = ((record.get("properties") or {}).get("createdate") or "").strip()
-            if created and _parse_dt(created) >= threshold:
-                filtered.append(record)
-        return filtered
+        while True:
+            params: dict[str, Any] = {"limit": 50}
+            if offset:
+                params["offset"] = offset
+            payload = self._request(
+                "GET",
+                f"/form-integrations/v1/submissions/forms/{form_guid}",
+                params=params,
+            )
+            batch = payload.get("results", []) or []
+            for record in batch:
+                normalized = _normalize_form_submission(record, form_guid=form_guid)
+                submitted_at = str(normalized.get("submitted_at", "") or "").strip()
+                if threshold is not None and submitted_at and _parse_dt(submitted_at) < threshold:
+                    continue
+                results.append(normalized)
+
+            if not payload.get("hasMore"):
+                break
+            next_offset = payload.get("offset")
+            if next_offset in (None, "", offset):
+                break
+            offset = str(next_offset)
+
+        results.sort(key=lambda item: str(item.get("submitted_at", "") or ""), reverse=True)
+        return results
 
     def _fetch_contact_for_submission(self, submission: dict[str, Any]) -> dict[str, Any]:
-        return submission
+        email = str(submission.get("email", "") or "").strip().lower()
+        if not email:
+            return {}
+        payload = self._request(
+            "POST",
+            "/crm/v3/objects/contacts/search",
+            json_payload={
+                "filterGroups": [
+                    {
+                        "filters": [
+                            {
+                                "propertyName": "email",
+                                "operator": "EQ",
+                                "value": email,
+                            }
+                        ]
+                    }
+                ],
+                "properties": CONTACT_INQUIRY_PROPERTIES,
+                "limit": 1,
+            },
+        )
+        results = payload.get("results", []) or []
+        return results[0] if results else {}
 
     def _build_form_inquiry_record(self, submission: dict[str, Any], contact: dict[str, Any]) -> FormInquiryRecord | None:
         properties = contact.get("properties", {}) or {}
+        submission_values = submission.get("values", {}) or {}
         contact_id = str(contact.get("id", "") or "")
-        email = str(properties.get("email", "") or "").strip()
-        if not contact_id or not email:
+        email = str(properties.get("email") or submission_values.get("email") or "").strip()
+        if not email:
             return None
 
-        sender_name = _compose_name(properties.get("firstname"), properties.get("lastname"))
+        sender_name = _compose_name(
+            properties.get("firstname") or submission_values.get("firstname"),
+            properties.get("lastname") or submission_values.get("lastname"),
+        )
         owner_id = str(properties.get("hubspot_owner_id", "") or "")
         owner = self._fetch_owner(owner_id) if owner_id else {}
         owner_name = _compose_name(owner.get("firstName"), owner.get("lastName"))
-        submission_id = str(properties.get("hs_object_id", "") or contact_id)
+        submission_id = str(submission.get("submission_id", "") or contact_id or email)
 
-        thread_messages = self._build_form_thread_messages(contact_id, email)
+        thread_messages = self._build_form_thread_messages(contact_id, email) if contact_id else []
 
         return FormInquiryRecord(
             contact_id=contact_id,
             submission_id=submission_id,
-            submitted_at=str(properties.get("createdate", "") or ""),
-            form_id=str((submission.get("properties") or {}).get("hs_form_id", "") or ""),
-            form_name=str((submission.get("properties") or {}).get("hs_form_name", "") or ""),
+            submitted_at=str(submission.get("submitted_at", "") or ""),
+            form_id=str(submission.get("form_id", "") or ""),
+            form_name=str(submission.get("form_name", "") or ""),
             sender_name=sender_name,
             email=email,
-            institution=str(properties.get("company", "") or ""),
-            phone=str(properties.get("phone", "") or ""),
-            message=str(properties.get("your_message", "") or ""),
-            products_of_interest=str(properties.get("products_of_interest", "") or ""),
-            service_of_interest=str(properties.get("service_of_interest", "") or ""),
-            how_did_you_hear=str(properties.get("how_did_you_hera_about_us_", "") or ""),
-            lifecycle_stage=str(properties.get("lifecyclestage", "") or ""),
+            institution=str(properties.get("company") or submission_values.get("company") or ""),
+            phone=str(properties.get("phone") or submission_values.get("phone") or ""),
+            message=str(
+                properties.get("your_message")
+                or submission_values.get("your_message")
+                or submission_values.get("message")
+                or ""
+            ),
+            products_of_interest=str(properties.get("products_of_interest") or submission_values.get("products_of_interest") or ""),
+            service_of_interest=str(properties.get("service_of_interest") or submission_values.get("service_of_interest") or ""),
+            how_did_you_hear=str(properties.get("how_did_you_hera_about_us_") or submission_values.get("how_did_you_hera_about_us_") or ""),
+            lifecycle_stage=str(properties.get("lifecyclestage") or submission_values.get("lifecyclestage") or ""),
             contact_owner_id=owner_id,
             contact_owner_name=owner_name,
             thread_messages=thread_messages,
@@ -560,6 +594,48 @@ def _split_attachment_ids(raw: str) -> list[str]:
     if not text:
         return []
     return [part.strip() for part in text.split(";") if part.strip()]
+
+
+def _submission_values_map(raw_submission: dict[str, Any]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for item in raw_submission.get("values", []) or []:
+        name = str(item.get("name", "") or "").strip()
+        if not name:
+            continue
+        values[name] = str(item.get("value", "") or "").strip()
+    return values
+
+
+def _millis_to_iso8601(raw: Any) -> str:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return ""
+    return (
+        datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _normalize_form_submission(raw_submission: dict[str, Any], *, form_guid: str) -> dict[str, Any]:
+    values = _submission_values_map(raw_submission)
+    sender_name = _compose_name(values.get("firstname"), values.get("lastname"))
+    page_url = str(raw_submission.get("pageUrl", "") or "").strip()
+    form_name = "Contact Us"
+    if page_url:
+        form_name = page_url.rsplit("/", 1)[-1] or "Contact Us"
+
+    return {
+        "submission_id": str(raw_submission.get("conversionId", "") or "").strip(),
+        "submitted_at": _millis_to_iso8601(raw_submission.get("submittedAt")),
+        "form_id": form_guid,
+        "form_name": form_name,
+        "sender_name": sender_name,
+        "email": values.get("email", ""),
+        "values": values,
+        "page_url": page_url,
+    }
 
 
 def _parse_dt(raw: str) -> datetime:
