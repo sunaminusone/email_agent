@@ -557,7 +557,18 @@ function renderChatHistory() {
 
     return `
       <div class="chat-message-row ${roleClass}">
-        ${isAssistant ? "" : `<div class="chat-avatar">${escapeHtml(roleLabel)}</div>`}
+        ${isAssistant ? "" : `
+          <div class="chat-message ${roleClass}">
+            <div class="chat-message-header">
+              <strong>${roleLabel}</strong>
+            </div>
+            ${body}
+            ${documentSection}
+            ${metaLine}
+          </div>
+          <div class="chat-avatar">${escapeHtml(roleLabel)}</div>
+        `}
+        ${isAssistant ? `
         <div class="chat-message ${roleClass}">
           <div class="chat-message-header">
             <strong>${roleLabel}</strong>
@@ -566,6 +577,7 @@ function renderChatHistory() {
           ${documentSection}
           ${metaLine}
         </div>
+        ` : ""}
       </div>
     `;
   }).join("");
