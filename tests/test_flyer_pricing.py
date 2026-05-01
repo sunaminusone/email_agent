@@ -48,8 +48,11 @@ def test_build_flyer_pricing_record_normalizes_metadata_into_panel_shape():
     chunk = _make_chunk(
         {
             "service_name": "Custom CAR-T Development",
-            "service_line": "car_t_car_nk",
-            "business_line": "car-t",
+            # In Chroma metadata, `service_line` is the human-readable label
+            # and `business_line` is the slug — opposite of what the names
+            # suggest. The flyer record prefers the readable form.
+            "service_line": "CAR-T/CAR-NK Development",
+            "business_line": "car_t_car_nk",
             "section_type": "pricing_overview",
             "section_title": "Pricing - Plan A",
             "price_usd": "50000",
@@ -67,7 +70,7 @@ def test_build_flyer_pricing_record_normalizes_metadata_into_panel_shape():
 
     assert record["_subsource"] == "service_flyer"
     assert record["service_name"] == "Custom CAR-T Development"
-    assert record["business_line"] == "car-t"
+    assert record["business_line"] == "CAR-T/CAR-NK Development"
     assert record["price"] == 50000
     assert record["price_min"] == 45000
     assert record["price_max"] == 55000

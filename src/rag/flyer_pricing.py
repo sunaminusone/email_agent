@@ -59,9 +59,13 @@ def _build_flyer_pricing_record(chunk: Document) -> dict[str, Any]:
             or metadata.get("page_title")
             or ""
         ),
+        # Chroma metadata field naming is counterintuitive here: `service_line`
+        # holds the human-readable label (e.g. "CAR-T/CAR-NK Development") and
+        # `business_line` holds the slug (e.g. "car_t_car_nk"). Prefer the
+        # readable form so the panel matches PG's business_line column.
         "business_line": (
-            metadata.get("business_line")
-            or metadata.get("service_line")
+            metadata.get("service_line")
+            or metadata.get("business_line")
             or ""
         ),
         "price": _coerce_price(metadata.get("price_usd")),
