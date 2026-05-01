@@ -15,6 +15,7 @@ from src.ingestion.models import (
     ParserSignals,
     ReferenceSignals,
     SourceAttribution,
+    TurnCore,
     TurnSignals,
 )
 from src.memory.models import ClarificationMemory, MemoryContext, MemorySnapshot
@@ -345,3 +346,31 @@ def test_active_object_none_when_no_primary_and_no_memory():
 
     assert resolved.primary_object is None
     assert resolved.active_object is None
+
+
+# ---------------------------------------------------------------------------
+# Business-line keyword fallback (helper-only — does not exercise registries)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query, expected_bl",
+    [
+        ("looking for proprietary lipids and pre-tested formulations", "mrna_lnp"),
+        ("I am looking for CAR lentiviral particles against CD19", "car_t"),
+        ("we offer CAR-cell production and virus production service", "car_t"),
+        ("interested in custom generation of antibodies polyclonal and monoclonal", "antibody"),
+        ("hybridoma fusion for monoclonal antibodies", "antibody"),
+        ("LNP delivery of mRNA constructs", "mrna_lnp"),
+        ("", ""),
+        ("we just want a quote, no specifics", ""),
+        # antibody=1 (antibody), mrna_lnp=1 (lipid) — true tie → empty
+        ("antibody for lipid delivery", ""),
+        # antibody=2 (monoclonal+antibody) > mrna_lnp=1 (lipid) — winner takes
+        ("monoclonal antibody for a lipid antigen", "antibody"),
+    ],
+)
+def test_infer_business_line_from_query(query, expected_bl):
+    from src.objects.resolution import _infer_business_line_from_query
+
+    assert _infer_business_line_from_query(query) == expected_bl

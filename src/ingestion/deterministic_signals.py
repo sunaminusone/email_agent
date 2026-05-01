@@ -12,7 +12,11 @@ _CATALOG_HINT_PATTERN = re.compile(
 _HIGH_CONFIDENCE_CATALOG_PATTERNS = (
     re.compile(r"\bPM-CAR\d{4}\b", re.IGNORECASE),
     re.compile(r"\bPM-LNP-\d{4}\b", re.IGNORECASE),
-    re.compile(r"\b[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b"),
+    # Hyphenated tokens are catalog candidates only if they contain a digit
+    # (PM-CAR1234, PM-A431-CD147KO) or use the PM- product prefix
+    # (PM-Jurkat-GFP). This rejects natural-language compounds like
+    # "PRE-TESTED", "CAR-CELLS", "non-profit", "mRNA-LNP".
+    re.compile(r"\b(?=[A-Za-z0-9-]*\d|PM-)[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b", re.IGNORECASE),
 )
 _NUMERIC_IDENTIFIER_PATTERN = re.compile(r"\b\d{4,6}\b")
 _INVOICE_HINT_PATTERN = re.compile(

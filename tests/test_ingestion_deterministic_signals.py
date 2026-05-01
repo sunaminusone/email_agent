@@ -51,6 +51,26 @@ def test_numeric_id_ambiguous_when_no_parser_signals():
     assert _span_texts(signals.order_numbers) == []
 
 
+def test_hyphenated_catalog_pattern_accepts_real_codes():
+    ps = _make_parser_signals(intent="product_inquiry")
+    for code in ["PM-CAR1234", "PM-A431-CD147KO", "PM-AB001", "PM-Jurkat-GFP"]:
+        signals = extract_deterministic_signals(f"Can I get info on {code}?", parser_signals=ps)
+        assert code.upper() in _span_texts(signals.catalog_numbers), code
+
+
+def test_hyphenated_catalog_pattern_rejects_natural_language_compounds():
+    ps = _make_parser_signals(intent="product_inquiry")
+    queries = [
+        "looking for PRE-TESTED formulations",
+        "Since you offer both CAR-CELLS and a virus production service",
+        "delivered as mRNA-LNP for transient expression",
+        "we are a non-profit lab",
+    ]
+    for query in queries:
+        signals = extract_deterministic_signals(query, parser_signals=ps)
+        assert _span_texts(signals.catalog_numbers) == [], query
+
+
 def test_strip_identifier_missing_information_matches_legacy_behavior():
     cleaned = strip_identifier_missing_information(
         [

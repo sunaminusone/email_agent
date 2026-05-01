@@ -210,6 +210,14 @@ def resolve_object_state(
 
     ambiguous_sets = [_decorate_ambiguous_set(item) for item in ambiguous_sets]
 
+    # --- Backfill business_line on primary_object when registry didn't carry one ---
+    if primary_object is not None and not primary_object.business_line:
+        inferred_bl = _infer_business_line_from_query(
+            ingestion_bundle.turn_core.normalized_query
+        )
+        if inferred_bl:
+            primary_object = primary_object.model_copy(update={"business_line": inferred_bl})
+
     # --- Derive active_object ---
     active_object = _derive_active_object(primary_object, context_candidates)
 
@@ -311,6 +319,34 @@ def _has_strong_explicit_object(candidates: list[ObjectCandidate]) -> bool:
         ):
             return True
     return False
+
+
+# Keyword fallback for the 3 ProMab business lines. Used only when registry
+# resolution didn't carry a business_line on the primary_object.
+_BL_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "antibody": ("antibody", "antibodies", "polyclonal", "monoclonal", "hybridoma"),
+    "car_t": ("car-t", "car-nk", "car-cell", "lentiviral", "lentivirus", "virus production"),
+    "mrna_lnp": ("mrna", "lnp", "lipid nanoparticle", "lipid"),
+}
+
+
+def _infer_business_line_from_query(query: str) -> str:
+    if not query:
+        return ""
+    haystack = query.lower()
+    counts = {
+        bl: sum(1 for kw in keywords if kw in haystack)
+        for bl, keywords in _BL_KEYWORDS.items()
+    }
+    nonzero = sorted(
+        ((bl, n) for bl, n in counts.items() if n > 0),
+        key=lambda pair: -pair[1],
+    )
+    if not nonzero:
+        return ""
+    if len(nonzero) > 1 and nonzero[0][1] == nonzero[1][1]:
+        return ""
+    return nonzero[0][0]
 
 
 # ---------------------------------------------------------------------------
