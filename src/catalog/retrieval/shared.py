@@ -44,9 +44,11 @@ BUSINESS_LINE_MATCH_SQL = "POSITION(LOWER(REPLACE(%s, '-', '_')) IN LOWER(REPLAC
 
 
 def build_connection_string() -> str:
+    from src.common.pg_runtime import with_runtime_timeouts
+
     database_url = os.getenv("DATABASE_URL")
     if database_url:
-        return database_url
+        return with_runtime_timeouts(database_url)
 
     host = os.getenv("PGHOST", "localhost")
     port = os.getenv("PGPORT", "5432")
@@ -57,7 +59,7 @@ def build_connection_string() -> str:
     auth = user
     if password:
         auth = f"{user}:{password}"
-    return f"postgresql://{auth}@{host}:{port}/{dbname}"
+    return with_runtime_timeouts(f"postgresql://{auth}@{host}:{port}/{dbname}")
 
 
 def serialize_match(row: dict[str, Any]) -> dict[str, Any]:

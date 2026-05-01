@@ -354,9 +354,11 @@ def canonicalize_product_name(value: str) -> str:
 
 
 def _postgres_dsn() -> str:
+    from src.common.pg_runtime import with_runtime_timeouts
+
     database_url = os.getenv("DATABASE_URL", "").strip()
     if database_url:
-        return database_url
+        return with_runtime_timeouts(database_url)
 
     host = os.getenv("PGHOST", "localhost").strip()
     port = os.getenv("PGPORT", "5432").strip()
@@ -366,8 +368,8 @@ def _postgres_dsn() -> str:
     if not database:
         return ""
     if password:
-        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
-    return f"postgresql://{user}@{host}:{port}/{database}"
+        return with_runtime_timeouts(f"postgresql://{user}:{password}@{host}:{port}/{database}")
+    return with_runtime_timeouts(f"postgresql://{user}@{host}:{port}/{database}")
 
 
 def _entry_payload(entry: ProductRegistryEntry) -> dict[str, Any]:

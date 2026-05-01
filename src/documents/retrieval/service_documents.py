@@ -19,9 +19,11 @@ SERVICE_DOCUMENTS_TABLE = os.getenv("SERVICE_DOCUMENTS_TABLE", "service_document
 
 
 def build_connection_string() -> str:
+    from src.common.pg_runtime import with_runtime_timeouts
+
     database_url = os.getenv("DATABASE_URL")
     if database_url:
-        return database_url
+        return with_runtime_timeouts(database_url)
 
     host = os.getenv("PGHOST", "localhost")
     port = os.getenv("PGPORT", "5432")
@@ -29,7 +31,7 @@ def build_connection_string() -> str:
     password = os.getenv("PGPASSWORD", "")
     dbname = os.getenv("PGDATABASE", "promab")
     auth = user if not password else f"{user}:{password}"
-    return f"postgresql://{auth}@{host}:{port}/{dbname}"
+    return with_runtime_timeouts(f"postgresql://{auth}@{host}:{port}/{dbname}")
 
 
 def get_primary_service_document(service_name: str) -> dict[str, Any] | None:
