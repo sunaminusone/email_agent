@@ -72,11 +72,27 @@ def run_executor(
     )
 
     all_calls: list[ExecutedToolCall] = []
-    already_called: set[str] = set()
+    # Seed `already_called` with what other groups have already done for our
+    # primary object. Without this, turn-level invariants in select_tools
+    # (CSR_ALWAYS_INCLUDE, known-catalog) re-select tools every group, the
+    # dispatcher hits the cache, and each group accrues a 0ms duplicate
+    # ExecutedToolCall — which then surfaces as N x duplicate planned_actions.
+    obj_type_for_seed = context.primary_object.object_type if context.primary_object else ""
+    obj_id_for_seed = context.primary_object.identifier if context.primary_object else ""
+    cross_group_satisfied: set[str] = (
+        tool_call_cache.cached_for_object(obj_type_for_seed, obj_id_for_seed)
+        if tool_call_cache is not None
+        else set()
+    )
+    already_called: set[str] = set(cross_group_satisfied)
     call_counter = 0
+    iteration_count = 0
 
     for iteration in range(MAX_ITERATIONS):
-        # 1. SELECT — on retry, skip already-called tools (unless force_include)
+        iteration_count += 1
+        # 1. SELECT — skip tools already called this turn (in this group's
+        #    iterations OR by a prior group for the same object). On retry,
+        #    `force_include` can override the skip.
         force_include = ""
         if iteration > 0:
             prev_eval = evaluate_completeness(context, all_calls, iteration - 1, MAX_ITERATIONS)
@@ -84,16 +100,29 @@ def run_executor(
 
         selections = select_tools(
             context,
-            already_called=already_called if iteration > 0 else None,
+            already_called=already_called,
             force_include=force_include,
         )
 
         if not selections:
             if all_calls:
                 break
+            # Distinguish "satisfied by a prior group" from "no match at all":
+            # if the cross-group seed is non-empty, this group's needs were
+            # already covered upstream, so report ok with no calls of our
+            # own (downstream merger reads the prior group's calls). Without
+            # this branch _run_group_execution would treat empty as
+            # needs_clarification and trigger a spurious clarify.
+            if cross_group_satisfied:
+                return ExecutionResult(
+                    final_status="ok",
+                    reason="All required tools already executed by a prior intent group.",
+                    iteration_count=iteration_count,
+                )
             return ExecutionResult(
                 final_status="empty",
                 reason="No tools matched the current context.",
+                iteration_count=iteration_count,
             )
 
         # 2. DISPATCH (with cache dedup)
@@ -117,7 +146,7 @@ def run_executor(
             break
         # retry_with_fallback or retry_add_tool → continue loop
 
-    return _build_execution_result(all_calls)
+    return _build_execution_result(all_calls, iteration_count=iteration_count)
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +339,11 @@ def _dispatch_selections(
 # Result construction
 # ---------------------------------------------------------------------------
 
-def _build_execution_result(executed_calls: list[ExecutedToolCall]) -> ExecutionResult:
+def _build_execution_result(
+    executed_calls: list[ExecutedToolCall],
+    *,
+    iteration_count: int,
+) -> ExecutionResult:
     """Build the final ExecutionResult from executed tool calls."""
     merged, final_status, reason = merge_execution_results(executed_calls)
 
@@ -319,6 +352,7 @@ def _build_execution_result(executed_calls: list[ExecutedToolCall]) -> Execution
         merged_results=merged,
         final_status=final_status,
         reason=reason,
+        iteration_count=iteration_count,
     )
 
 

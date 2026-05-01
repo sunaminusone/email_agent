@@ -886,6 +886,7 @@ class TestRunExecutor:
         result = run_executor(bundle, resolved, route)
         assert result.final_status == "empty"
         assert result.executed_calls == []
+        assert result.iteration_count == 1
 
     def test_dispatches_and_merges_tool_results(self) -> None:
         from src.ingestion.models import (
@@ -943,6 +944,7 @@ class TestRunExecutor:
         assert result.executed_calls[0].tool_name == "catalog_lookup_tool"
         assert result.executed_calls[0].status == "ok"
         assert "catalog_lookup_tool" in result.merged_results.primary_facts
+        assert result.iteration_count == 1
 
     def test_retries_with_fallback_when_primary_returns_empty(self) -> None:
         """When primary (commercial) returns empty, demand-aware fallback retries with RAG."""
@@ -1039,6 +1041,255 @@ class TestRunExecutor:
         assert "catalog_lookup_tool" in tool_names
         assert "technical_rag_tool" in tool_names
         assert result.final_status == "ok"
+        assert result.iteration_count == 1
+
+    def test_retries_into_second_iteration_when_unsatisfied_demand_adds_tool(self) -> None:
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        def empty_order_lookup(request: ToolRequest) -> ToolResult:
+            return ToolResult(tool_name=request.tool_name, status="empty")
+
+        def ok_shipping_lookup(request: ToolRequest) -> ToolResult:
+            return ToolResult(
+                tool_name=request.tool_name,
+                status="ok",
+                primary_records=[{"tracking_number": "1Z999"}],
+            )
+
+        register_tool(
+            tool_name="order_lookup_tool",
+            executor=empty_order_lookup,
+            capability=ToolCapability(
+                tool_name="order_lookup_tool",
+                supported_object_types=["order"],
+                supported_demands=["operational"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["external_api"],
+            ),
+        )
+        register_tool(
+            tool_name="shipping_lookup_tool",
+            executor=ok_shipping_lookup,
+            capability=ToolCapability(
+                tool_name="shipping_lookup_tool",
+                supported_object_types=["shipment"],
+                supported_demands=[],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["external_api"],
+                supported_request_flags=["needs_shipping_info"],
+            ),
+        )
+
+        primary = ObjectCandidate(
+            object_type="order",
+            canonical_value="SO-123",
+            display_name="SO-123",
+            identifier="SO-123",
+            identifier_type="order_no",
+        )
+        bundle = IngestionBundle(
+            turn_core=TurnCore(
+                raw_query="Where is order SO-123?",
+                normalized_query="Where is order SO-123?",
+            ),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(
+                    context=ParserContext(semantic_intent="shipping_question"),
+                    request_flags=ParserRequestFlags(needs_shipping_info=True),
+                ),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        resolved = ResolvedObjectState(primary_object=primary)
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        result = run_executor(
+            bundle,
+            resolved,
+            route,
+            active_demand=GroupDemand(
+                primary_demand="operational",
+                request_flags=["needs_shipping_info"],
+            ),
+        )
+
+        assert result.iteration_count == 2
+        assert [call.tool_name for call in result.executed_calls] == [
+            "order_lookup_tool",
+            "shipping_lookup_tool",
+        ]
+
+    def test_cross_group_cache_dedup_skips_already_called_tools(self) -> None:
+        """Group B's executor should skip tools that group A already cached for the same object.
+
+        Without this, every group re-selects CSR_ALWAYS_INCLUDE / known-catalog
+        invariants, the dispatcher hits the cache, and each group accrues a 0ms
+        duplicate ExecutedToolCall — which surfaces as N x duplicate planned_actions.
+        """
+        from src.agent.tool_call_cache import ToolCallCache
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        dispatch_count = {"catalog": 0, "rag": 0}
+
+        def catalog_executor(request: ToolRequest) -> ToolResult:
+            dispatch_count["catalog"] += 1
+            return ToolResult(
+                tool_name=request.tool_name,
+                status="ok",
+                primary_records=[{"display_name": "CD3 Antibody", "catalog_no": "A100"}],
+            )
+
+        def rag_executor(request: ToolRequest) -> ToolResult:
+            dispatch_count["rag"] += 1
+            return ToolResult(
+                tool_name=request.tool_name,
+                status="ok",
+                unstructured_snippets=[{"content": "CD3 background"}],
+            )
+
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=catalog_executor,
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+            ),
+        )
+        register_tool(
+            tool_name="technical_rag_tool",
+            executor=rag_executor,
+            capability=ToolCapability(
+                tool_name="technical_rag_tool",
+                supported_object_types=["product"],
+                supported_demands=["technical"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["unstructured_retrieval"],
+            ),
+        )
+
+        primary = ObjectCandidate(
+            object_type="product",
+            canonical_value="CD3",
+            display_name="CD3 Antibody",
+            identifier="A100",
+            identifier_type="catalog_no",
+        )
+        bundle = IngestionBundle(
+            turn_core=TurnCore(raw_query="CD3 antibody", normalized_query="CD3 antibody"),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(context=ParserContext()),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        resolved = ResolvedObjectState(primary_object=primary)
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        cache = ToolCallCache()
+
+        # Group A: dispatches both tools, populating cache
+        result_a = run_executor(bundle, resolved, route, tool_call_cache=cache)
+        assert result_a.final_status == "ok"
+        a_tools = [call.tool_name for call in result_a.executed_calls]
+        assert "catalog_lookup_tool" in a_tools
+        assert "technical_rag_tool" in a_tools
+
+        # Group B: same object, same selections — but cache should suppress
+        # both selections, returning ok with no new calls.
+        result_b = run_executor(bundle, resolved, route, tool_call_cache=cache)
+        assert result_b.final_status == "ok"
+        assert result_b.executed_calls == []
+        assert "already executed by a prior" in result_b.reason
+
+        # Real dispatch counts: each tool ran exactly once (group A), not twice.
+        assert dispatch_count == {"catalog": 1, "rag": 1}
+
+    def test_cross_group_cache_does_not_dedup_for_different_object(self) -> None:
+        """Cache dedup is per-object: group B with a different identifier still dispatches."""
+        from src.agent.tool_call_cache import ToolCallCache
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        dispatch_count = {"count": 0}
+
+        def catalog_executor(request: ToolRequest) -> ToolResult:
+            dispatch_count["count"] += 1
+            return ToolResult(
+                tool_name=request.tool_name,
+                status="ok",
+                primary_records=[{"display_name": request.scope.get("display_name", ""), "catalog_no": request.scope.get("identifier", "")}],
+            )
+
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=catalog_executor,
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+            ),
+        )
+
+        bundle = IngestionBundle(
+            turn_core=TurnCore(raw_query="product question", normalized_query="product question"),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(context=ParserContext()),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        cache = ToolCallCache()
+
+        # Group A: object CD3
+        primary_a = ObjectCandidate(
+            object_type="product",
+            canonical_value="CD3",
+            display_name="CD3 Antibody",
+            identifier="A100",
+            identifier_type="catalog_no",
+        )
+        result_a = run_executor(
+            bundle, ResolvedObjectState(primary_object=primary_a), route,
+            tool_call_cache=cache,
+        )
+        assert len(result_a.executed_calls) == 1
+
+        # Group B: different object CD19
+        primary_b = ObjectCandidate(
+            object_type="product",
+            canonical_value="CD19",
+            display_name="CD19 Antibody",
+            identifier="A200",
+            identifier_type="catalog_no",
+        )
+        result_b = run_executor(
+            bundle, ResolvedObjectState(primary_object=primary_b), route,
+            tool_call_cache=cache,
+        )
+        assert len(result_b.executed_calls) == 1
+        assert dispatch_count["count"] == 2  # both groups dispatched real calls
 
 
 # ===================================================================

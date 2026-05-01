@@ -129,6 +129,12 @@ def select_tools(
     #    inquiries with how sales actually replied; technical_rag_tool
     #    surfaces relevant KB chunks (service flyers, workflow docs).
     #    The CSR sees both and decides what to use.
+    #
+    #    These are turn-level invariants — every CSR turn benefits from
+    #    them. The `already_called` set passed by run_executor is seeded
+    #    with cross-group cache hits, so when a prior group already ran
+    #    these for the same object we skip here and avoid duplicate 0ms
+    #    cache-hit entries in this group's executed_calls.
     CSR_ALWAYS_INCLUDE = ("historical_thread_tool", "technical_rag_tool")
     for tool_name in CSR_ALWAYS_INCLUDE:
         if tool_name in selected or tool_name in already_called:

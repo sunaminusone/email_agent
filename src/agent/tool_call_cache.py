@@ -60,6 +60,20 @@ class ToolCallCache(BaseModel):
         self._cache[key] = call
         self._extract_observations(call)
 
+    def cached_for_object(self, object_type: str, object_identifier: str) -> set[str]:
+        """Return tool names already cached for the given object scope.
+
+        Used by the executor to extend `already_called` so that turn-level
+        invariants (e.g. CSR_ALWAYS_INCLUDE, known-catalog) chosen by an
+        earlier group are not re-selected by later groups for the same
+        object — avoiding duplicate cache-hit entries in `executed_calls`.
+        """
+        return {
+            key.tool_name
+            for key in self._cache
+            if key.object_type == object_type and key.object_identifier == object_identifier
+        }
+
     # --- Cross-group observations ---
 
     @property
