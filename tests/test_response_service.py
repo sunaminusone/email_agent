@@ -13,6 +13,7 @@ from src.ingestion.models import ParserConstraints
 from src.objects.models import ObjectCandidate, ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
+from src.app.service import _serialize_execution_plan
 from src.responser import ResponseInput, build_response_bundle, compose_response
 from src.responser.csr.composer import render_csr_draft_response
 from src.responser.models import ResponsePlan, build_response_memory_contribution
@@ -25,6 +26,26 @@ def _empty_execution_result(
     return ExecutionResult(
         executed_calls=executed_calls or [],
     )
+
+
+def test_execution_plan_serialization_uses_true_iteration_count() -> None:
+    payload = _serialize_execution_plan(
+        ExecutionResult(
+            executed_calls=[
+                ExecutedToolCall(
+                    call_id="1",
+                    tool_name="catalog_lookup_tool",
+                    status="ok",
+                    request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+                    result=ToolResult(tool_name="catalog_lookup_tool", status="ok"),
+                )
+            ],
+            iteration_count=2,
+            reason="retried with rag fallback",
+        )
+    )
+
+    assert payload["iterations"] == 2
 
 
 class _FakeStructuredLLM:

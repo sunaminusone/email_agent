@@ -5,6 +5,7 @@ const newChatButton = document.getElementById("new-chat-btn");
 const parsedResult = document.getElementById("parsed_result");
 const agentInput = document.getElementById("agent_input");
 const workflow = document.getElementById("workflow");
+const workflowMeta = document.getElementById("workflow_meta");
 const executionPlan = document.getElementById("execution_plan");
 const executionRun = document.getElementById("execution_run");
 const answerFocusEl = document.getElementById("answer_focus");
@@ -718,6 +719,7 @@ function resetInspectorPanels(errorMessage = "等待输入...") {
   historicalResults.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
   trustSummary.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
   routingNoteSummary.innerHTML = '<p class="signal-state">No routing flag yet.</p>';
+  workflowMeta.innerHTML = `<p class="signal-state">${escapeHtml(errorMessage)}</p>`;
   renderWorkflow([]);
 }
 
@@ -803,8 +805,29 @@ async function initializeWorkspace() {
 
 initializeWorkspace();
 
-function renderWorkflow(items) {
+function renderWorkflow(items, executionPlanPayload = {}) {
   workflow.innerHTML = "";
+  const rounds = Number(executionPlanPayload?.iterations || 0);
+  const plannedActions = executionPlanPayload?.planned_actions || [];
+
+  if (rounds > 1) {
+    workflowMeta.innerHTML = `
+      <p class="signal-line"><strong>Execution rounds:</strong> ${rounds}</p>
+      <p class="signal-line">The agent used multiple observe-decide-act passes to add tools or recover from an incomplete result.</p>
+    `;
+  } else if (rounds === 1) {
+    workflowMeta.innerHTML = `
+      <p class="signal-line"><strong>Execution rounds:</strong> 1</p>
+      <p class="signal-line">The agent completed the workflow in a single pass.</p>
+    `;
+  } else if (plannedActions.length) {
+    workflowMeta.innerHTML = `
+      <p class="signal-line"><strong>Execution rounds:</strong> n/a</p>
+      <p class="signal-line">Workflow steps are available, but the round count was not returned.</p>
+    `;
+  } else {
+    workflowMeta.innerHTML = '<p class="signal-state">Submit a query to see execution rounds.</p>';
+  }
 
   if (!items.length) {
     const empty = document.createElement("li");
@@ -1106,7 +1129,7 @@ form.addEventListener("submit", async (event) => {
     renderResponseContentBlocks(output);
     renderDocumentResults(output.execution_run || {});
     renderTechnicalResults(output.execution_run || {});
-    renderWorkflow(output.suggested_workflow || []);
+    renderWorkflow(output.suggested_workflow || [], output.execution_plan || {});
   } catch (error) {
     if (messages.length && messages[messages.length - 1].role === "user") {
       messages = messages.slice(0, -1);

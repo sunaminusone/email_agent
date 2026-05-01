@@ -1035,6 +1035,10 @@ textarea:focus {
   gap: 10px;
 }
 
+#workflow_meta {
+  margin-bottom: 10px;
+}
+
 .workflow-list li {
   padding: 12px 14px;
   border-radius: 14px;

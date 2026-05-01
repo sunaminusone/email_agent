@@ -87,6 +87,10 @@ class AgentState(BaseModel):
             executed_calls=all_calls,
             final_status=final_status,
             reason="; ".join(reasons),
+            iteration_count=sum(
+                outcome.execution_result.iteration_count
+                for outcome in self.resolved_outcomes
+            ),
         )
 
     @property

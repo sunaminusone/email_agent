@@ -97,7 +97,7 @@ def _serialize_execution_plan(result: ExecutionResult) -> dict[str, Any]:
             }
             for call in result.executed_calls
         ],
-        "iterations": 1,
+        "iterations": result.iteration_count,
         "reason": result.reason,
     }
 
