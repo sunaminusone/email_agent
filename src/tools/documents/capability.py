@@ -11,7 +11,6 @@ DOCUMENT_LOOKUP_CAPABILITY = ToolCapability(
     supported_dialogue_acts=["inquiry", "selection"],
     supported_modalities=["structured_lookup", "unstructured_retrieval", "hybrid"],
     supported_request_flags=["needs_documentation"],
-    required_params=[],
     can_run_in_parallel=True,
     returns_structured_facts=True,
     returns_unstructured_snippets=True,

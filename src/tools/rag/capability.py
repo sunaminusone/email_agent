@@ -14,7 +14,6 @@ TECHNICAL_RAG_CAPABILITY = ToolCapability(
         "needs_protocol", "needs_troubleshooting", "needs_recommendation",
         "needs_regulatory_info",
     ],
-    required_params=[],
     returns_structured_facts=True,
     returns_unstructured_snippets=True,
 )

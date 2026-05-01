@@ -16,7 +16,6 @@ HISTORICAL_THREAD_CAPABILITY = ToolCapability(
         "needs_documentation", "needs_customization", "needs_sample",
         "needs_comparison", "needs_availability",
     ],
-    required_params=[],
     returns_structured_facts=True,
     returns_unstructured_snippets=True,
 )

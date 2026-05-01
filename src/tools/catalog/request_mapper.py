@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.common.utils import dedupe_strings
+from src.common.utils import dedupe_strings, first_non_empty
 from src.tools.models import ToolRequest
 
 
@@ -24,7 +24,7 @@ def build_catalog_lookup_params(request: ToolRequest) -> dict[str, Any]:
         elif canonical_value:
             product_names.append(canonical_value)
 
-    catalog_no = _first_non_empty(
+    catalog_no = first_non_empty(
         resolved_constraints.get("catalog_number"),
         resolved_constraints.get("catalog_no"),
         resolved_constraints.get("identifier"),
@@ -32,7 +32,7 @@ def build_catalog_lookup_params(request: ToolRequest) -> dict[str, Any]:
     if catalog_no:
         catalog_numbers.append(catalog_no)
 
-    product_name = _first_non_empty(
+    product_name = first_non_empty(
         resolved_constraints.get("product_name"),
         resolved_constraints.get("canonical_value"),
         resolved_constraints.get("display_name"),
@@ -72,13 +72,5 @@ def build_catalog_lookup_params(request: ToolRequest) -> dict[str, Any]:
         "business_line_hint": business_line_hint,
         "top_k": 10,
     }
-
-
-def _first_non_empty(*values: Any) -> str:
-    for value in values:
-        cleaned = str(value or "").strip()
-        if cleaned:
-            return cleaned
-    return ""
 
 

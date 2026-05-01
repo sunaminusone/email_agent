@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.common.utils import dedupe_strings
+from src.common.utils import dedupe_strings, first_non_empty
 from src.tools.models import ToolRequest
 
 
@@ -20,14 +20,14 @@ def build_quickbooks_lookup_params(request: ToolRequest) -> dict[str, Any]:
         if primary_object.object_type in {"order", "invoice", "shipment"} and primary_object.identifier:
             order_numbers.append(primary_object.identifier)
 
-    customer_name = _first_non_empty(
+    customer_name = first_non_empty(
         resolved_constraints.get("customer_name"),
         resolved_constraints.get("company_name"),
     )
     if customer_name:
         customer_names.append(customer_name)
 
-    order_number = _first_non_empty(
+    order_number = first_non_empty(
         resolved_constraints.get("order_number"),
         resolved_constraints.get("doc_number"),
         resolved_constraints.get("invoice_number"),
@@ -37,7 +37,7 @@ def build_quickbooks_lookup_params(request: ToolRequest) -> dict[str, Any]:
 
     tool_constraints = request.constraints.tool
 
-    destination = _first_non_empty(
+    destination = first_non_empty(
         resolved_constraints.get("destination"),
         resolved_constraints.get("ship_to"),
     )
@@ -55,13 +55,5 @@ def build_quickbooks_lookup_params(request: ToolRequest) -> dict[str, Any]:
         "timeline_requirement": timeline_requirement,
         "quantity": quantity,
     }
-
-
-def _first_non_empty(*values: Any) -> str:
-    for value in values:
-        cleaned = str(value or "").strip()
-        if cleaned:
-            return cleaned
-    return ""
 
 

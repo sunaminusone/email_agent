@@ -88,7 +88,6 @@ class ToolCapability(_ToolModel):
     supported_dialogue_acts: list[str] = Field(default_factory=list)
     supported_modalities: list[str] = Field(default_factory=list)
     supported_request_flags: list[str] = Field(default_factory=list)
-    required_params: list[str] = Field(default_factory=list)  # DEPRECATED
     full_identifiers: list[str] = Field(default_factory=list)
     degraded_identifiers: list[str] = Field(default_factory=list)
     provides_params: list[str] = Field(default_factory=list)
