@@ -145,6 +145,28 @@ def select_tools(
             )
             break
 
+    # 4. Known-catalog invariant: when the customer pinned the inquiry to a
+    #    real catalog product (registry-resolved catalog_no), always include
+    #    catalog_lookup_tool as supporting. The CSR needs structured product
+    #    specs to ground the reply, even when the primary demand is technical
+    #    (datasheet/sequence questions) rather than commercial.
+    if (
+        "catalog_lookup_tool" not in selected
+        and "catalog_lookup_tool" not in already_called
+        and _has_known_catalog_product(context)
+    ):
+        for cap, score, reasons in scored:
+            if cap.tool_name != "catalog_lookup_tool":
+                continue
+            selected["catalog_lookup_tool"] = ToolSelection(
+                tool_name="catalog_lookup_tool",
+                match_score=round(max(score, 0.3), 4),
+                match_reasons=[*reasons, "known_catalog_product_invariant"],
+                role="supporting",
+                can_run_in_parallel=cap.can_run_in_parallel,
+            )
+            break
+
     result = list(selected.values())
     result.sort(key=lambda s: (-s.match_score, s.role != "primary"))
     return result
@@ -288,3 +310,11 @@ def _load_capabilities() -> list[ToolCapability]:
         if entry.capability is not None:
             caps.append(entry.capability)
     return caps
+
+
+def _has_known_catalog_product(context: ExecutionContext) -> bool:
+    po = context.primary_object
+    if po is None or po.object_type != "product" or po.identifier_type != "catalog_no":
+        return False
+    metadata = po.metadata if isinstance(po.metadata, dict) else {}
+    return metadata.get("match_strategy") != "unknown_catalog_no"

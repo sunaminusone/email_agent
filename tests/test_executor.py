@@ -346,6 +346,11 @@ class TestSelectTools:
             object_type="product", dialogue_act="inquiry",
             request_flags=flags, semantic_intent="technical_question",
         )
+        # Pure-technical scenario: no catalog identifier in the customer's
+        # message, so the known-catalog invariant should not fire.
+        ctx.primary_object = ctx.primary_object.model_copy(
+            update={"identifier": "", "identifier_type": ""},
+        )
         ctx.active_demand = GroupDemand(
             primary_demand="technical", request_flags=["needs_protocol"],
         )
@@ -393,6 +398,127 @@ class TestSelectTools:
         tool_names = {s.tool_name for s in sels}
         assert "pricing_lookup_tool" in tool_names
         assert "technical_rag_tool" in tool_names
+
+    def test_known_catalog_product_includes_catalog_lookup_even_for_doc_request(self) -> None:
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_availability"],
+            ),
+        )
+        register_tool(
+            tool_name="document_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="document_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["technical"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_documentation"],
+            ),
+        )
+        flags = ParserRequestFlags(needs_documentation=True)
+        ctx = _make_context(
+            object_type="product", dialogue_act="inquiry",
+            request_flags=flags, semantic_intent="documentation_request",
+        )
+        ctx.active_demand = GroupDemand(
+            primary_demand="technical", request_flags=["needs_documentation"],
+        )
+
+        sels = select_tools(ctx)
+        tool_names = {s.tool_name for s in sels}
+        assert "document_lookup_tool" in tool_names
+        assert "catalog_lookup_tool" in tool_names
+        catalog_sel = next(s for s in sels if s.tool_name == "catalog_lookup_tool")
+        assert catalog_sel.role == "supporting"
+        assert "known_catalog_product_invariant" in catalog_sel.match_reasons
+
+    def test_unknown_catalog_no_does_not_force_catalog_lookup(self) -> None:
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_availability"],
+            ),
+        )
+        register_tool(
+            tool_name="document_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="document_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["technical"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_documentation"],
+            ),
+        )
+        flags = ParserRequestFlags(needs_documentation=True)
+        ctx = _make_context(
+            object_type="product", dialogue_act="inquiry",
+            request_flags=flags, semantic_intent="documentation_request",
+        )
+        ctx.primary_object = ctx.primary_object.model_copy(
+            update={"metadata": {"match_strategy": "unknown_catalog_no"}},
+        )
+        ctx.active_demand = GroupDemand(
+            primary_demand="technical", request_flags=["needs_documentation"],
+        )
+
+        sels = select_tools(ctx)
+        tool_names = {s.tool_name for s in sels}
+        assert "catalog_lookup_tool" not in tool_names
+
+    def test_service_object_does_not_trigger_catalog_invariant(self) -> None:
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product", "service"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_availability"],
+            ),
+        )
+        register_tool(
+            tool_name="document_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="document_lookup_tool",
+                supported_object_types=["product", "service"],
+                supported_demands=["technical"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_documentation"],
+            ),
+        )
+        flags = ParserRequestFlags(needs_documentation=True)
+        ctx = _make_context(
+            object_type="service", dialogue_act="inquiry",
+            request_flags=flags, semantic_intent="documentation_request",
+        )
+        ctx.active_demand = GroupDemand(
+            primary_demand="technical", request_flags=["needs_documentation"],
+        )
+
+        sels = select_tools(ctx)
+        tool_names = {s.tool_name for s in sels}
+        assert "catalog_lookup_tool" not in tool_names
 
 
 # ===================================================================
