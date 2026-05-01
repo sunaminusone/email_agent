@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterator
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,15 +13,27 @@ before sending — your job is to give them a strong starting point.
 
 Inputs you will see:
 1. The new customer inquiry.
-2. STRUCTURED LIVE FACTS — catalog / pricing records from our live database
+2. ASKED FOCUS — the specific question(s) the upstream parser identified in
+   the inquiry. This is your answer target.
+3. STRUCTURED LIVE FACTS — catalog / pricing records from our live database
    (only present when the corresponding tools fired and returned matches).
-3. Past similar inquiries with how our sales team replied to them.
-4. Relevant documentation chunks from our knowledge base.
-5. OPERATIONAL RECORDS — order / invoice / shipping / customer data from
+4. Past similar inquiries with how our sales team replied to them.
+5. Relevant documentation chunks from our knowledge base.
+6. OPERATIONAL RECORDS — order / invoice / shipping / customer data from
    QuickBooks (only present when those tools fired).
 
 Rules:
 - Write a clear, professional draft reply addressed to the new customer.
+- ANSWER ONLY THE ASKED FOCUS. If ASKED FOCUS lists one ask, answer that
+  one. If it lists several (separated by ";"), answer each. Do NOT
+  volunteer adjacent fields the customer did not ask about (e.g. don't
+  report payment status when only the send date was asked, don't quote
+  price when only the lead time was asked).
+- If the requested information is NOT present in the data we retrieved,
+  say so EXPLICITLY ("we don't have a record of when the invoice was
+  emailed to you" / "I don't see a delivery timestamp on file") instead
+  of substituting a related field. Never present a different field as if
+  it answered the question.
 - STRUCTURED LIVE FACTS are AUTHORITATIVE. When live catalog / pricing
   records are present, cite catalog_no, price, currency, and lead_time
   EXACTLY as given — do NOT round, paraphrase, or pull these numbers from
@@ -29,6 +41,17 @@ Rules:
   the live data, trust the live data and ignore the email's number.
 - OPERATIONAL RECORDS (orders / invoices / shipping) are also authoritative —
   cite order numbers, statuses, and tracking IDs exactly as given.
+- QuickBooks field semantics (don't mistranslate these):
+  * `email_status: NotSet` / `print_status: NotSet` mean the document was
+    NEVER sent via QuickBooks email / print — not "we have no record".
+    `EmailSent` means it was sent but QB does not store the timestamp.
+    Neither status carries a send DATE.
+  * `txn_date` is when the document was CREATED in QuickBooks (issue date),
+    NOT when it was sent / delivered to the customer.
+  * `due_date` is the payment due date, not a send or delivery date.
+  * `ship_date` is the goods-shipped date, not the document-sent date.
+  * `balance: 0.00` with `payment_status: paid` confirms full payment;
+    do NOT volunteer payment status unless the customer asked about it.
 - Lean on past sales replies for TONE and STRUCTURE — how our team talks to
   customers — but not for specific numbers when live data exists.
 - Use documentation chunks to cite technical specs and process details only
@@ -91,21 +114,33 @@ class DraftOutput(BaseModel):
     draft: str = ""
 
 
-def generate_draft(
+def _build_draft_prompts(
     *,
     query: str,
+    asked_focus: str | None,
     threads: list[dict[str, Any]],
     documents: list[dict[str, Any]],
     structured_records: list[dict[str, Any]],
     operational_records: list[dict[str, Any]],
     trust_signal: dict[str, Any],
     primary_service_document: dict[str, Any] | None,
-) -> str:
-    if not query.strip():
-        return ""
-
+) -> tuple[str, str]:
     parts: list[str] = []
     parts.append(f"NEW CUSTOMER INQUIRY:\n{query}\n")
+
+    focus_text = (asked_focus or "").strip()
+    if focus_text:
+        parts.append(
+            "\nASKED FOCUS (parser-identified asks — answer ONLY these; if any "
+            "asked item is not in the retrieved data, say so explicitly rather "
+            "than substituting a related field):\n"
+            f"{focus_text}\n"
+        )
+    else:
+        parts.append(
+            "\nASKED FOCUS: (no specific ask identified — likely a greeting / "
+            "acknowledgement / closing; reply briefly without volunteering data)\n"
+        )
 
     if structured_records:
         parts.append(
@@ -177,13 +212,40 @@ def generate_draft(
     )
 
     user_prompt = "\n".join(parts)
+    system_prompt = _build_system_prompt(
+        grounding_status=str(trust_signal.get("grounding_status") or ""),
+        primary_service_document=primary_service_document,
+    )
+    return system_prompt, user_prompt
+
+
+def generate_draft(
+    *,
+    query: str,
+    asked_focus: str | None,
+    threads: list[dict[str, Any]],
+    documents: list[dict[str, Any]],
+    structured_records: list[dict[str, Any]],
+    operational_records: list[dict[str, Any]],
+    trust_signal: dict[str, Any],
+    primary_service_document: dict[str, Any] | None,
+) -> str:
+    if not query.strip():
+        return ""
+
+    system_prompt, user_prompt = _build_draft_prompts(
+        query=query,
+        asked_focus=asked_focus,
+        threads=threads,
+        documents=documents,
+        structured_records=structured_records,
+        operational_records=operational_records,
+        trust_signal=trust_signal,
+        primary_service_document=primary_service_document,
+    )
 
     try:
         llm = get_llm().with_structured_output(DraftOutput)
-        system_prompt = _build_system_prompt(
-            grounding_status=str(trust_signal.get("grounding_status") or ""),
-            primary_service_document=primary_service_document,
-        )
         result = llm.invoke([
             ("system", system_prompt),
             ("human", user_prompt),
@@ -193,10 +255,54 @@ def generate_draft(
         return f"[Draft generation failed: {exc}. CSR: please draft manually using the references below.]"
 
 
+def stream_draft(
+    *,
+    query: str,
+    asked_focus: str | None,
+    threads: list[dict[str, Any]],
+    documents: list[dict[str, Any]],
+    structured_records: list[dict[str, Any]],
+    operational_records: list[dict[str, Any]],
+    trust_signal: dict[str, Any],
+    primary_service_document: dict[str, Any] | None,
+) -> Iterator[str]:
+    """Yield draft text token-by-token. Drops with_structured_output since we
+    just want a raw text stream (the structured wrapper would produce partial
+    JSON chunks instead of clean tokens)."""
+    if not query.strip():
+        return
+
+    system_prompt, user_prompt = _build_draft_prompts(
+        query=query,
+        asked_focus=asked_focus,
+        threads=threads,
+        documents=documents,
+        structured_records=structured_records,
+        operational_records=operational_records,
+        trust_signal=trust_signal,
+        primary_service_document=primary_service_document,
+    )
+
+    try:
+        llm = get_llm()
+        for chunk in llm.stream([
+            ("system", system_prompt),
+            ("human", user_prompt),
+        ]):
+            text = getattr(chunk, "content", "") or ""
+            if text:
+                yield text
+    except Exception as exc:
+        yield f"[Draft generation failed: {exc}. CSR: please draft manually using the references below.]"
+
+
+_LLM_RECORD_HIDDEN_KEYS = frozenset({"raw", "id", "customer_id"})
+
+
 def render_record_for_llm(record: dict[str, Any]) -> str:
     lines: list[str] = []
     for key, value in record.items():
-        if key.startswith("_"):
+        if key.startswith("_") or key in _LLM_RECORD_HIDDEN_KEYS:
             continue
         if value in (None, "", [], {}):
             continue

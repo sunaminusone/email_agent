@@ -74,9 +74,10 @@ def run_executor(
     all_calls: list[ExecutedToolCall] = []
     # Seed `already_called` with what other groups have already done for our
     # primary object. Without this, turn-level invariants in select_tools
-    # (CSR_ALWAYS_INCLUDE, known-catalog) re-select tools every group, the
-    # dispatcher hits the cache, and each group accrues a 0ms duplicate
-    # ExecutedToolCall — which then surfaces as N x duplicate planned_actions.
+    # (known-catalog) and overlapping flag-driven selections re-select tools
+    # every group, the dispatcher hits the cache, and each group accrues a
+    # 0ms duplicate ExecutedToolCall — which then surfaces as N x duplicate
+    # planned_actions.
     obj_type_for_seed = context.primary_object.object_type if context.primary_object else ""
     obj_id_for_seed = context.primary_object.identifier if context.primary_object else ""
     cross_group_satisfied: set[str] = (

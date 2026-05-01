@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Iterator
 
 from src.agent.state import AgentState
 from src.app.agent_loop import _run_agent_loop
@@ -26,7 +27,14 @@ from src.memory import (
 from src.memory.models import MemoryContext
 from src.objects.models import build_objects_memory_contribution
 from src.objects.resolution import resolve_objects
-from src.responser import ResponseInput, build_response_bundle
+from src.responser import (
+    ContentBlock,
+    ResponseInput,
+    assemble_response_bundle,
+    build_response_bundle,
+    plan_response,
+)
+from src.responser.csr import stream_csr_response
 from src.responser.models import build_response_memory_contribution
 from src.routing.models import build_routing_memory_contribution
 
@@ -389,7 +397,24 @@ def _assemble_agent_response(
     )
 
 
-def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeResponse:
+@dataclass
+class _PipelineState:
+    """Everything produced by the pre-response pipeline (parser → router →
+    executor). Shared by run_email_agent and stream_email_agent so both
+    take the same path up to the composer."""
+    request: AgentRequest
+    session_store: SessionStore
+    memory_context: MemoryContext
+    ingestion_bundle: Any
+    resolved_object_state: Any
+    intent_groups: list[IntentGroup]
+    demand_profile: DemandProfile
+    agent_state: AgentState
+    response_input: ResponseInput
+    query: str
+
+
+def _run_until_response_input(request: AgentRequest | dict[str, Any]) -> _PipelineState:
     if isinstance(request, dict):
         request = AgentRequest.model_validate(request)
 
@@ -436,14 +461,11 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
         intent_groups, demand_profile, ingestion_bundle, resolved_object_state, memory_context,
     )
 
-    # --- Phase 3: Respond — merge all group outcomes into one response ---
-    execution_result = agent_state.merged_execution_result
-
     parser_signals = ingestion_bundle.turn_signals.parser_signals
-    response_bundle = build_response_bundle(ResponseInput(
+    response_input = ResponseInput(
         query=query,
         locale=request.locale,
-        execution_result=execution_result,
+        execution_result=agent_state.merged_execution_result,
         resolved_object_state=resolved_object_state,
         dialogue_act=agent_state.primary_dialogue_act,
         response_memory=memory_context.snapshot.response_memory,
@@ -453,32 +475,100 @@ def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeRes
         demand_profile=demand_profile,
         parser_constraints=parser_signals.constraints,
         parser_open_slots=parser_signals.open_slots,
-    ))
+        asked_focus=parser_signals.asked_focus,
+    )
 
-    # --- Phase 4: Serialize ---
+    return _PipelineState(
+        request=request,
+        session_store=session_store,
+        memory_context=memory_context,
+        ingestion_bundle=ingestion_bundle,
+        resolved_object_state=resolved_object_state,
+        intent_groups=intent_groups,
+        demand_profile=demand_profile,
+        agent_state=agent_state,
+        response_input=response_input,
+        query=query,
+    )
+
+
+def _finalize_pipeline(
+    state: _PipelineState,
+    response_bundle,
+) -> AgentPrototypeResponse:
+    """Phases 4-6: serialize, persist, and assemble the HTTP response."""
+    execution_result = state.agent_state.merged_execution_result
     execution_plan_payload = _serialize_execution_plan(execution_result)
     execution_run_payload = _serialize_execution_run(execution_result)
     response_content_blocks = _serialize_content_blocks(response_bundle.composed_response.content_blocks)
-    final_response = _build_final_response_payload(agent_state, execution_result, response_bundle)
+    final_response = _build_final_response_payload(state.agent_state, execution_result, response_bundle)
     reply_preview = _build_reply_preview(
-        query, execution_run_payload, final_response,
-        locale=request.locale,
+        state.query, execution_run_payload, final_response,
+        locale=state.request.locale,
     )
 
-    # --- Phase 5: Reflect + persist ---
     assistant_message = _persist_session_state(
-        session_store, request.thread_id, request.user_query,
-        memory_context, ingestion_bundle, resolved_object_state,
-        intent_groups, demand_profile, agent_state,
+        state.session_store, state.request.thread_id, state.request.user_query,
+        state.memory_context, state.ingestion_bundle, state.resolved_object_state,
+        state.intent_groups, state.demand_profile, state.agent_state,
         final_response, response_bundle,
         reply_preview, response_content_blocks,
     )
 
-    # --- Phase 6: Assemble HTTP response ---
     return _assemble_agent_response(
-        ingestion_bundle, resolved_object_state, intent_groups, demand_profile, agent_state,
+        state.ingestion_bundle, state.resolved_object_state, state.intent_groups,
+        state.demand_profile, state.agent_state,
         execution_plan_payload, execution_run_payload,
         response_bundle, response_content_blocks,
         final_response, reply_preview, assistant_message,
-        locale=request.locale,
+        locale=state.request.locale,
     )
+
+
+def run_email_agent(request: AgentRequest | dict[str, Any]) -> AgentPrototypeResponse:
+    state = _run_until_response_input(request)
+    response_bundle = build_response_bundle(state.response_input)
+    return _finalize_pipeline(state, response_bundle)
+
+
+def _serialize_stream_event(event_name: str, payload: Any) -> dict[str, Any]:
+    """Map composer event payloads to JSON-safe dicts. ``ContentBlock`` gets
+    expanded with the ``kind``/``text`` aliases the frontend already uses."""
+    if event_name == "section" and isinstance(payload, ContentBlock):
+        block_payload = payload.model_dump(mode="json")
+        block_payload.setdefault("kind", block_payload.get("block_type", ""))
+        block_payload.setdefault("text", block_payload.get("body", ""))
+        return block_payload
+    if isinstance(payload, dict):
+        return payload
+    return {"value": payload}
+
+
+def stream_email_agent(
+    request: AgentRequest | dict[str, Any],
+) -> Iterator[dict[str, Any]]:
+    """Yield SSE-shaped dicts (``{event, data}``) for the full agent run.
+
+    Order: ``trust`` → one ``section`` per populated panel → ``draft_start``
+    → many ``draft_chunk`` → ``draft_end`` → ``done`` (full
+    AgentPrototypeResponse for inspector panels + persistence).
+    """
+    state = _run_until_response_input(request)
+    response_plan, content_blocks = plan_response(state.response_input)
+
+    composed_response = None
+    for event_name, payload in stream_csr_response(state.response_input, response_plan):
+        if event_name == "composed":
+            composed_response = payload
+            continue
+        yield {"event": event_name, "data": _serialize_stream_event(event_name, payload)}
+
+    assert composed_response is not None, "stream_csr_response must yield a final composed event"
+
+    response_bundle = assemble_response_bundle(
+        composed_response=composed_response,
+        response_plan=response_plan,
+        content_blocks=content_blocks,
+    )
+    final_payload = _finalize_pipeline(state, response_bundle)
+    yield {"event": "done", "data": final_payload.model_dump(mode="json")}

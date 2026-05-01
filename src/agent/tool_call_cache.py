@@ -64,9 +64,10 @@ class ToolCallCache(BaseModel):
         """Return tool names already cached for the given object scope.
 
         Used by the executor to extend `already_called` so that turn-level
-        invariants (e.g. CSR_ALWAYS_INCLUDE, known-catalog) chosen by an
-        earlier group are not re-selected by later groups for the same
-        object — avoiding duplicate cache-hit entries in `executed_calls`.
+        invariants (e.g. known-catalog) and overlapping flag selections
+        chosen by an earlier group are not re-selected by later groups for
+        the same object — avoiding duplicate cache-hit entries in
+        `executed_calls`.
         """
         return {
             key.tool_name

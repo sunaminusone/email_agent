@@ -42,6 +42,7 @@ class ResponseInput(_ResponseModel):
     demand_profile: DemandProfile | None = None
     parser_constraints: ParserConstraints | None = None
     parser_open_slots: ParserOpenSlots | None = None
+    asked_focus: str | None = None
 
 
 class ResponsePlan(_ResponseModel):

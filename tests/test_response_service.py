@@ -549,9 +549,12 @@ def test_csr_draft_marks_ungrounded_when_no_references_exist() -> None:
     trust_block = next(block for block in response.content_blocks if block.block_type == "trust_signal")
     assert trust_block.data["grounding_status"] == "ungrounded"
     assert "No live data, strong historical replies, or relevant documents were retrieved" in trust_block.body
-    assert "*📚 Similar past inquiries*" in response.message
-    assert "No strong similar historical replies were retrieved" in response.message
-    assert "*📄 Relevant documents*" in response.message
+    # Empty reference sections are suppressed — the trust signal already conveys
+    # "nothing retrieved", and per-source placeholders are noise.
+    assert "*📚 Similar past inquiries*" not in response.message
+    assert "*📄 Relevant documents*" not in response.message
+    assert not any(b.block_type == "historical_references" for b in response.content_blocks)
+    assert not any(b.block_type == "relevant_documents" for b in response.content_blocks)
 
 
 def test_csr_draft_surfaces_structured_reference_blocks_when_grounded() -> None:
@@ -701,3 +704,106 @@ def test_csr_draft_surfaces_live_pricing_records_from_pricing_lookup_tool() -> N
     assert response.debug_info["structured_records_returned"] == 1
     trust_block = next(b for b in response.content_blocks if b.block_type == "trust_signal")
     assert trust_block.data["has_live_data"] is True
+
+
+# ---------------------------------------------------------------------------
+# asked_focus consumption — parser-identified focus must reach draft_llm
+# ---------------------------------------------------------------------------
+
+
+class _PromptCapturingLLM:
+    """Captures the (system, human) messages passed to invoke()."""
+
+    def __init__(self, draft: str) -> None:
+        self._draft = draft
+        self.last_system: str = ""
+        self.last_human: str = ""
+
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, messages):
+        for role, content in messages:
+            if role == "system":
+                self.last_system = content
+            elif role == "human":
+                self.last_human = content
+
+        class _Result:
+            draft = ""
+
+        result = _Result()
+        result.draft = self._draft
+        return result
+
+
+def test_csr_draft_prompt_includes_asked_focus_when_set() -> None:
+    """asked_focus from the parser must be surfaced into the draft user prompt."""
+    fake_llm = _PromptCapturingLLM("Draft body.")
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=fake_llm):
+        render_csr_draft_response(
+            ResponseInput(
+                query="Customer is asking when 1002 was sent out — can you confirm?",
+                execution_result=_empty_execution_result(),
+                asked_focus="the date/time invoice 1002 was sent out (delivered) to the customer",
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    assert "ASKED FOCUS" in fake_llm.last_human
+    assert "the date/time invoice 1002 was sent out" in fake_llm.last_human
+    # System prompt must instruct the LLM to honor the focus.
+    assert "ANSWER ONLY THE ASKED FOCUS" in fake_llm.last_system
+
+
+def test_csr_draft_prompt_marks_asked_focus_absent_when_no_focus() -> None:
+    """No asked_focus (greeting / closing) must surface a clear placeholder."""
+    fake_llm = _PromptCapturingLLM("Thanks for reaching out.")
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=fake_llm):
+        render_csr_draft_response(
+            ResponseInput(
+                query="Thanks, that's all for now.",
+                execution_result=_empty_execution_result(),
+                asked_focus=None,
+            ),
+            ResponsePlan(answer_focus="conversation_close"),
+        )
+
+    assert "ASKED FOCUS" in fake_llm.last_human
+    assert "no specific ask identified" in fake_llm.last_human
+
+
+def test_csr_draft_prompt_passes_multi_intent_focus_verbatim() -> None:
+    """Multi-ask focus (semicolon-separated) must reach the prompt verbatim."""
+    fake_llm = _PromptCapturingLLM("Draft body.")
+    multi_focus = (
+        "the price for custom rabbit polyclonal antibody development; "
+        "the lead time for custom rabbit polyclonal antibody development"
+    )
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=fake_llm):
+        render_csr_draft_response(
+            ResponseInput(
+                query="What's the price and lead time for custom rabbit polyclonal antibody development?",
+                execution_result=_empty_execution_result(),
+                asked_focus=multi_focus,
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    assert multi_focus in fake_llm.last_human
+
+
+def test_csr_draft_prompt_treats_blank_asked_focus_as_absent() -> None:
+    """Whitespace-only focus should fall through to the absent-focus branch."""
+    fake_llm = _PromptCapturingLLM("Draft body.")
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=fake_llm):
+        render_csr_draft_response(
+            ResponseInput(
+                query="hi",
+                execution_result=_empty_execution_result(),
+                asked_focus="   ",
+            ),
+            ResponsePlan(answer_focus="conversation_close"),
+        )
+
+    assert "no specific ask identified" in fake_llm.last_human

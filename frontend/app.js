@@ -1,6 +1,5 @@
 const form = document.getElementById("agent-form");
 const submitButton = document.getElementById("submit-btn");
-const clearChatButton = document.getElementById("clear-chat-btn");
 const newChatButton = document.getElementById("new-chat-btn");
 const parsedResult = document.getElementById("parsed_result");
 const agentInput = document.getElementById("agent_input");
@@ -20,89 +19,24 @@ const routeResult = document.getElementById("route_result");
 const chatHistory = document.getElementById("chat_history");
 const historyNav = document.getElementById("history_nav");
 const sessionHint = document.getElementById("session_hint");
-const questionSamples = document.getElementById("question_samples");
-const refreshSamplesButton = document.getElementById("refresh-samples-btn");
+const appShell = document.getElementById("app_shell");
+const chatStage = document.getElementById("chat_stage");
+const sidebarToggleButton = document.getElementById("sidebar-toggle-btn");
+const composerToolsTrigger = document.getElementById("composer-tools-trigger");
+const composerToolsDropdown = document.getElementById("composer-tools-dropdown");
 const inspectorTabs = Array.from(document.querySelectorAll("[data-panel-target]"));
 const inspectorPanels = Array.from(document.querySelectorAll(".inspector-panel"));
 
 const CHAT_SESSIONS_STORAGE_KEY = "email_agent.chat_sessions";
 const THREAD_STORAGE_KEY = "email_agent.thread_id";
-
-const SAMPLE_QUESTIONS = {
-  product: [
-    "Can you tell me more about your CAR-T cell line development service?",
-    "What applications is your anti-CD3 antibody validated for?",
-    "Do you offer custom peptide synthesis for immunogenicity studies?",
-    "Please introduce your NPM1 mutation detection workflow.",
-    "Which product would you recommend for western blot detection of GFP-tagged proteins?",
-  ],
-  pricing: [
-    "Could you provide a quote for 5 mg custom peptide synthesis with HPLC purification?",
-    "What is the price range for monoclonal antibody generation in rabbits?",
-    "Please share the pricing for a pilot CAR construct design project.",
-    "How much would flow cytometry validation cost for three target markers?",
-    "Can you prepare a budgetary quote for ELISA kit development with two antigens?",
-  ],
-  technical: [
-    "How does your hybridoma screening workflow work after mouse immunization?",
-    "What QC checkpoints are included in your lentiviral packaging service?",
-    "Can you explain the difference between peptide conjugation and carrier protein coupling?",
-    "What readouts do you provide in your T cell functional assay package?",
-    "How do you validate specificity for a custom phospho-antibody project?",
-  ],
-  timeline: [
-    "What is the typical turnaround time for recombinant protein expression and purification?",
-    "How long does a standard monoclonal antibody project usually take?",
-    "When could you deliver a small-batch peptide order if we start this week?",
-    "What is the lead time for custom plasmid construction and sequence verification?",
-    "How many weeks are needed for CAR-T in vitro functional testing?",
-  ],
-  shipping: [
-    "Do you ship antibodies on dry ice to California, and what is the typical transit time?",
-    "Can you arrange international shipping for frozen PBMC samples to Singapore?",
-    "What shipping documents are needed for protein samples sent to the EU?",
-    "Do you provide tracking and temperature monitoring for cold-chain shipments?",
-    "Can you split delivery for a multi-batch peptide synthesis order?",
-  ],
-  documentation: [
-    "Could you send the datasheet and COA for your recombinant IL-2 protein?",
-    "Do you have a protocol or application note for your ELISA development service?",
-    "Please share any validation report for the anti-PD-1 antibody.",
-    "Can you provide technical documentation for your stable cell line generation workflow?",
-    "Is there a brochure or slide deck for your antibody humanization service?",
-  ],
-  order: [
-    "Can you check the status of order PO-20481 and confirm the expected ship date?",
-    "Has invoice INV-11892 already been issued for our last peptide order?",
-    "Please help confirm whether sample receipt was logged for our CRO project.",
-    "Can you verify if batch 2 of our recombinant protein order passed QC?",
-    "We need an update on the shipping status for our custom antibody project.",
-  ],
-  reply: [
-    "Draft a polite customer reply explaining that technical validation data will be shared after internal review.",
-    "Help me write a concise email to follow up on a pending quote for antibody development.",
-    "Please draft a customer-facing reply summarizing lead time, price, and shipping constraints.",
-    "Write a professional response asking the client to confirm antigen sequence and purification grade.",
-    "Generate a warm reply that offers both a datasheet and a call to discuss assay design.",
-  ],
-};
-
-const SAMPLE_CATEGORY_LABELS = {
-  product: "Product",
-  pricing: "Pricing",
-  technical: "Technical",
-  timeline: "Timeline",
-  shipping: "Shipping",
-  documentation: "Docs",
-  order: "Order",
-  reply: "Draft",
-};
+const SIDEBAR_STATE_STORAGE_KEY = "email_agent.sidebar_open";
 
 let messages = [];
 let threadId = "";
 let sessions = {};
 let editingThreadId = "";
 let editingThreadTitleDraft = "";
+let sidebarOpen = true;
 
 function escapeHtml(value) {
   return String(value)
@@ -125,6 +59,11 @@ function closeAllHistoryMenus() {
   document.querySelectorAll(".history-menu").forEach((menu) => {
     menu.classList.remove("history-menu-open");
   });
+}
+
+function setComposerToolsOpen(nextOpen) {
+  composerToolsTrigger.setAttribute("aria-expanded", String(nextOpen));
+  composerToolsDropdown.classList.toggle("composer-tools-dropdown-open", nextOpen);
 }
 
 function startInlineThreadRename(targetThreadId) {
@@ -210,6 +149,117 @@ function formatSlackMessage(text) {
   return out.join("");
 }
 
+function parseSseBlock(rawBlock) {
+  // Each SSE event is a block of `event: <name>\ndata: <json>\n`. Multi-line
+  // data lines get concatenated; the runtime here only emits single-line
+  // data, but handle the spec-correct case anyway.
+  const lines = rawBlock.split("\n");
+  let name = "message";
+  const dataLines = [];
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      name = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).replace(/^ /, ""));
+    }
+  }
+  if (!dataLines.length) {
+    return null;
+  }
+  const raw = dataLines.join("\n");
+  try {
+    return { name, data: JSON.parse(raw) };
+  } catch (_err) {
+    return { name, data: raw };
+  }
+}
+
+async function streamEmailAgent(payload, onEvent) {
+  const response = await fetch("/email-agent/sse", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input: payload }),
+  });
+  if (!response.ok || !response.body) {
+    const text = response.body ? await response.text() : "";
+    throw new Error(text || `stream request failed (${response.status})`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const parsed = parseSseBlock(block);
+      if (parsed) {
+        onEvent(parsed);
+      }
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    const parsed = parseSseBlock(buffer);
+    if (parsed) {
+      onEvent(parsed);
+    }
+  }
+}
+
+function formatStreamingTrustSection(signal) {
+  const status = signal?.grounding_status || "unknown";
+  const tier = signal?.retrieval_quality_tier || "unknown";
+  const summary = signal?.summary || "";
+  return [
+    "*🧭 Grounding signal*",
+    `   • status: \`${status}\``,
+    `   • retrieval quality: \`${tier}\``,
+    `   • ${summary}`,
+  ].join("\n");
+}
+
+function renderStreamingTrust(signal) {
+  if (!signal) {
+    return;
+  }
+  const status = signal.grounding_status || "unknown";
+  const tier = signal.retrieval_quality_tier || "unknown";
+  const docCount = Number(signal.documents_used || 0);
+  const histCount = Number(signal.historical_threads_used || 0);
+  trustSummary.innerHTML = `
+    <p class="signal-line"><span class="trust-tier trust-tier-${escapeHtml(tier)}">${escapeHtml(tier)}</span></p>
+    <p class="signal-line"><strong>Status:</strong> ${escapeHtml(status)}</p>
+    <p class="signal-line"><strong>Sources:</strong> ${histCount} similar past · ${docCount} docs</p>
+  `;
+}
+
+function renderStreamingContentBlocks(blocks) {
+  if (!blocks.length) {
+    responseContentBlocks.innerHTML = '<p class="signal-state">Streaming references…</p>';
+    return;
+  }
+  renderResponseContentBlocks({ response_content_blocks: blocks });
+}
+
+function composeStreamingMessage(state) {
+  const parts = [];
+  const draftBody = state.draftDone
+    ? (state.draftText || "_(empty draft — see references below)_")
+    : (state.draftText || "_(streaming…)_");
+  parts.push(`*📝 Draft reply* _(CSR: please review & edit before sending)_\n\n${draftBody}`);
+  if (state.trustSection) {
+    parts.push(state.trustSection);
+  }
+  parts.push(...state.panelSectionTexts);
+  return parts.join("\n\n");
+}
+
 function createThreadId() {
   if (window.crypto?.randomUUID) {
     return `thread-${window.crypto.randomUUID()}`;
@@ -228,12 +278,31 @@ function activateInspectorPanel(panelId) {
   });
 }
 
+function syncSidebarUI() {
+  appShell.classList.toggle("sidebar-open", sidebarOpen);
+  appShell.classList.toggle("sidebar-closed", !sidebarOpen);
+  sidebarToggleButton.setAttribute("aria-expanded", String(sidebarOpen));
+  sidebarToggleButton.setAttribute("aria-label", sidebarOpen ? "Collapse sidebar" : "Expand sidebar");
+  sidebarToggleButton.setAttribute("title", sidebarOpen ? "Collapse sidebar" : "Expand sidebar");
+}
+
+function initializeSidebarState() {
+  const stored = window.localStorage.getItem(SIDEBAR_STATE_STORAGE_KEY);
+  sidebarOpen = stored == null ? true : stored === "true";
+  syncSidebarUI();
+}
+
+function toggleSidebar() {
+  sidebarOpen = !sidebarOpen;
+  window.localStorage.setItem(SIDEBAR_STATE_STORAGE_KEY, String(sidebarOpen));
+  syncSidebarUI();
+}
+
 function ensureThreadId() {
   if (!threadId) {
     threadId = window.localStorage.getItem(THREAD_STORAGE_KEY) || createThreadId();
     window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
   }
-  ensureSessionRecord(threadId);
   return threadId;
 }
 
@@ -245,6 +314,16 @@ function loadStoredSessions() {
   }
   if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
     sessions = {};
+  }
+  let removedEmptySessions = false;
+  for (const [key, session] of Object.entries(sessions)) {
+    if (!sessionHasMessages(session)) {
+      delete sessions[key];
+      removedEmptySessions = true;
+    }
+  }
+  if (removedEmptySessions) {
+    saveStoredSessions();
   }
 }
 
@@ -312,6 +391,12 @@ async function deleteThreadFromBackend(id) {
   return response.json();
 }
 
+async function deleteAllThreadsFromBackend(threadIds) {
+  for (const id of threadIds) {
+    await deleteThreadFromBackend(id);
+  }
+}
+
 async function renameThreadInBackend(id, title) {
   const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -328,6 +413,15 @@ async function renameThreadInBackend(id, title) {
 
 function saveStoredSessions() {
   window.localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
+}
+
+function sessionHasMessages(session) {
+  if (!session || typeof session !== "object") {
+    return false;
+  }
+  const storedMessages = Array.isArray(session.messages) ? session.messages.length : 0;
+  const countedMessages = Number(session.message_count || 0);
+  return storedMessages > 0 || countedMessages > 0;
 }
 
 function buildSessionTitle(sessionMessages) {
@@ -356,6 +450,13 @@ function ensureSessionRecord(id) {
 
 function syncCurrentSession() {
   const activeThreadId = ensureThreadId();
+  if (!messages.length) {
+    if (sessions[activeThreadId]) {
+      delete sessions[activeThreadId];
+      saveStoredSessions();
+    }
+    return;
+  }
   sessions[activeThreadId] = {
     thread_id: activeThreadId,
     messages: [...messages],
@@ -368,7 +469,6 @@ function syncCurrentSession() {
 }
 
 function loadThreadSession(id) {
-  ensureSessionRecord(id);
   threadId = id;
   window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
   messages = [...(sessions[id]?.messages || [])];
@@ -379,8 +479,6 @@ function createAndSwitchToNewThread() {
   threadId = createThreadId();
   window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
   messages = [];
-  ensureSessionRecord(threadId);
-  syncCurrentSession();
 }
 
 function renderSessionHint() {
@@ -388,56 +486,24 @@ function renderSessionHint() {
   sessionHint.textContent = `Session linked to ${activeThreadId.slice(0, 18)}...`;
 }
 
-function shuffleArray(items) {
-  const copy = [...items];
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-  }
-  return copy;
+function syncChatStageLayout() {
+  const isEmpty = !messages.length;
+  chatStage.classList.toggle("chat-stage-empty-mode", isEmpty);
 }
 
-function pickSampleQuestions(count = 6) {
-  const categories = shuffleArray(Object.keys(SAMPLE_QUESTIONS)).slice(0, count);
-  return categories.map((category) => {
-    const options = SAMPLE_QUESTIONS[category] || [];
-    const question = options[Math.floor(Math.random() * options.length)] || "";
-    return {
-      category,
-      label: SAMPLE_CATEGORY_LABELS[category] || category,
-      question,
-    };
-  });
-}
-
-function applySampleQuestion(question) {
-  const userQueryField = document.getElementById("user_query");
-  userQueryField.value = question;
-  userQueryField.focus();
-  userQueryField.setSelectionRange(userQueryField.value.length, userQueryField.value.length);
-}
-
-function renderQuestionSamples() {
-  const samples = pickSampleQuestions();
-  questionSamples.innerHTML = samples.map((sample) => `
-    <button type="button" class="question-sample-card" data-question="${escapeHtml(sample.question)}">
-      <span class="question-sample-tag">${escapeHtml(sample.label)}</span>
-      <span class="question-sample-text">${escapeHtml(sample.question)}</span>
-    </button>
-  `).join("");
-
-  questionSamples.querySelectorAll(".question-sample-card").forEach((button) => {
-    button.addEventListener("click", () => {
-      applySampleQuestion(button.dataset.question || "");
-    });
-  });
+function playChatStageTransition() {
+  chatStage.classList.remove("chat-stage-switching");
+  void chatStage.offsetWidth;
+  chatStage.classList.add("chat-stage-switching");
 }
 
 function renderChatHistory() {
+  syncChatStageLayout();
+
   if (!messages.length) {
     chatHistory.innerHTML = `
       <div class="chat-empty-state">
-        <p class="chat-empty-title">Start a new conversation</p>
+        <p class="chat-empty-title">Where should we start?</p>
         <p class="chat-empty">Ask about a product, request a quote, or retrieve technical documentation.</p>
       </div>
     `;
@@ -446,9 +512,24 @@ function renderChatHistory() {
 
   chatHistory.innerHTML = messages.map((message) => {
     const isAssistant = message.role === "assistant";
+    const isStreaming = Boolean(message.metadata?.streaming);
     const roleClass = isAssistant ? "chat-message-assistant" : "chat-message-user";
     const roleLabel = isAssistant ? "Assistant" : "CSR";
-    const avatarLabel = isAssistant ? "AI" : "CSR";
+    const streamingIndicator = isStreaming
+      ? `
+        <div class="chat-streaming-indicator" aria-hidden="true">
+          <div class="honeycomb">
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+          </div>
+        </div>
+      `
+      : "";
     const metaParts = [];
 
     if (message.metadata?.response_type) {
@@ -471,12 +552,12 @@ function renderChatHistory() {
       : "";
 
     const body = isAssistant
-      ? `<div class="message-formatted">${formatSlackMessage(message.content || "")}</div>`
+      ? `<div class="message-formatted">${streamingIndicator}${formatSlackMessage(message.content || "")}</div>`
       : escapeHtml(message.content || "");
 
     return `
       <div class="chat-message-row ${roleClass}">
-        <div class="chat-avatar">${avatarLabel}</div>
+        ${isAssistant ? "" : `<div class="chat-avatar">${escapeHtml(roleLabel)}</div>`}
         <div class="chat-message ${roleClass}">
           <div class="chat-message-header">
             <strong>${roleLabel}</strong>
@@ -494,6 +575,7 @@ function renderChatHistory() {
 
 function renderHistoryNav() {
   const entries = Object.values(sessions)
+    .filter((entry) => sessionHasMessages(entry))
     .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
 
   if (!entries.length) {
@@ -504,11 +586,6 @@ function renderHistoryNav() {
   historyNav.innerHTML = entries.map((entry) => {
     const sessionMessages = entry.messages || [];
     const title = entry.title || buildSessionTitle(sessionMessages);
-    const previewSource = entry.preview
-      || sessionMessages.find((message) => message.role === "assistant")?.content
-      || sessionMessages.find((message) => message.role === "user")?.content
-      || "";
-    const preview = String(previewSource).replace(/\s+/g, " ").trim();
     const updated = String(entry.updated_at || "").replace("T", " ").slice(0, 16) || "No activity yet";
     const isActive = entry.thread_id === ensureThreadId();
     const messageCount = Number(entry.message_count || sessionMessages.length || 0);
@@ -531,11 +608,12 @@ function renderHistoryNav() {
             <span class="history-item-marker">${isActive ? "●" : "#"}<\/span>
             <div class="history-item-copy">
               <div class="history-item-topline">
-                ${titleMarkup}
+                <div class="history-item-title-wrap">
+                  ${titleMarkup}
+                </div>
                 <span class="history-item-time">${escapeHtml(updated.slice(5))}</span>
               </div>
-              <p class="history-item-preview">${escapeHtml(preview.slice(0, 72) || "No messages yet.")}</p>
-              <p class="history-item-meta">${messageCount} msg · ${escapeHtml(entry.thread_id.slice(0, 12))}</p>
+              <p class="history-item-meta">${messageCount} msg</p>
             </div>
           </div>
         </button>
@@ -547,7 +625,7 @@ function renderHistoryNav() {
             aria-label="Thread actions"
             title="Thread actions"
           >
-            ...
+            &#8942;
           </button>
           <div class="history-menu" data-menu-for-thread-id="${escapeHtml(entry.thread_id || "")}">
             <button type="button" class="history-menu-item" data-rename-thread-id="${escapeHtml(entry.thread_id || "")}">
@@ -573,12 +651,14 @@ function renderHistoryNav() {
         messages = await loadThreadMessagesFromBackend(nextThreadId);
         loadThreadSession(nextThreadId);
         renderChatHistory();
+        playChatStageTransition();
         renderHistoryNav();
         renderSessionHint();
         resetInspectorPanels("Loaded prior conversation. Submit a new message to continue this thread.");
       } catch (_error) {
         loadThreadSession(nextThreadId);
         renderChatHistory();
+        playChatStageTransition();
         renderHistoryNav();
         renderSessionHint();
         resetInspectorPanels("Loaded prior conversation from local cache.");
@@ -677,23 +757,16 @@ function renderHistoryNav() {
             .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")))
             .map((s) => s.thread_id)[0]
           || createThreadId();
-        if (!sessions[remainingThreadId]) {
-          sessions[remainingThreadId] = {
-            thread_id: remainingThreadId,
-            messages: [],
-            updated_at: new Date().toISOString(),
-            title: "New conversation",
-            message_count: 0,
-            preview: "",
-          };
-          saveStoredSessions();
-        }
         threadId = remainingThreadId;
         window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
-        try {
-          messages = await loadThreadMessagesFromBackend(threadId);
-        } catch (_error) {
-          loadThreadSession(threadId);
+        if (sessions[threadId]) {
+          try {
+            messages = await loadThreadMessagesFromBackend(threadId);
+          } catch (_error) {
+            loadThreadSession(threadId);
+          }
+        } else {
+          messages = [];
         }
         renderChatHistory();
         renderSessionHint();
@@ -778,16 +851,14 @@ function normalizeAssistantMessage(output) {
 
 async function initializeWorkspace() {
   await loadSessionsFromBackend();
-  ensureThreadId();
-  try {
-    messages = await loadThreadMessagesFromBackend(threadId);
-  } catch (_error) {
-    loadThreadSession(threadId);
-  }
+  initializeSidebarState();
+  threadId = createThreadId();
+  window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
+  messages = [];
   renderSessionHint();
   renderChatHistory();
+  playChatStageTransition();
   renderHistoryNav();
-  renderQuestionSamples();
   activateInspectorPanel("docs_panel");
 
   inspectorTabs.forEach((button) => {
@@ -800,10 +871,30 @@ async function initializeWorkspace() {
     if (!event.target.closest(".history-actions")) {
       closeAllHistoryMenus();
     }
+    if (!event.target.closest(".composer-tools-menu")) {
+      setComposerToolsOpen(false);
+    }
   });
 }
 
 initializeWorkspace();
+
+sidebarToggleButton.addEventListener("click", () => {
+  toggleSidebar();
+});
+
+composerToolsTrigger.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const nextOpen = composerToolsTrigger.getAttribute("aria-expanded") !== "true";
+  setComposerToolsOpen(nextOpen);
+});
+
+composerToolsDropdown.querySelectorAll(".composer-tool-item").forEach((button) => {
+  button.addEventListener("click", () => {
+    setComposerToolsOpen(false);
+    sessionHint.textContent = `${button.textContent.trim()} is coming soon.`;
+  });
+});
 
 function renderWorkflow(items, executionPlanPayload = {}) {
   workflow.innerHTML = "";
@@ -1071,7 +1162,8 @@ form.addEventListener("submit", async (event) => {
   }
 
   submitButton.disabled = true;
-  submitButton.textContent = "发送中...";
+  submitButton.classList.add("is-loading");
+  submitButton.setAttribute("aria-busy", "true");
 
   try {
     const userMessage = buildUserMessage(userQuery);
@@ -1082,86 +1174,131 @@ form.addEventListener("submit", async (event) => {
     };
 
     messages = [...messages, userMessage];
+    const placeholderAssistant = {
+      role: "assistant",
+      content: "_(starting…)_",
+      metadata: { response_type: "streaming", streaming: true },
+    };
+    messages = [...messages, placeholderAssistant];
+    const placeholderIndex = messages.length - 1;
     syncCurrentSession();
     renderChatHistory();
     renderHistoryNav();
     trustSummary.innerHTML = '<p class="signal-state">Retrieving similar threads + docs…</p>';
     routingNoteSummary.innerHTML = '<p class="signal-state">Routing in progress…</p>';
+    responseContentBlocks.innerHTML = '<p class="signal-state">Waiting for evidence…</p>';
     userQueryField.value = "";
 
-    const response = await fetch("/email-agent/invoke", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ input: payload }),
-    });
+    const streamState = {
+      trustSignal: null,
+      trustSection: "",
+      panelSectionTexts: [],
+      panelBlocks: [],
+      draftText: "",
+      draftStarted: false,
+      draftDone: false,
+    };
 
-    if (!response.ok) {
-      const message = await response.text();
-      throw new Error(message || "请求失败");
+    const refreshPlaceholder = () => {
+      messages[placeholderIndex] = {
+        ...messages[placeholderIndex],
+        content: composeStreamingMessage(streamState),
+      };
+      renderChatHistory();
+    };
+
+    const handleStreamEvent = ({ name, data }) => {
+      if (name === "trust") {
+        streamState.trustSignal = data;
+        streamState.trustSection = formatStreamingTrustSection(data);
+        renderStreamingTrust(data);
+        refreshPlaceholder();
+      } else if (name === "section") {
+        const block = data;
+        streamState.panelBlocks = [...streamState.panelBlocks, block];
+        if (block.body || block.text) {
+          streamState.panelSectionTexts.push(block.body || block.text);
+        }
+        renderStreamingContentBlocks(streamState.panelBlocks);
+        refreshPlaceholder();
+      } else if (name === "draft_start") {
+        streamState.draftStarted = true;
+        refreshPlaceholder();
+      } else if (name === "draft_chunk") {
+        streamState.draftText += String(data?.text || "");
+        refreshPlaceholder();
+      } else if (name === "draft_end") {
+        streamState.draftText = String(data?.draft || streamState.draftText || "");
+        streamState.draftDone = true;
+        refreshPlaceholder();
+      } else if (name === "done") {
+        const output = data || {};
+        const assistantMessage = normalizeAssistantMessage(output);
+        messages[placeholderIndex] = assistantMessage;
+        syncCurrentSession();
+        renderChatHistory();
+        renderHistoryNav();
+        if (output.agent_input?.thread_id) {
+          threadId = output.agent_input.thread_id;
+          window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
+          renderSessionHint();
+        }
+        executionPlan.textContent = JSON.stringify(output.execution_plan || {}, null, 2);
+        executionRun.textContent = JSON.stringify(output.execution_run || {}, null, 2);
+        answerFocusEl.textContent = output.answer_focus || "";
+        routeResult.textContent = JSON.stringify(output.route || {}, null, 2);
+        parsedResult.textContent = JSON.stringify(output.parsed || {}, null, 2);
+        agentInput.textContent = JSON.stringify(output.agent_input || {}, null, 2);
+        renderTrust(output.execution_run || {});
+        renderRoutingNote(output);
+        renderHistoricalThreads(output.execution_run || {});
+        renderResponseTopic(output);
+        renderResponseContentBlocks(output);
+        renderDocumentResults(output.execution_run || {});
+        renderTechnicalResults(output.execution_run || {});
+        renderWorkflow(output.suggested_workflow || [], output.execution_plan || {});
+      } else if (name === "error") {
+        throw new Error(data?.message || "stream error");
+      }
+    };
+
+    await streamEmailAgent(payload, handleStreamEvent);
+  } catch (error) {
+    // Drop both the user message and the streaming placeholder we appended.
+    if (messages.length && messages[messages.length - 1].role === "assistant" && messages[messages.length - 1].metadata?.streaming) {
+      messages = messages.slice(0, -1);
     }
-
-    const data = await response.json();
-    const output = data.output || {};
-    const assistantMessage = normalizeAssistantMessage(output);
-
-    messages = [...messages, assistantMessage];
+    if (messages.length && messages[messages.length - 1].role === "user") {
+      messages = messages.slice(0, -1);
+    }
     syncCurrentSession();
     renderChatHistory();
     renderHistoryNav();
-    if (output.agent_input?.thread_id) {
-      threadId = output.agent_input.thread_id;
-      window.localStorage.setItem(THREAD_STORAGE_KEY, threadId);
-      renderSessionHint();
-    }
-
-    executionPlan.textContent = JSON.stringify(output.execution_plan || {}, null, 2);
-    executionRun.textContent = JSON.stringify(output.execution_run || {}, null, 2);
-    answerFocusEl.textContent = output.answer_focus || "";
-    routeResult.textContent = JSON.stringify(output.route || {}, null, 2);
-    parsedResult.textContent = JSON.stringify(output.parsed || {}, null, 2);
-    agentInput.textContent = JSON.stringify(output.agent_input || {}, null, 2);
-    renderTrust(output.execution_run || {});
-    renderRoutingNote(output);
-    renderHistoricalThreads(output.execution_run || {});
-    renderResponseTopic(output);
-    renderResponseContentBlocks(output);
-    renderDocumentResults(output.execution_run || {});
-    renderTechnicalResults(output.execution_run || {});
-    renderWorkflow(output.suggested_workflow || [], output.execution_plan || {});
-  } catch (error) {
-    if (messages.length && messages[messages.length - 1].role === "user") {
-      messages = messages.slice(0, -1);
-      syncCurrentSession();
-      renderChatHistory();
-      renderHistoryNav();
-    }
     resetInspectorPanels(error.message);
   } finally {
     submitButton.disabled = false;
-    submitButton.textContent = "发送消息";
+    submitButton.classList.remove("is-loading");
+    submitButton.setAttribute("aria-busy", "false");
   }
 });
 
-clearChatButton.addEventListener("click", () => {
-  messages = [];
-  syncCurrentSession();
-  renderChatHistory();
-  renderHistoryNav();
-  renderSessionHint();
-  resetInspectorPanels();
+document.getElementById("user_query").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey) {
+    return;
+  }
+  event.preventDefault();
+  if (submitButton.disabled) {
+    return;
+  }
+  form.requestSubmit();
 });
 
 newChatButton.addEventListener("click", () => {
   createAndSwitchToNewThread();
   renderChatHistory();
+  playChatStageTransition();
   renderHistoryNav();
   renderSessionHint();
   resetInspectorPanels();
   document.getElementById("user_query").focus();
-});
-
-refreshSamplesButton.addEventListener("click", () => {
-  renderQuestionSamples();
 });

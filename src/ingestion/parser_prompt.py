@@ -518,12 +518,13 @@ Most flags can be inferred from the field name. Pay special attention to:
 - needs_documentation: datasheet, brochure, COA, SDS, manual, technical file.
   NOT when the user is asking how something works ("how does the process work?") — that is needs_protocol.
   NOT when the user asks about price for a document name ("how much for the datasheet?") — that is needs_price.
-- needs_quote / needs_price: quotation, price, cost, budget, how much.
+- needs_quote / needs_price: quotation, price, cost, budget, how much — for PRODUCTS or SERVICES only.
   NOT for technical questions that happen to mention a service name ("how does peptide synthesis work?") — that is needs_protocol.
+  NOT when "how much" / "amount" / "balance" refers to an invoice / PO / order / bill ("how much is invoice 1012?", "what's the balance on PO 234?") — that is needs_invoice (or needs_order_status), with NO needs_price.
 - needs_shipping_info: tracking, delivery, where is my order, shipping method, cold chain, customs, logistics.
   NOT for order status without shipping context ("what is the status of my order?") — that is needs_order_status.
 - needs_order_status: order progress, order status, when will my order be ready.
-- needs_invoice: invoice, PO, billing, payment status.
+- needs_invoice: invoice, PO, billing, payment status, invoice amount / balance / total due.
 - needs_timeline: lead time, ETA, turnaround time, how long does it take.
   NOT for delivery tracking ("where is my shipment?") — that is needs_shipping_info.
 - needs_recommendation: suggest, recommend, which one should I use, best option.
@@ -590,6 +591,35 @@ For retrieval_hints.expanded_queries:
 - **Do not seed expansions from non-technical context**: Do not generate expansions from institution names, geographic locations, sign-offs, or self-introductions. If user says "I'm writing from cancer vaccine science, Poland", do NOT generate "Pricing for cancer vaccine products" — "cancer vaccine science" is an institution name, not a product category.
 - Write in English regardless of user language (the knowledge base is English).
 - Leave expanded_queries as [] only when the message is clearly off-domain (investment partnership, distributor agreement, general shipping question) or too ambiguous to reformulate.
+
+Asked focus guidance (asked_focus):
+The asked_focus field captures the SPECIFIC piece of information the customer wants — not the broad topic, but the exact attribute / fact / action they are asking about. This is the single most important field for keeping the downstream draft on-target.
+
+Write asked_focus as one short sentence (or, for multi-ask messages, a semicolon-separated list of short clauses) naming the concrete information the customer is requesting. The downstream responder will be told to answer ONLY this and to flag missing data rather than substitute adjacent fields.
+
+Rules:
+- Be specific about the attribute, not just the entity. "the timestamp invoice 1002 was emailed to the customer" — NOT "invoice 1002 status".
+- Preserve the exact identifier the customer used (invoice number, catalog number, PO number, service name) so the responder can ground its answer.
+- For multi-ask messages, list each ask as its own clause separated by "; ". "the lead time for stable cell line development; the price for 1 mg scale".
+- For pure greetings / acknowledgements / pure closings with no actionable ASK, leave asked_focus empty (null).
+- Do not include greetings, politeness, or sign-offs. Use canonical biotech terminology when the user used a colloquial phrasing.
+- Write in English regardless of user language (the responder prompt is English).
+
+Examples:
+- User: "Customer is asking when 1002 was sent out — can you confirm?"
+  → asked_focus: "the date/time invoice 1002 was sent out (delivered) to the customer"
+- User: "Status of PO 20240315?"
+  → asked_focus: "the current status of order PO 20240315"
+- User: "What's the price and lead time for custom rabbit polyclonal antibody development?"
+  → asked_focus: "the price for custom rabbit polyclonal antibody development; the lead time for custom rabbit polyclonal antibody development"
+- User: "Do you offer mRNA-LNP delivery?"
+  → asked_focus: "whether ProMab offers mRNA-LNP delivery service"
+- User: "Thanks, that's all for now."
+  → asked_focus: null
+- User: "Could you send the SDS for catalog 20081?"
+  → asked_focus: "the SDS document for catalog product 20081"
+- User: "Customer wants to change the billing entity on INV-1067 from 'Shanghai branch' to 'Beijing HQ' — how do we handle this?"
+  → asked_focus: "how to change the billing entity on invoice INV-1067 from Shanghai branch to Beijing HQ"
 
 Context-dependent follow-up guidance:
 - If the user refers to an object indirectly using phrases like "this antibody", "this service", "that one", "it", "its", "the product", or similar follow-up language, do not guess the missing entity.

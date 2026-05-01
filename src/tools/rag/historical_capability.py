@@ -11,10 +11,9 @@ HISTORICAL_THREAD_CAPABILITY = ToolCapability(
     supported_dialogue_acts=["inquiry", "selection", "follow_up", "closing"],
     supported_modalities=["unstructured_retrieval"],
     supported_request_flags=[
-        "needs_protocol", "needs_troubleshooting", "needs_recommendation",
-        "needs_price", "needs_quote", "needs_timeline",
-        "needs_documentation", "needs_customization", "needs_sample",
-        "needs_comparison", "needs_availability",
+        "needs_quote", "needs_recommendation", "needs_customization",
+        "needs_comparison", "needs_sample",
+        "needs_protocol", "needs_troubleshooting",
     ],
     returns_structured_facts=True,
     returns_unstructured_snippets=True,

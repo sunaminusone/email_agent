@@ -123,35 +123,7 @@ def select_tools(
                     )
                     uncovered_flags -= tool_flags
 
-    # 3. CSR mode invariant: both retrieval tools always run, regardless of
-    #    whether the primary classification "matched" them. Their value is
-    #    complementary: historical_thread_tool surfaces past similar
-    #    inquiries with how sales actually replied; technical_rag_tool
-    #    surfaces relevant KB chunks (service flyers, workflow docs).
-    #    The CSR sees both and decides what to use.
-    #
-    #    These are turn-level invariants — every CSR turn benefits from
-    #    them. The `already_called` set passed by run_executor is seeded
-    #    with cross-group cache hits, so when a prior group already ran
-    #    these for the same object we skip here and avoid duplicate 0ms
-    #    cache-hit entries in this group's executed_calls.
-    CSR_ALWAYS_INCLUDE = ("historical_thread_tool", "technical_rag_tool")
-    for tool_name in CSR_ALWAYS_INCLUDE:
-        if tool_name in selected or tool_name in already_called:
-            continue
-        for cap, score, reasons in scored:
-            if cap.tool_name != tool_name:
-                continue
-            selected[tool_name] = ToolSelection(
-                tool_name=tool_name,
-                match_score=round(max(score, 0.3), 4),
-                match_reasons=[*reasons, "csr_mode_always_include"],
-                role="supporting",
-                can_run_in_parallel=cap.can_run_in_parallel,
-            )
-            break
-
-    # 4. Known-catalog invariant: when the customer pinned the inquiry to a
+    # 3. Known-catalog invariant: when the customer pinned the inquiry to a
     #    real catalog product (registry-resolved catalog_no), always include
     #    catalog_lookup_tool as supporting. The CSR needs structured product
     #    specs to ground the reply, even when the primary demand is technical

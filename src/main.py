@@ -1,14 +1,16 @@
+import json
 import os
 from pathlib import Path
+from typing import Iterator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from langchain_core.runnables import RunnableLambda # 把普通Python函数包装成 LangChain runnable
 from langserve import add_routes # 自动生成 API（不用自己写 /chat）
 
-from src.app.service import run_email_agent
+from src.app.service import run_email_agent, stream_email_agent
 from src.api_models import AgentPrototypeResponse, AgentRequest
 from src.conversations import ConversationStore
 from src.integrations import QuickBooksClient, QuickBooksConfigError
@@ -58,6 +60,34 @@ add_routes(
     email_agent_runnable,
     path="/email-agent",
 )
+
+
+class StreamRequestBody(BaseModel):
+    """Mirror LangServe's ``{input: <payload>}`` envelope so the frontend
+    can use the same payload shape for stream and invoke."""
+    input: AgentRequest
+
+
+@app.post("/email-agent/sse")
+async def email_agent_sse(body: StreamRequestBody) -> StreamingResponse:
+    def event_source() -> Iterator[bytes]:
+        try:
+            for event in stream_email_agent(body.input):
+                name = event.get("event", "message")
+                data = json.dumps(event.get("data", {}), ensure_ascii=False)
+                yield f"event: {name}\ndata: {data}\n\n".encode("utf-8")
+        except Exception as exc:
+            error_payload = json.dumps({"message": str(exc)}, ensure_ascii=False)
+            yield f"event: error\ndata: {error_payload}\n\n".encode("utf-8")
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

@@ -193,6 +193,7 @@ class ParserSignals(_IngestionModel):
     missing_information: list[str] = Field(default_factory=list)
     extra_instructions: str | None = None
     selection_resolution: SelectionResolution | None = None
+    asked_focus: str | None = None
 
 
 class ParserOutput(_IngestionModel):
@@ -206,6 +207,7 @@ class ParserOutput(_IngestionModel):
     missing_information: list[str] = Field(default_factory=list)
     extra_instructions: str | None = None
     selection_resolution: SelectionResolution | None = None
+    asked_focus: str | None = None
 
 
 class DeterministicSignals(_IngestionModel):

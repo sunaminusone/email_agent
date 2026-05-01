@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.responser.csr.draft_llm import generate_draft
+from typing import Any, Iterator
+
+from src.responser.csr.draft_llm import generate_draft, stream_draft
 from src.responser.csr.extractors import (
     collect_calls_by_bucket,
     collect_routing_notes,
@@ -27,12 +29,11 @@ from src.responser.csr.sections import (
 from src.responser.models import ComposedResponse, ContentBlock, ResponseInput, ResponsePlan
 
 
-def render_csr_draft_response(
-    response_input: ResponseInput,
-    response_plan: ResponsePlan,
-) -> ComposedResponse:
+def _gather_inputs(response_input: ResponseInput) -> dict[str, Any]:
+    """One-shot extract: bucket calls, pull every piece of evidence the
+    composer needs, and compute the trust signal. Shared by the streaming
+    and non-streaming entry points so both see identical data."""
     buckets = collect_calls_by_bucket(response_input)
-
     raw_historical_threads = extract_historical_threads(buckets["historical"])
     historical_threads = filter_historical_threads(raw_historical_threads)
     document_matches = extract_technical_doc_matches(buckets["technical_docs"])
@@ -44,7 +45,6 @@ def render_csr_draft_response(
     primary_service_document, primary_service_document_error = resolve_primary_service_document(
         response_input
     )
-
     trust_signal = build_trust_signal(
         raw_historical_threads=raw_historical_threads,
         surfaced_historical_threads=historical_threads,
@@ -53,139 +53,232 @@ def render_csr_draft_response(
         structured_records=structured_records,
         operational_records=operational_records,
     )
+    return {
+        "buckets": buckets,
+        "raw_historical_threads": raw_historical_threads,
+        "historical_threads": historical_threads,
+        "document_matches": document_matches,
+        "document_files": document_files,
+        "structured_records": structured_records,
+        "operational_records": operational_records,
+        "routing_notes": routing_notes,
+        "primary_service_document": primary_service_document,
+        "primary_service_document_error": primary_service_document_error,
+        "trust_signal": trust_signal,
+    }
 
-    draft_text = generate_draft(
-        query=response_input.query,
-        threads=historical_threads,
-        documents=document_matches,
-        structured_records=structured_records,
-        operational_records=operational_records,
-        trust_signal=trust_signal,
-        primary_service_document=primary_service_document,
-    )
 
-    # Each block_type owns one contiguous region: render its section text
-    # and append the matching ContentBlock side-by-side. Blocks above the
-    # next blank line always render; blocks below render only when their
-    # source data is non-empty. The threads/documents pair is asymmetric:
-    # the section is always emitted (formatter prints a "no matches" line),
-    # but the ContentBlock is skipped when the underlying list is empty.
-    sections: list[str] = []
-    content_blocks: list[ContentBlock] = []
-
-    sections.append(format_draft_section(draft_text))
-    content_blocks.append(ContentBlock(
-        block_type="csr_draft",
-        title="Draft reply for CSR",
-        body=draft_text,
-        data={
-            "grounding_status": trust_signal["grounding_status"],
-            "historical_thread_count": len(historical_threads),
-            "document_count": len(document_matches),
-            "structured_record_count": len(structured_records),
-            "operational_record_count": len(operational_records),
-            "routing_note_count": len(routing_notes),
-        },
-    ))
-
-    sections.append(format_trust_section(trust_signal))
-    content_blocks.append(ContentBlock(
-        block_type="trust_signal",
-        title="Grounding and retrieval quality",
-        body=trust_signal["summary"],
-        data=trust_signal,
-    ))
+def _build_panel_section_pairs(inputs: dict[str, Any]) -> list[tuple[str, ContentBlock]]:
+    """Build every non-draft, non-trust panel section in display order. Each
+    pair is (section_text, ContentBlock) — the text goes into the Slack-style
+    message, the block is what the frontend renders. Sections without data
+    are omitted (no placeholder noise)."""
+    pairs: list[tuple[str, ContentBlock]] = []
+    trust_signal = inputs["trust_signal"]
+    structured_records = inputs["structured_records"]
+    historical_threads = inputs["historical_threads"]
+    document_matches = inputs["document_matches"]
+    document_files = inputs["document_files"]
+    primary_service_document = inputs["primary_service_document"]
+    operational_records = inputs["operational_records"]
+    routing_notes = inputs["routing_notes"]
 
     if structured_records:
         section = format_structured_section(structured_records)
-        sections.append(section)
-        content_blocks.append(ContentBlock(
+        pairs.append((section, ContentBlock(
             block_type="structured_facts",
             title="Live catalog / pricing facts",
             body=section,
             data={"records": structured_records},
-        ))
+        )))
 
-    threads_section = format_threads_section(historical_threads, trust_signal=trust_signal)
-    sections.append(threads_section)
     if historical_threads:
-        content_blocks.append(ContentBlock(
+        section = format_threads_section(historical_threads, trust_signal=trust_signal)
+        pairs.append((section, ContentBlock(
             block_type="historical_references",
             title="Similar past inquiries",
-            body=threads_section,
+            body=section,
             data={"threads": historical_threads},
-        ))
+        )))
 
-    documents_section = format_documents_section(document_matches, trust_signal=trust_signal)
-    sections.append(documents_section)
     if document_matches:
-        content_blocks.append(ContentBlock(
+        section = format_documents_section(document_matches, trust_signal=trust_signal)
+        pairs.append((section, ContentBlock(
             block_type="relevant_documents",
             title="Relevant documents",
-            body=documents_section,
+            body=section,
             data={"matches": document_matches},
-        ))
+        )))
 
     if document_files:
         section = format_document_files_section(document_files)
-        sections.append(section)
-        content_blocks.append(ContentBlock(
+        pairs.append((section, ContentBlock(
             block_type="document_files",
             title="Matched document files",
             body=section,
             data={"files": document_files},
-        ))
+        )))
 
     if primary_service_document:
         section = format_service_document_section(primary_service_document)
-        sections.append(section)
-        content_blocks.append(ContentBlock(
+        pairs.append((section, ContentBlock(
             block_type="service_primary_document",
             title="Primary service document",
             body=section,
             data=primary_service_document,
-        ))
+        )))
 
     if operational_records:
         section = format_operational_section(operational_records)
-        sections.append(section)
-        content_blocks.append(ContentBlock(
+        pairs.append((section, ContentBlock(
             block_type="operational_records",
             title="Operational records (QuickBooks)",
             body=section,
             data={"records": operational_records},
-        ))
+        )))
 
     if routing_notes:
         section = format_routing_section(routing_notes)
-        sections.append(section)
-        content_blocks.append(ContentBlock(
+        pairs.append((section, ContentBlock(
             block_type="routing_notes",
             title="AI routing notes",
             body=section,
             data={"notes": routing_notes},
-        ))
+        )))
 
-    message = "\n\n".join(sections)
+    return pairs
+
+
+def _build_debug_info(inputs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "csr_mode": True,
+        "grounding_status": inputs["trust_signal"]["grounding_status"],
+        "historical_threads_returned": len(inputs["historical_threads"]),
+        "historical_threads_raw": len(inputs["raw_historical_threads"]),
+        "document_matches_returned": len(inputs["document_matches"]),
+        "document_files_returned": len(inputs["document_files"]),
+        "primary_service_document_found": bool(inputs["primary_service_document"]),
+        "primary_service_document_error": inputs["primary_service_document_error"],
+        "structured_records_returned": len(inputs["structured_records"]),
+        "operational_records_returned": len(inputs["operational_records"]),
+        "unrouted_tool_calls": [call.tool_name for call in inputs["buckets"]["unknown"]],
+        "retrieval_quality_tier": inputs["trust_signal"]["retrieval_quality_tier"],
+    }
+
+
+def _assemble_composed_response(
+    *,
+    inputs: dict[str, Any],
+    draft_text: str,
+    panel_pairs: list[tuple[str, ContentBlock]],
+) -> ComposedResponse:
+    """Combine draft + trust + panel sections into the canonical response.
+
+    Section ordering: draft first (most important), trust signal second
+    (grounding badge), then panels in evidence order. Every reply needs the
+    draft and grounding badge; everything else is data-gated.
+    """
+    trust_signal = inputs["trust_signal"]
+    sections: list[str] = [
+        format_draft_section(draft_text),
+        format_trust_section(trust_signal),
+    ]
+    content_blocks: list[ContentBlock] = [
+        ContentBlock(
+            block_type="csr_draft",
+            title="Draft reply for CSR",
+            body=draft_text,
+            data={
+                "grounding_status": trust_signal["grounding_status"],
+                "historical_thread_count": len(inputs["historical_threads"]),
+                "document_count": len(inputs["document_matches"]),
+                "structured_record_count": len(inputs["structured_records"]),
+                "operational_record_count": len(inputs["operational_records"]),
+                "routing_note_count": len(inputs["routing_notes"]),
+            },
+        ),
+        ContentBlock(
+            block_type="trust_signal",
+            title="Grounding and retrieval quality",
+            body=trust_signal["summary"],
+            data=trust_signal,
+        ),
+    ]
+    for section_text, block in panel_pairs:
+        sections.append(section_text)
+        content_blocks.append(block)
 
     return ComposedResponse(
-        message=message,
+        message="\n\n".join(sections),
         response_type="csr_draft",
         content_blocks=content_blocks,
-        debug_info={
-            "csr_mode": True,
-            "grounding_status": trust_signal["grounding_status"],
-            "historical_threads_returned": len(historical_threads),
-            "historical_threads_raw": len(raw_historical_threads),
-            "document_matches_returned": len(document_matches),
-            "document_files_returned": len(document_files),
-            "primary_service_document_found": bool(primary_service_document),
-            "primary_service_document_error": primary_service_document_error,
-            "structured_records_returned": len(structured_records),
-            "operational_records_returned": len(operational_records),
-            "unrouted_tool_calls": [
-                call.tool_name for call in buckets["unknown"]
-            ],
-            "retrieval_quality_tier": trust_signal["retrieval_quality_tier"],
-        },
+        debug_info=_build_debug_info(inputs),
     )
+
+
+def render_csr_draft_response(
+    response_input: ResponseInput,
+    response_plan: ResponsePlan,
+) -> ComposedResponse:
+    inputs = _gather_inputs(response_input)
+    draft_text = generate_draft(
+        query=response_input.query,
+        asked_focus=response_input.asked_focus,
+        threads=inputs["historical_threads"],
+        documents=inputs["document_matches"],
+        structured_records=inputs["structured_records"],
+        operational_records=inputs["operational_records"],
+        trust_signal=inputs["trust_signal"],
+        primary_service_document=inputs["primary_service_document"],
+    )
+    panel_pairs = _build_panel_section_pairs(inputs)
+    return _assemble_composed_response(
+        inputs=inputs,
+        draft_text=draft_text,
+        panel_pairs=panel_pairs,
+    )
+
+
+def stream_csr_response(
+    response_input: ResponseInput,
+    response_plan: ResponsePlan,
+) -> Iterator[tuple[str, Any]]:
+    """Yield composer events in display order: trust signal, every populated
+    panel section, draft start/chunks/end, then a final ``composed`` event
+    carrying the fully assembled :class:`ComposedResponse`.
+
+    Event tuples are ``(event_name, payload)``. Panel sections are emitted
+    before draft generation so the UI fills in all the deterministic
+    evidence while the LLM is still working on the reply.
+    """
+    inputs = _gather_inputs(response_input)
+
+    yield "trust", inputs["trust_signal"]
+
+    panel_pairs = _build_panel_section_pairs(inputs)
+    for _section_text, block in panel_pairs:
+        yield "section", block
+
+    yield "draft_start", {}
+    chunks: list[str] = []
+    for chunk in stream_draft(
+        query=response_input.query,
+        asked_focus=response_input.asked_focus,
+        threads=inputs["historical_threads"],
+        documents=inputs["document_matches"],
+        structured_records=inputs["structured_records"],
+        operational_records=inputs["operational_records"],
+        trust_signal=inputs["trust_signal"],
+        primary_service_document=inputs["primary_service_document"],
+    ):
+        chunks.append(chunk)
+        yield "draft_chunk", {"text": chunk}
+    draft_text = "".join(chunks).strip()
+    yield "draft_end", {"draft": draft_text}
+
+    composed = _assemble_composed_response(
+        inputs=inputs,
+        draft_text=draft_text,
+        panel_pairs=panel_pairs,
+    )
+    yield "composed", composed

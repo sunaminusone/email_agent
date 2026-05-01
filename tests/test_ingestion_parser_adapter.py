@@ -83,6 +83,30 @@ def test_adapter_corrects_inaccurate_parser_offsets_against_raw_surface_form():
     assert "Please send datasheet for 20001"[span.start : span.end] == "20001"
 
 
+def test_adapter_passes_through_asked_focus_field():
+    payload = {
+        "asked_focus": "the date/time invoice 1002 was sent out (delivered) to the customer",
+    }
+
+    signals = adapt_parsed_result_to_parser_signals(payload, source_query="when was 1002 sent out")
+
+    assert signals.asked_focus == "the date/time invoice 1002 was sent out (delivered) to the customer"
+
+
+def test_adapter_normalizes_blank_asked_focus_to_none():
+    payload = {"asked_focus": "   "}
+
+    signals = adapt_parsed_result_to_parser_signals(payload, source_query="hi")
+
+    assert signals.asked_focus is None
+
+
+def test_adapter_defaults_missing_asked_focus_to_none():
+    signals = adapt_parsed_result_to_parser_signals({}, source_query="anything")
+
+    assert signals.asked_focus is None
+
+
 def test_preprocess_for_parser_prefers_memory_context_over_direct_anchor_plumbing():
     payload = preprocess_for_parser(
         user_query="The first one sounds right",

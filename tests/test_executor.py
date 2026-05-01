@@ -1128,9 +1128,9 @@ class TestRunExecutor:
     def test_cross_group_cache_dedup_skips_already_called_tools(self) -> None:
         """Group B's executor should skip tools that group A already cached for the same object.
 
-        Without this, every group re-selects CSR_ALWAYS_INCLUDE / known-catalog
-        invariants, the dispatcher hits the cache, and each group accrues a 0ms
-        duplicate ExecutedToolCall — which surfaces as N x duplicate planned_actions.
+        Without this, every group re-selects known-catalog / flag-overlap tools,
+        the dispatcher hits the cache, and each group accrues a 0ms duplicate
+        ExecutedToolCall — which surfaces as N x duplicate planned_actions.
         """
         from src.agent.tool_call_cache import ToolCallCache
         from src.ingestion.models import (
@@ -1189,20 +1189,31 @@ class TestRunExecutor:
             identifier_type="catalog_no",
         )
         bundle = IngestionBundle(
-            turn_core=TurnCore(raw_query="CD3 antibody", normalized_query="CD3 antibody"),
+            turn_core=TurnCore(raw_query="CD3 antibody protocol", normalized_query="CD3 antibody protocol"),
             turn_signals=TurnSignals(
-                parser_signals=ParserSignals(context=ParserContext()),
+                parser_signals=ParserSignals(
+                    context=ParserContext(),
+                    request_flags=ParserRequestFlags(needs_protocol=True),
+                ),
                 deterministic_signals=DeterministicSignals(),
                 reference_signals=ReferenceSignals(),
             ),
         )
         resolved = ResolvedObjectState(primary_object=primary)
         route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+        active_demand = GroupDemand(
+            primary_demand="technical",
+            request_flags=["needs_protocol"],
+        )
 
         cache = ToolCallCache()
 
-        # Group A: dispatches both tools, populating cache
-        result_a = run_executor(bundle, resolved, route, tool_call_cache=cache)
+        # Group A: technical_rag fires via needs_protocol flag overlap;
+        # catalog_lookup fires via known-catalog invariant.
+        result_a = run_executor(
+            bundle, resolved, route,
+            tool_call_cache=cache, active_demand=active_demand,
+        )
         assert result_a.final_status == "ok"
         a_tools = [call.tool_name for call in result_a.executed_calls]
         assert "catalog_lookup_tool" in a_tools
@@ -1210,7 +1221,10 @@ class TestRunExecutor:
 
         # Group B: same object, same selections — but cache should suppress
         # both selections, returning ok with no new calls.
-        result_b = run_executor(bundle, resolved, route, tool_call_cache=cache)
+        result_b = run_executor(
+            bundle, resolved, route,
+            tool_call_cache=cache, active_demand=active_demand,
+        )
         assert result_b.final_status == "ok"
         assert result_b.executed_calls == []
         assert "already executed by a prior" in result_b.reason

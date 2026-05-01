@@ -37,14 +37,6 @@ def format_trust_section(trust_signal: dict[str, Any]) -> str:
 
 def format_threads_section(threads: list[dict[str, Any]], *, trust_signal: dict[str, Any]) -> str:
     lines = ["*📚 Similar past inquiries*"]
-    if not threads:
-        lines.append("   • No strong similar historical replies were retrieved for this draft.")
-        if trust_signal.get("historical_threads_raw", 0):
-            lines.append(
-                f"   • Raw retrieval found {trust_signal['historical_threads_raw']} candidate thread(s), "
-                "but none passed the surfacing threshold."
-            )
-        return "\n".join(lines)
     for i, t in enumerate(threads, 1):
         units = t.get("units") or []
         if not units:
@@ -87,9 +79,6 @@ def format_attachments_line(attachments: list[dict[str, Any]]) -> str:
 
 def format_documents_section(matches: list[dict[str, Any]], *, trust_signal: dict[str, Any]) -> str:
     lines = ["*📄 Relevant documents*"]
-    if not matches:
-        lines.append("   • No relevant documentation chunks were retrieved for this draft.")
-        return "\n".join(lines)
     for i, m in enumerate(matches, 1):
         section = m.get("section_type") or "unknown"
         chunk_label = m.get("chunk_label") or m.get("file_name") or ""
@@ -175,29 +164,137 @@ def format_service_document_section(document: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_OPERATIONAL_FIELD_ORDER: tuple[tuple[str, str], ...] = (
+    ("payment_status", "status"),
+    ("balance", "balance due"),
+    ("total_amt", "total"),
+    ("txn_date", "date"),
+    ("due_date", "due"),
+    ("ship_date", "shipped"),
+    ("billing_email", "billing email"),
+    ("ship_city", "ship to"),
+    ("ship_country", "country"),
+    ("email_status", "email status"),
+    ("print_status", "print status"),
+    ("last_updated_at", "last updated"),
+)
+
+# Internal IDs, the raw QuickBooks payload, and fields already in the header.
+# `days_past_due` is the numeric companion to `payment_status` — already in the header line.
+_OPERATIONAL_HIDDEN_KEYS = frozenset({
+    "raw", "id", "customer_id", "entity", "doc_number", "customer_name", "days_past_due",
+})
+
+_CURRENCY_FIELDS = frozenset({"balance", "total_amt"})
+_DATE_FIELDS = frozenset({"txn_date", "due_date", "ship_date", "last_updated_at"})
+
+
+def _format_currency(value: Any) -> str:
+    try:
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _format_operational_value(field: str, value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if field in _CURRENCY_FIELDS:
+        return _format_currency(value)
+    if field in _DATE_FIELDS:
+        s = str(value)
+        return s[:10] if len(s) >= 10 else s
+    return str(value)
+
+
+def _format_invoice_line_items(raw: Any) -> list[str]:
+    if not isinstance(raw, dict):
+        return []
+    out: list[str] = []
+    for line in raw.get("Line") or []:
+        if not isinstance(line, dict):
+            continue
+        detail_type = line.get("DetailType")
+        amount = line.get("Amount")
+        if detail_type == "SalesItemLineDetail":
+            detail = line.get("SalesItemLineDetail") or {}
+            qty = detail.get("Qty")
+            unit_price = detail.get("UnitPrice")
+            description = line.get("Description") or (detail.get("ItemRef") or {}).get("name") or "item"
+            parts: list[str] = []
+            if qty is not None:
+                parts.append(f"{qty}×")
+            parts.append(str(description))
+            if unit_price is not None:
+                parts.append(f"@ {_format_currency(unit_price)}")
+            if amount is not None:
+                parts.append(f"= {_format_currency(amount)}")
+            out.append("      • " + " ".join(parts))
+        elif detail_type == "DiscountLineDetail":
+            detail = line.get("DiscountLineDetail") or {}
+            pct = detail.get("DiscountPercent")
+            if pct is not None and amount is not None:
+                out.append(f"      • discount: −{pct}% ({_format_currency(amount)})")
+            elif amount is not None:
+                out.append(f"      • discount: −{_format_currency(amount)}")
+        elif detail_type == "SubTotalLineDetail" and amount is not None:
+            out.append(f"      • subtotal: {_format_currency(amount)}")
+    return out
+
+
+_ENTITY_GROUP_LABEL: dict[str, str] = {
+    "Invoice": "Invoices",
+    "SalesReceipt": "Sales receipts",
+    "Customer": "Customer records",
+}
+
+
 def format_operational_section(records: list[dict[str, Any]]) -> str:
     lines = ["*📋 Operational records (QuickBooks)* _(authoritative — order / invoice / shipping)_"]
-    by_source: dict[str, list[dict[str, Any]]] = {}
+    # Group by QuickBooks entity (Invoice / SalesReceipt / Customer) rather
+    # than by source tool: order_lookup_tool / invoice_lookup_tool /
+    # shipping_lookup_tool all hit the same QB SearchTransactions endpoint,
+    # so the same Invoice row can surface from any of them — labelling the
+    # group by tool name is implementation noise. CSR cares which kind of
+    # record it is.
+    by_entity: dict[str, list[dict[str, Any]]] = {}
     for record in records:
-        source = str(record.get("_source_tool") or "unknown_tool")
-        by_source.setdefault(source, []).append(record)
+        entity = str(record.get("entity") or "").strip() or "Other"
+        by_entity.setdefault(entity, []).append(record)
 
-    for source, group in by_source.items():
-        lines.append(f"\n   _from {source}:_")
+    curated = {key for key, _ in _OPERATIONAL_FIELD_ORDER}
+
+    for entity, group in by_entity.items():
+        group_label = _ENTITY_GROUP_LABEL.get(entity, entity)
+        lines.append(f"\n   _{group_label}:_")
         for i, record in enumerate(group, 1):
-            label = (
-                record.get("name")
-                or record.get("display_name")
-                or record.get("order_number")
-                or record.get("invoice_number")
-                or record.get("tracking_number")
-                or f"record {i}"
-            )
-            lines.append(f"   *[{i}]* {label}")
+            entity = str(record.get("entity") or "").strip() or "record"
+            doc_number = record.get("doc_number") or record.get("id") or ""
+            customer = record.get("customer_name") or ""
+            header_parts = [f"*[{i}]* {entity}"]
+            if doc_number:
+                header_parts.append(f"#{doc_number}")
+            if customer:
+                header_parts.append(f"— {customer}")
+            lines.append(f"\n   {' '.join(header_parts)}")
+
+            for key, label in _OPERATIONAL_FIELD_ORDER:
+                formatted = _format_operational_value(key, record.get(key))
+                if formatted:
+                    lines.append(f"      • {label}: `{formatted}`")
+
+            # Surface unexpected fields (so new serializer keys aren't silently dropped),
+            # but skip hidden internal keys and anything we already rendered above.
             for key, value in record.items():
-                if key.startswith("_"):
+                if key in curated or key in _OPERATIONAL_HIDDEN_KEYS or key.startswith("_"):
                     continue
                 if value in (None, "", [], {}):
                     continue
                 lines.append(f"      • {key}: `{value}`")
+
+            if entity in {"Invoice", "SalesReceipt"}:
+                item_lines = _format_invoice_line_items(record.get("raw"))
+                if item_lines:
+                    lines.append("      _line items:_")
+                    lines.extend(item_lines)
     return "\n".join(lines)

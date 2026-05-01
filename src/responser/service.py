@@ -27,6 +27,23 @@ def compose_response(response_input: ResponseInput) -> tuple[ComposedResponse, R
 
 def build_response_bundle(response_input: ResponseInput) -> ResponseBundle:
     response_plan, content_blocks, composed_response = _build_response_artifacts(response_input)
+    return assemble_response_bundle(
+        composed_response=composed_response,
+        response_plan=response_plan,
+        content_blocks=content_blocks,
+    )
+
+
+def assemble_response_bundle(
+    *,
+    composed_response: ComposedResponse,
+    response_plan: ResponsePlan,
+    content_blocks: list[ContentBlock],
+) -> ResponseBundle:
+    """Assemble the final bundle from an already-rendered composed response.
+    Streaming callers render via ``stream_csr_response`` and then call this
+    to get topic / summary / path metadata without re-running the LLM."""
+    composed_response.debug_info.setdefault("response_path", "csr_renderer_direct")
     response_path = str(composed_response.debug_info.get("response_path", "csr_renderer_direct"))
 
     # Topic derivation: answer_focus already encodes both control topics

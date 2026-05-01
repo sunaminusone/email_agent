@@ -402,7 +402,15 @@ def adapt_parsed_result_to_parser_signals(
         missing_information=list(payload.get("missing_information", []) or []),
         extra_instructions=payload.get("extra_instructions"),
         selection_resolution=_map_selection_resolution(payload),
+        asked_focus=_normalize_asked_focus(payload.get("asked_focus")),
     )
+
+
+def _normalize_asked_focus(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def build_parser_signals(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from src.common.execution_models import ExecutedToolCall
@@ -98,8 +99,78 @@ def extract_operational_records(calls: list[ExecutedToolCall]) -> list[dict[str,
                 continue
             annotated = dict(record)
             annotated["_source_tool"] = call.tool_name
+            _derive_payment_status(annotated)
             out.append(annotated)
     return out[:8]
+
+
+def _derive_payment_status(record: dict[str, Any]) -> None:
+    """Add `payment_status` / `days_past_due` to QuickBooks Invoice records.
+
+    QBO's REST API does not return Open/Partial/Overdue/Paid — the QBO web
+    UI derives it from Balance vs TotalAmt vs DueDate. We replicate that
+    derivation so the CSR (and the drafter) don't have to do date+amount
+    arithmetic in their head. SalesReceipts are paid at point of sale, so
+    we skip them.
+
+    Output mirrors QBO's badge: paid / partial / partial — overdue (N days) /
+    overdue (N days) / due today / open · due in N days, optionally suffixed
+    with "(not sent)" when EmailStatus == NeedToSend.
+    """
+    if (record.get("entity") or "") != "Invoice":
+        return
+
+    balance = _coerce_float(record.get("balance"))
+    total = _coerce_float(record.get("total_amt"))
+    if balance is None:
+        return
+
+    if balance <= 0:
+        record["payment_status"] = _append_send_suffix("paid", record)
+        return
+
+    due_date_str = str(record.get("due_date") or "").strip()
+    due: date | None = None
+    if due_date_str:
+        try:
+            due = date.fromisoformat(due_date_str[:10])
+        except ValueError:
+            due = None
+
+    is_partial = total is not None and 0 < balance < total
+    delta_days = (date.today() - due).days if due is not None else None
+
+    if delta_days is not None and delta_days > 0:
+        suffix = "s" if delta_days != 1 else ""
+        prefix = "partial — overdue" if is_partial else "overdue"
+        base = f"{prefix} ({delta_days} day{suffix})"
+        record["days_past_due"] = delta_days
+    elif delta_days == 0:
+        base = "partial — due today" if is_partial else "due today"
+    elif delta_days is not None:
+        remaining = -delta_days
+        suffix = "s" if remaining != 1 else ""
+        prefix = "partial" if is_partial else "open"
+        base = f"{prefix} · due in {remaining} day{suffix}"
+    else:
+        base = "partial" if is_partial else "open"
+
+    record["payment_status"] = _append_send_suffix(base, record)
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _append_send_suffix(status: str, record: dict[str, Any]) -> str:
+    if str(record.get("email_status") or "") == "NeedToSend":
+        return f"{status} (not sent)"
+    return status
 
 
 def collect_routing_notes(response_input: ResponseInput) -> list[str]:
