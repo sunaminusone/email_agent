@@ -139,3 +139,61 @@ def test_documentation_tool_returns_ok_when_urls_work():
     assert len(result.primary_records) >= 1
     assert result.errors == []
     assert result.structured_facts["url_failures"] == []
+
+
+# ---------------------------------------------------------------------------
+# document_catalog_inventory: PG failures must propagate, not silently empty
+# ---------------------------------------------------------------------------
+
+def test_documentation_tool_surfaces_inventory_pg_failure_as_error():
+    """Previously document_catalog_inventory returned [] on any PG exception
+    and the lru_cache would freeze the empty result for the rest of the
+    process. The CSR saw 'no documents' instead of 'PG is down'. Now the
+    exception propagates to the tool wrapper, which already surfaces the
+    underlying error text via error_result."""
+    def boom(**kwargs):
+        raise ConnectionError("PG connect timeout: server unreachable")
+
+    with patch("src.documents.service.run_document_selection", boom):
+        request = ToolRequest(
+            tool_name="document_lookup_tool",
+            query="anti cd3 datasheet",
+        )
+        result = execute_document_lookup(request)
+
+    assert result.status == "error"
+    assert any("PG connect timeout" in err for err in result.errors)
+
+
+def test_document_catalog_inventory_does_not_cache_failures():
+    """When the PG query raises, lru_cache should not store the failure
+    so a subsequent call (after PG recovers) tries again."""
+    from src.documents.retrieval.shared import document_catalog_inventory
+
+    document_catalog_inventory.cache_clear()
+
+    call_count = {"n": 0}
+
+    def fake_psycopg_connect(*args, **kwargs):
+        call_count["n"] += 1
+        raise ConnectionError("transient PG outage")
+
+    helpers = {
+        "infer_document_type": lambda x: "datasheet",
+        "normalize_text": lambda x: str(x).lower(),
+        "tokenize": lambda x: str(x).lower().split(),
+        "normalize_business_line": lambda x: str(x).lower(),
+    }
+
+    with patch("src.documents.retrieval.shared.psycopg.connect", fake_psycopg_connect):
+        try:
+            document_catalog_inventory(**helpers)
+        except ConnectionError:
+            pass
+        try:
+            document_catalog_inventory(**helpers)
+        except ConnectionError:
+            pass
+
+    document_catalog_inventory.cache_clear()
+    assert call_count["n"] == 2  # both calls hit PG, no cached empty result

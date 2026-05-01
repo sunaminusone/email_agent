@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from functools import lru_cache
 from typing import Any
 
@@ -16,9 +15,6 @@ try:
 except ImportError:  # pragma: no cover - psycopg is required at runtime
     psycopg = None
     dict_row = None
-
-
-logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -53,14 +49,16 @@ def document_catalog_inventory(
         WHERE sd.is_active = TRUE
     """
 
-    try:
-        with psycopg.connect(build_connection_string()) as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(sql)
-                rows = cur.fetchall()
-    except Exception as exc:
-        logger.warning("document_catalog_inventory PG query failed: %s", exc)
-        return []
+    # No try/except: let PG exceptions propagate so documentation_tool
+    # surfaces them as ToolResult.status="error" with the underlying
+    # error text. Catching here previously masked connection failures
+    # as "no documents in inventory", and the lru_cache would freeze the
+    # empty result for the rest of the process lifetime. Propagating
+    # also means lru_cache won't cache the failure — next call retries.
+    with psycopg.connect(build_connection_string()) as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
 
     inventory: list[dict[str, Any]] = []
     for row in rows:
