@@ -2,21 +2,36 @@ from __future__ import annotations
 
 from typing import Any
 
-_STRUCTURED_DISPLAY_FIELDS = (
-    "catalog_no",
-    "name",
-    "display_name",
-    "price",
-    "price_text",
-    "currency",
-    "lead_time_text",
-    "format",
-    "unit",
-    "business_line",
-    "target_antigen",
-    "species_reactivity_text",
-    "application_text",
+_STRUCTURED_FIELD_ORDER: tuple[tuple[str, str], ...] = (
+    ("catalog_no", "catalog #"),
+    ("price", "price"),
+    ("currency", "currency"),
+    ("lead_time_text", "lead time"),
+    ("business_line", "business line"),
+    ("record_type", "record type"),
+    ("product_type", "product type"),
+    ("target_antigen", "target antigen"),
+    ("application_text", "applications"),
+    ("species_reactivity_text", "species reactivity"),
+    ("construct", "construct"),
+    ("format", "format"),
+    ("unit", "unit"),
+    ("also_known_as", "also known as"),
 )
+
+# `name` / `display_name` already in the header line; `price_text` is the
+# string form of `price` and would just duplicate; `id` and the matcher
+# debug fields (score / match_rank / matched_field / matched_value) are
+# implementation noise CSR doesn't need.
+_STRUCTURED_HIDDEN_KEYS = frozenset({
+    "name", "display_name", "price_text", "id", "raw",
+    "score", "match_rank", "matched_field", "matched_value",
+})
+
+_STRUCTURED_GROUP_LABEL: dict[str, str] = {
+    "pricing_lookup_tool": "Pricing lookup matches",
+    "catalog_lookup_tool": "Catalog lookup matches",
+}
 
 
 def format_draft_section(draft: str) -> str:
@@ -104,8 +119,11 @@ def format_structured_section(records: list[dict[str, Any]]) -> str:
         source = str(record.get("_source_tool") or "unknown_tool")
         by_source.setdefault(source, []).append(record)
 
+    curated = {key for key, _ in _STRUCTURED_FIELD_ORDER}
+
     for source, group in by_source.items():
-        lines.append(f"\n   _from {source}:_")
+        group_label = _STRUCTURED_GROUP_LABEL.get(source, source)
+        lines.append(f"\n   _{group_label}:_")
         for i, record in enumerate(group, 1):
             label = (
                 record.get("display_name")
@@ -114,13 +132,22 @@ def format_structured_section(records: list[dict[str, Any]]) -> str:
                 or f"record {i}"
             )
             lines.append(f"\n   *[{i}]* {label}")
-            for field in _STRUCTURED_DISPLAY_FIELDS:
-                if field in {"display_name", "name"}:
-                    continue
-                value = record.get(field)
+
+            for key, label_text in _STRUCTURED_FIELD_ORDER:
+                value = record.get(key)
                 if value in (None, "", []):
                     continue
-                lines.append(f"      • {field}: `{value}`")
+                lines.append(f"      • {label_text}: `{value}`")
+
+            # Surface unexpected fields (so new serializer keys aren't silently
+            # dropped), but skip hidden internal keys and anything we already
+            # rendered above. Mirrors the operational-records pattern.
+            for key, value in record.items():
+                if key in curated or key in _STRUCTURED_HIDDEN_KEYS or key.startswith("_"):
+                    continue
+                if value in (None, "", [], {}):
+                    continue
+                lines.append(f"      • {key}: `{value}`")
     return "\n".join(lines)
 
 

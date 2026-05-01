@@ -760,6 +760,47 @@ def test_csr_draft_marks_missing_price_explicitly_for_llm() -> None:
     assert "lead_time_text: (not on file)" in capturing.last_human
 
 
+def test_format_structured_section_renders_full_table_for_csr() -> None:
+    """The catalog/pricing panel must mirror the QB operational pattern:
+    friendly group label, friendly field labels, the "(not on file)"
+    sentinel for missing answerable fields, and a fallback row for any
+    serializer key we haven't curated yet (so new fields aren't silently
+    dropped)."""
+    from src.responser.csr.sections import format_structured_section
+
+    rendered = format_structured_section([
+        {
+            "_source_tool": "catalog_lookup_tool",
+            "id": "abc-123",
+            "catalog_no": "20001",
+            "name": "Mouse Monoclonal antibody to Nucleophosmin",
+            "display_name": "Mouse Monoclonal antibody to Nucleophosmin",
+            "price": "(not on file)",
+            "currency": "USD",
+            "lead_time_text": "(not on file)",
+            "business_line": "Antibody",
+            "target_antigen": "NPM1",
+            "application_text": "ELISA, WB+, IHC+",
+            "score": 0.95,
+            "match_rank": 1,
+            "future_serializer_key": "surfaced",
+        },
+    ])
+
+    assert "_Catalog lookup matches:_" in rendered
+    assert "*[1]* Mouse Monoclonal antibody to Nucleophosmin" in rendered
+    assert "• catalog #: `20001`" in rendered
+    assert "• price: `(not on file)`" in rendered
+    assert "• lead time: `(not on file)`" in rendered
+    assert "• applications: `ELISA, WB+, IHC+`" in rendered
+    # Unknown serializer keys are surfaced rather than silently dropped.
+    assert "• future_serializer_key: `surfaced`" in rendered
+    # Internal/debug fields are hidden.
+    assert "score" not in rendered
+    assert "match_rank" not in rendered
+    assert "abc-123" not in rendered
+
+
 # ---------------------------------------------------------------------------
 # asked_focus consumption — parser-identified focus must reach draft_llm
 # ---------------------------------------------------------------------------
