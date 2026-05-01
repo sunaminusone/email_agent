@@ -93,7 +93,7 @@ def test_lookup_flyer_pricing_filters_non_pricing_chunks_and_caps_top_k():
 
     class _FakeStore:
         def similarity_search_with_score(self, query, k):
-            assert k == 10  # default candidate_pool
+            assert k == 25  # default candidate_pool
             return [
                 (technical_chunk, 0.9),
                 (pricing_chunk, 0.8),

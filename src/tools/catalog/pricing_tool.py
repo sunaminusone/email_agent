@@ -14,9 +14,13 @@ def execute_pricing_lookup_tool(request: ToolRequest) -> ToolResult:
     matches = output.get("matches", [])
     match_status = output.get("match_status")
 
-    pricing_records = [_pricing_record(match) for match in matches]
+    pg_records = [_pricing_record(match) for match in matches]
     flyer_records = lookup_flyer_pricing(query=request.query, top_k=3)
-    pricing_records.extend(flyer_records)
+    # Flyer records first because the downstream `extract_structured_records`
+    # caps at 8 records (to keep prompt size bounded). PG can easily return
+    # 10+ loose SKU matches for a service-level query, which would otherwise
+    # push the small, high-signal flyer hits past the cap.
+    pricing_records = flyer_records + pg_records
 
     facts = {
         "query": request.query,

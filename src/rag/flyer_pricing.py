@@ -89,7 +89,7 @@ def lookup_flyer_pricing(
     *,
     query: str,
     top_k: int = 3,
-    candidate_pool: int = 10,
+    candidate_pool: int = 25,
 ) -> list[dict[str, Any]]:
     """Embed-search the service-page Chroma store and return up to ``top_k``
     pricing-bearing chunks as flat record dicts.
@@ -101,9 +101,14 @@ def lookup_flyer_pricing(
     the full retrieval pipeline (which is tuned for technical-doc reranking
     with query rewrite / business-line boost / etc.).
 
-    We over-fetch ``candidate_pool`` then filter so we can still return
-    up to ``top_k`` actual pricing chunks when the top similarity hits
-    happen to be non-pricing sections of the same service page.
+    We over-fetch ``candidate_pool`` and filter so we can still return up
+    to ``top_k`` actual pricing chunks when the top similarity hits happen
+    to be non-pricing sections of the same service page. Default 25
+    rather than ~10 because pricing chunks are number-dense and tend to
+    rank below conversational service-overview chunks for natural
+    "how much does X cost" queries — we observed the first pricing
+    chunk for "How much does custom CAR-T development cost?" landing at
+    rank 11 of 20 against service_plan / workflow_step neighbours.
     """
     if not query.strip():
         return []
