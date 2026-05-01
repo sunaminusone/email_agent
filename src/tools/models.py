@@ -94,4 +94,3 @@ class ToolCapability(_ToolModel):
     can_run_in_parallel: bool = False
     returns_structured_facts: bool = False
     returns_unstructured_snippets: bool = False
-    requires_external_system: bool = False

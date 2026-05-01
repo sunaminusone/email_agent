@@ -15,7 +15,6 @@ CUSTOMER_LOOKUP_CAPABILITY = ToolCapability(
     degraded_identifiers=[],
     provides_params=["customer_name", "customer_identifier", "email"],
     returns_structured_facts=True,
-    requires_external_system=True,
 )
 
 
@@ -31,7 +30,6 @@ INVOICE_LOOKUP_CAPABILITY = ToolCapability(
     degraded_identifiers=["order_number", "customer_name"],
     provides_params=["invoice_number", "order_number", "customer_name"],
     returns_structured_facts=True,
-    requires_external_system=True,
 )
 
 
@@ -47,7 +45,6 @@ ORDER_LOOKUP_CAPABILITY = ToolCapability(
     degraded_identifiers=["customer_name", "customer_identifier"],
     provides_params=["order_number", "customer_name", "invoice_number"],
     returns_structured_facts=True,
-    requires_external_system=True,
 )
 
 
@@ -64,5 +61,4 @@ SHIPPING_LOOKUP_CAPABILITY = ToolCapability(
     provides_params=["tracking_number", "order_number", "customer_name"],
     can_run_in_parallel=True,
     returns_structured_facts=True,
-    requires_external_system=True,
 )
