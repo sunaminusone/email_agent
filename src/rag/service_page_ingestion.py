@@ -64,6 +64,7 @@ _METADATA_FIELDS: Set[str] = {
     "unit",
     "unit_price_usd",
     "setup_fee_usd",
+    "total_price_usd",
     "stage_type",
 }
 EXPLICIT_SUBCHUNK_SECTION_TYPES = {"plan_summary", "service_phase", "workflow_step"}
@@ -278,6 +279,7 @@ def _base_section_metadata(document_fields: Dict[str, str], section_fields: Dict
         "unit",
         "unit_price_usd",
         "setup_fee_usd",
+        "total_price_usd",
         "stage_type",
     ):
         if section_fields.get(key):

@@ -41,6 +41,20 @@ Rules:
   EXACTLY as given — do NOT round, paraphrase, or pull these numbers from
   past sales emails (which may be outdated). If past sales emails contradict
   the live data, trust the live data and ignore the email's number.
+- Service-flyer pricing semantics (records sourced from service flyers):
+  * If a record has `plan_total_price` set, that IS the bundled plan
+    total — cite it directly when the customer asks about plan cost.
+  * Otherwise, a flyer pricing record represents a SINGLE PHASE of a
+    multi-phase plan (look for `plan_name` and `phase_name`). Its
+    `price` is the phase price, not the plan total.
+  * `optional: yes` means that phase is not always included — its
+    price only applies if the customer chooses to include it.
+  * Do NOT sum phase prices into an implied "plan total" yourself.
+    Either cite `plan_total_price` directly, or — if no record has it
+    — say plan-level total isn't in the data and list phase prices
+    with their plan/phase context (e.g. "Plan A · Phase III: $7,350 —
+    vector construction"), noting that the full quote depends on
+    selected phases.
 - OPERATIONAL RECORDS (orders / invoices / shipping) are also authoritative —
   cite order numbers, statuses, and tracking IDs exactly as given.
 - QuickBooks field semantics (don't mistranslate these):

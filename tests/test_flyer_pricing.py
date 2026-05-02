@@ -53,11 +53,16 @@ def test_build_flyer_pricing_record_normalizes_metadata_into_panel_shape():
             # suggest. The flyer record prefers the readable form.
             "service_line": "CAR-T/CAR-NK Development",
             "business_line": "car_t_car_nk",
-            "section_type": "pricing_overview",
-            "section_title": "Pricing - Plan A",
-            "price_usd": "50000",
-            "price_usd_min": "45000",
-            "price_usd_max": "55000",
+            "section_type": "service_phase",
+            "section_title": "Plan A - Phase III",
+            "plan_name": "Plan A",
+            "phase_name": "Phase III",
+            "phase_role": "main_phase",
+            "optional": "no",
+            "duration_weeks": 4,
+            "price_usd": "7000",
+            "price_usd_min": "6500",
+            "price_usd_max": "7500",
             "pricing_tier": "Standard",
             "unit": "per sample",
             "unit_price_usd": "500",
@@ -71,16 +76,21 @@ def test_build_flyer_pricing_record_normalizes_metadata_into_panel_shape():
     assert record["_subsource"] == "service_flyer"
     assert record["service_name"] == "Custom CAR-T Development"
     assert record["business_line"] == "CAR-T/CAR-NK Development"
-    assert record["price"] == 50000
-    assert record["price_min"] == 45000
-    assert record["price_max"] == 55000
+    assert record["plan_name"] == "Plan A"
+    assert record["phase_name"] == "Phase III"
+    assert record["phase_role"] == "main_phase"
+    assert record["optional"] == "no"
+    assert record["duration_weeks"] == 4
+    assert record["price"] == 7000
+    assert record["price_min"] == 6500
+    assert record["price_max"] == 7500
     assert record["currency"] == "USD"
     assert record["pricing_tier"] == "Standard"
     assert record["unit"] == "per sample"
     assert record["unit_price"] == 500
     assert record["setup_fee"] == 2000
     assert record["price_note"] == "Volume discounts available"
-    assert record["source_section"] == "Pricing - Plan A"
+    assert record["source_section"] == "Plan A - Phase III"
     # Excerpt is truncated for panel readability.
     assert len(record["source_excerpt"]) <= 240
 

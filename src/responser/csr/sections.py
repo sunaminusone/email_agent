@@ -4,6 +4,12 @@ from typing import Any
 
 _STRUCTURED_FIELD_ORDER: tuple[tuple[str, str], ...] = (
     ("catalog_no", "catalog #"),
+    ("plan_name", "plan"),
+    ("phase_name", "phase"),
+    ("phase_role", "phase role"),
+    ("optional", "optional?"),
+    ("duration_weeks", "duration (weeks)"),
+    ("plan_total_price", "plan total"),
     ("price", "price"),
     ("price_min", "price (min)"),
     ("price_max", "price (max)"),

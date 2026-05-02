@@ -14,6 +14,7 @@ _PRICING_METADATA_KEYS: tuple[str, ...] = (
     "unit",
     "unit_price_usd",
     "setup_fee_usd",
+    "total_price_usd",
     "price_note",
 )
 _PRICE_MAGNITUDE_KEYS: tuple[str, ...] = (
@@ -22,6 +23,7 @@ _PRICE_MAGNITUDE_KEYS: tuple[str, ...] = (
     "price_usd_max",
     "unit_price_usd",
     "setup_fee_usd",
+    "total_price_usd",
 )
 _EXCERPT_LENGTH = 240
 
@@ -68,6 +70,17 @@ def _build_flyer_pricing_record(chunk: Document) -> dict[str, Any]:
             or metadata.get("business_line")
             or ""
         ),
+        # Plan / phase context: many service flyers price each PHASE of a
+        # multi-phase plan separately. Without surfacing plan_name /
+        # phase_name / optional, the LLM cannot tell that two records are
+        # different phases of the same plan rather than competing options,
+        # and may incorrectly sum or misrepresent them.
+        "plan_name": metadata.get("plan_name") or "",
+        "phase_name": metadata.get("phase_name") or "",
+        "phase_role": metadata.get("phase_role") or "",
+        "optional": metadata.get("optional") or "",
+        "duration_weeks": metadata.get("duration_weeks") or "",
+        "plan_total_price": _coerce_price(metadata.get("total_price_usd")),
         "price": _coerce_price(metadata.get("price_usd")),
         "price_min": _coerce_price(metadata.get("price_usd_min")),
         "price_max": _coerce_price(metadata.get("price_usd_max")),
