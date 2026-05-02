@@ -1057,10 +1057,10 @@ button {
 }
 
 .chat-streaming-indicator {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
   margin-right: 8px;
   vertical-align: text-top;
 }
@@ -1353,11 +1353,40 @@ button {
 }
 
 .chat-message-assistant .message-formatted {
-  display: flow-root;
+  min-width: 0;
 }
 
-.chat-message-assistant .chat-streaming-indicator {
-  float: left;
+.chat-streaming-shell {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.chat-streaming-label {
+  display: inline-flex;
+  align-items: baseline;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.chat-streaming-dots {
+  display: inline-block;
+  min-width: 12px;
+  animation: streaming-dots-blink 1.1s ease-in-out infinite;
+}
+
+@keyframes streaming-dots-blink {
+  0%,
+  20%,
+  100% {
+    opacity: 0.28;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 .chat-meta {

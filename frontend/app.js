@@ -251,8 +251,10 @@ function composeStreamingMessage(state) {
   const parts = [];
   const draftBody = state.draftDone
     ? (state.draftText || "_(empty draft — see references below)_")
-    : (state.draftText || "_(streaming…)_");
-  parts.push(`*📝 Draft reply* _(CSR: please review & edit before sending)_\n\n${draftBody}`);
+    : (state.draftText || "");
+  if (draftBody) {
+    parts.push(`*📝 Draft reply* _(CSR: please review & edit before sending)_\n\n${draftBody}`);
+  }
   if (state.trustSection) {
     parts.push(state.trustSection);
   }
@@ -433,6 +435,26 @@ function buildSessionTitle(sessionMessages) {
   return preview.length > 56 ? `${preview.slice(0, 56)}...` : preview;
 }
 
+function formatSessionTimestamp(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "No activity yet";
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return raw.replace("T", " ").slice(5, 16) || "No activity yet";
+  }
+
+  return parsed.toLocaleString([], {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).replace(",", "");
+}
+
 function ensureSessionRecord(id) {
   if (!id) {
     return;
@@ -522,6 +544,7 @@ function renderChatHistory(options = {}) {
     const roleClass = isAssistant ? "chat-message-assistant" : "chat-message-user";
     const roleLabel = isAssistant ? "Assistant" : "CSR";
     const plainContent = String(message.content || "");
+    const streamingLabel = String(message.metadata?.streaming_label || "");
     const normalizedUserLength = plainContent.replace(/\s+/g, " ").trim().length;
     let userBubbleSizeClass = "";
     if (!isAssistant) {
@@ -535,7 +558,7 @@ function renderChatHistory(options = {}) {
     }
     const streamingIndicator = isStreaming
       ? `
-        <div class="chat-streaming-indicator" aria-hidden="true">
+        <div class="chat-streaming-indicator">
           <div class="honeycomb">
             <div></div>
             <div></div>
@@ -545,6 +568,11 @@ function renderChatHistory(options = {}) {
             <div></div>
             <div></div>
           </div>
+          ${streamingLabel ? `
+            <span class="chat-streaming-label">
+              ${escapeHtml(streamingLabel)}<span class="chat-streaming-dots" aria-hidden="true">...</span>
+            </span>
+          ` : ""}
         </div>
       `
       : "";
@@ -570,7 +598,12 @@ function renderChatHistory(options = {}) {
       : "";
 
     const body = isAssistant
-      ? `<div class="message-formatted">${streamingIndicator}${formatSlackMessage(message.content || "")}</div>`
+      ? `
+        <div class="${isStreaming ? "chat-streaming-shell" : ""}">
+          ${streamingIndicator}
+          <div class="message-formatted">${formatSlackMessage(message.content || "")}</div>
+        </div>
+      `
       : escapeHtml(message.content || "");
 
     return `
@@ -618,7 +651,7 @@ function renderHistoryNav() {
   historyNav.innerHTML = entries.map((entry) => {
     const sessionMessages = entry.messages || [];
     const title = entry.title || buildSessionTitle(sessionMessages);
-    const updated = String(entry.updated_at || "").replace("T", " ").slice(0, 16) || "No activity yet";
+    const updated = formatSessionTimestamp(entry.updated_at);
     const isActive = entry.thread_id === ensureThreadId();
     const messageCount = Number(entry.message_count || sessionMessages.length || 0);
     const isEditing = entry.thread_id === editingThreadId;
@@ -643,7 +676,7 @@ function renderHistoryNav() {
                 <div class="history-item-title-wrap">
                   ${titleMarkup}
                 </div>
-                <span class="history-item-time">${escapeHtml(updated.slice(5))}</span>
+                <span class="history-item-time">${escapeHtml(updated)}</span>
               </div>
               <p class="history-item-meta">${messageCount} msg</p>
             </div>
@@ -1208,8 +1241,8 @@ form.addEventListener("submit", async (event) => {
     messages = [...messages, userMessage];
     const placeholderAssistant = {
       role: "assistant",
-      content: "_(starting…)_",
-      metadata: { response_type: "streaming", streaming: true },
+      content: "",
+      metadata: { response_type: "streaming", streaming: true, streaming_label: "thinking" },
     };
     messages = [...messages, placeholderAssistant];
     const placeholderIndex = messages.length - 1;
@@ -1235,6 +1268,11 @@ form.addEventListener("submit", async (event) => {
       messages[placeholderIndex] = {
         ...messages[placeholderIndex],
         content: composeStreamingMessage(streamState),
+        metadata: {
+          ...(messages[placeholderIndex].metadata || {}),
+          streaming: true,
+          streaming_label: "thinking",
+        },
       };
       renderChatHistory();
     };
