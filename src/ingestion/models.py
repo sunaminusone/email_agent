@@ -228,6 +228,19 @@ class ReferenceSignals(_IngestionModel):
     attribute_constraints: list[AttributeConstraint] = Field(default_factory=list)
     requires_active_context_for_safe_resolution: bool = False
 
+    @property
+    def has_reference_intent(self) -> bool:
+        """True when the turn carries any signal that the customer is
+        referring back to prior context (pronoun / explicit reference /
+        attribute-only continuation). Single source of truth so adding
+        a new reference signal field lands in one place instead of
+        having to update every consumer that ORs the same trio."""
+        return (
+            self.is_context_dependent
+            or self.reference_mode != "none"
+            or self.requires_active_context_for_safe_resolution
+        )
+
 
 class AttachmentPointer(_IngestionModel):
     file_name: str = ""

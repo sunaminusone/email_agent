@@ -24,9 +24,7 @@ def extract_context_candidates(
     ambiguous_sets: list[AmbiguousObjectSet] = []
 
     should_reuse_context = (
-        reference_signals.is_context_dependent
-        or reference_signals.requires_active_context_for_safe_resolution
-        or reference_signals.reference_mode != "none"
+        reference_signals.has_reference_intent
         or bool(clarification_memory.pending_clarification_type)
     )
 

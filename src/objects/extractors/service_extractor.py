@@ -49,10 +49,7 @@ def _extract_service_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
                     "document_summary": match.get("document_summary", ""),
                     "source_url": match.get("source_url", ""),
                     "source_path": match.get("source_path", ""),
-                    "source_file": match.get("source_file", ""),
-                    "matched_alias": span.text,
                     "matched_alias_kinds": alias_kinds,
-                    "alias_match_count": len(alias_matches),
                 },
             )
         ], []
@@ -73,14 +70,11 @@ def _extract_service_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
                 evidence_spans=[span],
                 metadata={
                     "aliases": match.get("aliases", []),
-                    "match_strategy": "ambiguous_service_alias",
                     "service_line": match.get("service_line", ""),
                     "subcategory": match.get("subcategory", ""),
                     "source_url": match.get("source_url", ""),
                     "source_path": match.get("source_path", ""),
-                    "matched_alias": span.text,
                     "matched_alias_kinds": alias_kinds,
-                    "alias_match_count": len(alias_matches),
                 },
                 is_ambiguous=True,
             )
@@ -108,6 +102,5 @@ def _extract_service_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
             recency="CURRENT_TURN",
             source_type="parser",
             evidence_spans=[span],
-            metadata={"match_strategy": "unresolved_service_name"},
         )
     ], []

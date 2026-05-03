@@ -43,11 +43,7 @@ def _classify_engagement(
     reference_signals = ingestion_bundle.turn_signals.reference_signals
     clarification_memory = ingestion_bundle.clarification_memory
 
-    has_reference_intent = (
-        reference_signals.is_context_dependent
-        or reference_signals.reference_mode != "none"
-        or reference_signals.requires_active_context_for_safe_resolution
-    )
+    has_reference_intent = reference_signals.has_reference_intent
     has_pending_clarification = bool(clarification_memory.pending_clarification_type)
     has_constraints = bool(reference_signals.attribute_constraints)
     blocks_context_reuse = trajectory_phase in ("fresh_start", "topic_switch")
