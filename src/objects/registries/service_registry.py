@@ -282,17 +282,16 @@ def get_service_registry_payload() -> dict[str, Any]:
     }
 
 
-# Trailing-suffix patterns applied at lookup time when the parser's raw
-# entity span doesn't match the alias index exactly.  The first seven
-# mirror `_generate_service_phrase_variants` so lookup picks up the
-# phrase variants the registry has ALREADY indexed at registration time
-# (e.g. canonical "Rabbit Polyclonal Antibody Production" registers
-# variant "Rabbit Polyclonal Antibody" by stripping "Production"; without
-# symmetric strip at lookup, parser's "rabbit polyclonal antibody
-# project" cannot reach it).  The last three are extras the parser
-# emits in natural-language phrasing that registration does not generate
-# from canonical names.
-_LOOKUP_TRAIL_STRIP_PATTERNS: tuple[tuple[str, str], ...] = (
+# Trailing service-suffix patterns shared by registration and lookup.
+# Registration uses these inside `_generate_service_phrase_variants` to
+# pre-index phrase variants of every canonical name (e.g. canonical
+# "Rabbit Polyclonal Antibody Production" registers variant "Rabbit
+# Polyclonal Antibody" by stripping "Production"). Lookup applies the
+# SAME patterns to the parser's raw entity span so the stripped form
+# reaches the indexed variant.  Editing this tuple updates both sides
+# atomically — adding a suffix here without registering the variant
+# would silently produce keys that don't resolve.
+_SHARED_TRAIL_SUFFIXES: tuple[tuple[str, str], ...] = (
     (r"\bdesign and development\b$", ""),
     (r"\bservices\b$", ""),
     (r"\bservice\b$", ""),
@@ -300,9 +299,19 @@ _LOOKUP_TRAIL_STRIP_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bmanufacturing\b$", ""),
     (r"\bproduction\b$", ""),
     (r"\bassay\b$", ""),
+)
+# Lookup-only extras: parser emits natural-language phrasings
+# ("X project" / "X work") that don't appear in canonical service
+# names, so registration never pre-generates "X" via these strips.
+# Lookup still strips them so "X project" reaches a registered "X"
+# phrase variant produced by one of the shared suffixes above.
+_LOOKUP_ONLY_TRAIL_SUFFIXES: tuple[tuple[str, str], ...] = (
     (r"\bproject\b$", ""),
     (r"\bprojects\b$", ""),
     (r"\bwork\b$", ""),
+)
+_LOOKUP_TRAIL_STRIP_PATTERNS: tuple[tuple[str, str], ...] = (
+    _SHARED_TRAIL_SUFFIXES + _LOOKUP_ONLY_TRAIL_SUFFIXES
 )
 
 
@@ -503,15 +512,13 @@ def _generate_service_phrase_variants(text: str, alias_kind: str = "phrase_fragm
     variants: list[str] = []
     queue: list[str] = [cleaned]
     seen: set[str] = {normalize_object_alias(cleaned)}
+    # Leading "custom" strip is registration-only (canonical names
+    # carry the "Custom" prefix; parsers normally don't emit it).
+    # The trailing suffixes come from the shared tuple above so
+    # adding a new suffix updates both registration and lookup.
     replacements = (
         (r"^custom\s+", ""),
-        (r"\bdesign and development\b$", ""),
-        (r"\bservices\b$", ""),
-        (r"\bservice\b$", ""),
-        (r"\bdevelopment\b$", ""),
-        (r"\bmanufacturing\b$", ""),
-        (r"\bproduction\b$", ""),
-        (r"\bassay\b$", ""),
+        *_SHARED_TRAIL_SUFFIXES,
     )
 
     while queue:

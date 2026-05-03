@@ -688,15 +688,13 @@ def _extract_antibody_target_aliases(canonical_name: str) -> list[str]:
 
 
 def _expand_antibody_alias_variants(values: list[str]) -> list[str]:
-    expanded: list[str] = list(values)
-    for value in values:
-        alias = _safe_text(value)
-        lowered = alias.lower().replace("×", "x")
-        if "6 his" in lowered or "6xhis" in lowered:
-            expanded.append(alias.replace("6×His", "6xHis").replace("6 His", "6xHis"))
-            expanded.append(alias.replace("6xHis", "6×His"))
-            expanded.append(alias.replace("6xHis", "6 His"))
-    return dedupe_preserve_order(expanded)
+    # 6xHis variant expansion lived here historically but was redundant:
+    # `normalize_object_alias` (src/objects/normalizers.py) already collapses
+    # "6×His" / "6 His" / "6xHis" into "6xhis" via regex, both at registration
+    # (alias index keys) and at lookup. All three forms therefore route to
+    # the same alias_to_catalog_nos entry — pre-expanding the list adds
+    # work without adding coverage.
+    return dedupe_preserve_order(values)
 
 
 _CART_TARGET_SPLIT_RE = re.compile(r"\s*[+/&]\s*")
@@ -766,14 +764,10 @@ def _expand_antibody_alias_records(
     clonality: str = "",
 ) -> list[ProductAliasRecord]:
     expanded: list[ProductAliasRecord] = list(records)
-    for record in records:
-        alias = _safe_text(record.value)
-        lowered = alias.lower().replace("×", "x")
-        if "6 his" in lowered or "6xhis" in lowered:
-            expanded.append(ProductAliasRecord(alias.replace("6×His", "6xHis").replace("6 His", "6xHis"), record.alias_kind))
-            expanded.append(ProductAliasRecord(alias.replace("6xHis", "6×His"), record.alias_kind))
-            expanded.append(ProductAliasRecord(alias.replace("6xHis", "6 His"), record.alias_kind))
-
+    # 6xHis variant pre-expansion removed: normalize_object_alias already
+    # collapses "6×His" / "6 His" / "6xHis" to a single normalized key,
+    # so storing all three forms produced duplicate index entries that
+    # collapsed back to one anyway.
     variants = _antibody_target_variants(target_aliases or [], synonyms or [])
     clonality_lower = (clonality or "").strip().lower()
     for variant in variants:
