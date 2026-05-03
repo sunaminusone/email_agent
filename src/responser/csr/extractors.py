@@ -89,7 +89,22 @@ def _materialize_missing_answerable_fields(record: dict[str, Any]) -> None:
     sentinel the LLM tends to substitute an adjacent field (e.g.
     answering a price question with the currency) rather than admitting
     the gap, even though the system prompt tells it to say so.
+
+    Skip the sentinel for service-flyer chunks entirely. Flyer
+    pricing records often carry their numeric prices only in the
+    ``source_excerpt`` narrative — a ``pricing_overview`` chunk for
+    mammalian protein expression, for example, lists "$2,000 Phase I
+    / $2,500 Phase II / $3,500 Phase III / $8,000 total" inline as
+    prose with no structured ``price_usd`` field. Stamping "(not on
+    file)" on those records overrides the excerpt-level truth and
+    leads the LLM to report "no price available" despite the prices
+    being right there in the narrative. Companion chunks (yield
+    ranges, plan summaries, workflow overviews attached by
+    ``lookup_flyer_pricing``) are explicitly context with no
+    price/lead_time by design and are also caught by this same skip.
     """
+    if record.get("_subsource") == "service_flyer":
+        return
     for field in _STRUCTURED_ANSWERABLE_FIELDS:
         if record.get(field) is None:
             record[field] = _MISSING_FIELD_SENTINEL

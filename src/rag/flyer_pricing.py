@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langchain_core.documents import Document
@@ -26,6 +27,56 @@ _PRICE_MAGNITUDE_KEYS: tuple[str, ...] = (
     "total_price_usd",
 )
 _EXCERPT_LENGTH = 240
+
+# Cell-type / platform keywords → canonical service_name (case-correct,
+# matched against Chroma metadata) to bias toward when reranking
+# similarity hits AND when issuing service-scoped focused searches.
+# Currently scoped to the protein-expression family because that's
+# where pure embedding similarity demonstrably can't disambiguate
+# platform — e.g. yeast and E. coli flyer chunks outrank mammalian
+# flyer chunks for HEK293 queries because those flyers have higher
+# pricing-text density and embeddings don't model the domain fact
+# "HEK293 == mammalian". This mirrors the biz_line boost the main
+# retrieval pipeline already applies (which this thin path bypasses
+# by design). Other service families (antibody / CAR-T / mRNA-LNP)
+# can be added when we observe the same disambiguation failures.
+_SUBSTRING_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("hek293", "hek 293", "mammalian"), "Mammalian Protein Expression"),
+    (("e. coli", "e.coli", "bl21", "rosetta"), "E. coli Protein Expression"),
+    (("pichia", "saccharomyces", "yeast"), "Yeast Protein Expression"),
+    (("baculovirus", "insect cell"), "Baculovirus Protein Expression"),
+)
+
+# Tokens short or generic enough that substring matching would fire
+# false positives ("cho" in "echo", "sf9" inside a hex blob); use word
+# boundaries instead.
+_WORD_BOUNDARY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("cho",), "Mammalian Protein Expression"),
+    (("ecoli",), "E. coli Protein Expression"),
+    (("sf9", "sf21", "hi5"), "Baculovirus Protein Expression"),
+)
+
+# Companion chunk section types in priority order. Picked because they
+# carry the quantitative / structural context a CSR (and the draft LLM)
+# needs to reason about whether a primary pricing record actually
+# answers the customer's ask — e.g. yield ranges decide whether a
+# standard package can deliver a requested quantity.
+_COMPANION_SECTION_PRIORITY: tuple[str, ...] = (
+    "benchmark",          # yield ranges, throughput numbers
+    "phase_overview",     # phase scale & cell-line info
+    "plan_summary",       # multi-phase plan structure summary
+    "workflow_overview",  # high-level workflow steps
+)
+
+_WORD_PATTERN_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _word_pattern(token: str) -> re.Pattern[str]:
+    pattern = _WORD_PATTERN_CACHE.get(token)
+    if pattern is None:
+        pattern = re.compile(r"\b" + re.escape(token) + r"\b", re.IGNORECASE)
+        _WORD_PATTERN_CACHE[token] = pattern
+    return pattern
 
 
 def _is_pricing_chunk(chunk: Document) -> bool:
@@ -102,30 +153,153 @@ def _build_flyer_pricing_record(chunk: Document) -> dict[str, Any]:
     return record
 
 
+def _detect_preferred_services(query: str) -> set[str]:
+    """Return the set of canonical service_name strings implied by
+    cell-type / platform keywords in the query. Returned values match
+    the case of ``service_name`` in Chroma metadata so they can be
+    used for direct equality checks AND as Chroma metadata filters."""
+    lowered = query.lower()
+    matches: set[str] = set()
+    for keywords, service_name in _SUBSTRING_HINTS:
+        if any(kw in lowered for kw in keywords):
+            matches.add(service_name)
+    for keywords, service_name in _WORD_BOUNDARY_HINTS:
+        if any(_word_pattern(kw).search(query) for kw in keywords):
+            matches.add(service_name)
+    return matches
+
+
+def _rerank_by_preferred_service(
+    hits: list[tuple[Document, float]],
+    preferred_services: set[str],
+) -> list[tuple[Document, float]]:
+    """Stable rerank: chunks whose service_name matches a preferred
+    service move to the front; relative order within each group is
+    preserved so similarity still drives intra-group ordering."""
+    if not preferred_services:
+        return hits
+    preferred: list[tuple[Document, float]] = []
+    other: list[tuple[Document, float]] = []
+    for hit in hits:
+        chunk, _ = hit
+        sn = (chunk.metadata or {}).get("service_name") or ""
+        if sn in preferred_services:
+            preferred.append(hit)
+        else:
+            other.append(hit)
+    return preferred + other
+
+
+def _focused_pricing_search(
+    *,
+    store: Any,
+    query: str,
+    service_name: str,
+    pricing_chunks_wanted: int = 3,
+    pool: int = 10,
+) -> list[tuple[Document, float]]:
+    """Run a metadata-filtered similarity search constrained to a single
+    service flyer, then keep only pricing chunks. Returns up to
+    ``pricing_chunks_wanted`` hits in similarity order.
+
+    Why this exists: when a query implicates multiple platforms
+    (e.g. "HEK293 vs CHO vs BL21") or contains keywords that pull
+    other service flyers higher in the unfiltered pool ("antibody in
+    CHO" surfaces antibody chunks first), the main candidate pool may
+    contain non-pricing chunks for the preferred service while its
+    pricing chunks live past the pool cap. A targeted per-service
+    search guarantees pricing chunks for each detected preferred
+    service have a chance to surface.
+    """
+    try:
+        hits = store.similarity_search_with_score(
+            query, k=pool, filter={"service_name": service_name}
+        )
+    except Exception:
+        return []
+    pricing: list[tuple[Document, float]] = []
+    for hit in hits:
+        if _is_pricing_chunk(hit[0]):
+            pricing.append(hit)
+            if len(pricing) >= pricing_chunks_wanted:
+                break
+    return pricing
+
+
+def _chunk_dedup_key(chunk: Document) -> tuple[str, str]:
+    md = chunk.metadata or {}
+    return (md.get("service_name") or "", md.get("section_title") or "")
+
+
+def _select_companion_chunk(
+    *,
+    service_name: str,
+    ranked_hits: list[tuple[Document, float]],
+    primary_keys: set[tuple[str, str]],
+) -> Document | None:
+    """Pick one context companion chunk for a service that already has
+    a primary pricing record. Walks ``_COMPANION_SECTION_PRIORITY`` in
+    order; within a tier picks the highest-similarity match. Returns
+    ``None`` if no eligible chunk exists in the candidate pool."""
+    for desired_type in _COMPANION_SECTION_PRIORITY:
+        for chunk, _ in ranked_hits:
+            md = chunk.metadata or {}
+            if (md.get("service_name") or "") != service_name:
+                continue
+            if (md.get("service_name") or "", md.get("section_title") or "") in primary_keys:
+                continue
+            if str(md.get("section_type") or "") == desired_type:
+                return chunk
+    return None
+
+
 def lookup_flyer_pricing(
     *,
     query: str,
     top_k: int = 3,
-    candidate_pool: int = 25,
+    candidate_pool: int = 35,
 ) -> list[dict[str, Any]]:
-    """Embed-search the service-page Chroma store and return up to ``top_k``
-    pricing-bearing chunks as flat record dicts.
+    """Embed-search the service-page Chroma store and return up to
+    ``top_k`` primary pricing chunks plus one context companion chunk
+    per service that surfaced a primary record.
 
-    Why a thin path instead of reusing ``retrieve_chunks``: pricing chunks
-    already carry strong metadata signal (``section_type ==
-    "pricing_overview"`` or non-empty ``price_usd*``), so a direct
-    similarity-search + post-filter is simpler and more predictable than
-    the full retrieval pipeline (which is tuned for technical-doc reranking
-    with query rewrite / business-line boost / etc.).
+    Two layers of disambiguation, both addressing failure modes the
+    main retrieval pipeline already handles but this thin path skips:
 
-    We over-fetch ``candidate_pool`` and filter so we can still return up
-    to ``top_k`` actual pricing chunks when the top similarity hits happen
-    to be non-pricing sections of the same service page. Default 25
-    rather than ~10 because pricing chunks are number-dense and tend to
-    rank below conversational service-overview chunks for natural
-    "how much does X cost" queries — we observed the first pricing
-    chunk for "How much does custom CAR-T development cost?" landing at
-    rank 11 of 20 against service_plan / workflow_step neighbours.
+    1. **Rerank by preferred service**. Pure embedding similarity
+       can't disambiguate platform — "HEK293" queries surface yeast /
+       E. coli flyer chunks above mammalian because those flyers have
+       higher pricing-text density and embeddings don't encode
+       "HEK293 == mammalian". When the query carries a cell-type /
+       platform signal we move chunks from the matching service flyer
+       to the front of the candidate list before picking primaries.
+       See ``_SUBSTRING_HINTS`` / ``_WORD_BOUNDARY_HINTS``. Rerank
+       (not filter), so non-preferred services can still fill remaining
+       primary slots if the preferred service runs out of pricing
+       chunks — same philosophy as the main retriever's biz_line boost.
+
+    2. **Companion chunks**. A primary pricing record alone often
+       can't answer quantitative asks. "How much for 100 mg in HEK293"
+       needs both the price ($8,000 standard package) AND the yield
+       range (200 μg–25 mg/L, avg 3 mg/L) to recognise that 100 mg is
+       far above standard-package capacity and needs a scale-up quote.
+       For each service that surfaces a primary, we attach one
+       same-service companion — preferring yield/benchmark, then
+       phase-scale overview, then plan/workflow summary.
+
+    Default ``candidate_pool=35`` (up from 25) because companion
+    sections (especially ``benchmark`` yield-range chunks) can rank
+    below pricing chunks for "how much" queries: we observed
+    "Mammalian Expression Yield Range" landing at rank 25 of 25 for
+    a "100 mg HEK293" query, just outside the old pool cap.
+
+    When preferred services are detected, the candidate pool is
+    augmented with a metadata-filtered focused search per service —
+    this guarantees their pricing chunks have a chance to surface
+    even when the unfiltered pool buries them past the cap (observed
+    for multi-platform comparison queries like "HEK293 vs CHO vs
+    BL21" where the unfiltered top-35 yielded zero pricing chunks
+    for either Mammalian or E. coli).
     """
     if not query.strip():
         return []
@@ -135,14 +309,67 @@ def lookup_flyer_pricing(
     except Exception:
         return []
 
-    records: list[dict[str, Any]] = []
-    for chunk, _score in hits:
+    preferred_services = _detect_preferred_services(query)
+    ranked_hits = _rerank_by_preferred_service(hits, preferred_services)
+
+    if preferred_services:
+        seen_keys: set[tuple[str, str]] = {
+            _chunk_dedup_key(chunk) for chunk, _ in ranked_hits
+        }
+        # Focused pricing hits go to the front of the ranked list:
+        # they are already curated to match a preferred service AND
+        # be pricing-bearing, so they're strictly stronger candidates
+        # for the primary slot than anything the unfiltered pool
+        # produced for the same service.
+        augmented: list[tuple[Document, float]] = []
+        for service_name in preferred_services:
+            for hit in _focused_pricing_search(
+                store=store, query=query, service_name=service_name,
+            ):
+                key = _chunk_dedup_key(hit[0])
+                if key in seen_keys:
+                    continue
+                augmented.append(hit)
+                seen_keys.add(key)
+        ranked_hits = augmented + ranked_hits
+
+    primary_records: list[dict[str, Any]] = []
+    primary_keys: set[tuple[str, str]] = set()
+    for chunk, _score in ranked_hits:
         if not _is_pricing_chunk(chunk):
             continue
-        records.append(_build_flyer_pricing_record(chunk))
-        if len(records) >= top_k:
+        record = _build_flyer_pricing_record(chunk)
+        record["_chunk_role"] = "primary"
+        primary_records.append(record)
+        md = chunk.metadata or {}
+        primary_keys.add(
+            (md.get("service_name") or "", md.get("section_title") or "")
+        )
+        if len(primary_records) >= top_k:
             break
-    return records
+
+    services_needing_companion: list[str] = []
+    seen_services: set[str] = set()
+    for record in primary_records:
+        sn = record.get("service_name") or ""
+        if sn and sn not in seen_services:
+            services_needing_companion.append(sn)
+            seen_services.add(sn)
+
+    companion_records: list[dict[str, Any]] = []
+    for service_name in services_needing_companion:
+        chunk = _select_companion_chunk(
+            service_name=service_name,
+            ranked_hits=ranked_hits,
+            primary_keys=primary_keys,
+        )
+        if chunk is None:
+            continue
+        record = _build_flyer_pricing_record(chunk)
+        record["_chunk_role"] = "companion"
+        companion_records.append(record)
+
+    return primary_records + companion_records
 
 
 __all__ = ["lookup_flyer_pricing"]
