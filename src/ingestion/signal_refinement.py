@@ -6,6 +6,7 @@ from typing import Iterable
 
 from src.ingestion.demand_profile import FLAG_DEMAND, INTENT_DEMAND
 from src.ingestion.models import (
+    SEMANTIC_INTENT_VALUES,
     AttachmentSignals,
     EntitySpan,
     ParserRequestFlags,
@@ -50,6 +51,27 @@ _FAMILY_FLAG_NAMES: dict[str, tuple[str, ...]] = {
     "commercial": _COMMERCIAL_FLAG_NAMES,
     "operational": _OPERATIONAL_FLAG_NAMES,
 }
+
+
+# ---------------------------------------------------------------------------
+# Startup invariants
+# ---------------------------------------------------------------------------
+# _INTENT_DEFAULT_FLAG keys must be valid intents and values must be valid
+# flags; otherwise gap-fill silently writes a phantom flag onto the parser
+# output. Coverage is INTENTIONALLY one-directional — only intents that have
+# a single natural default flag belong here, so requiring ⊇ SEMANTIC_INTENT_VALUES
+# would force entries for intents like technical_question / follow_up where
+# no single flag is the right default.
+_INTENT_DEFAULT_FLAG_INTENTS = set(SEMANTIC_INTENT_VALUES)
+_INTENT_DEFAULT_FLAG_FLAGS = set(ParserRequestFlags.model_fields)
+assert set(_INTENT_DEFAULT_FLAG) <= _INTENT_DEFAULT_FLAG_INTENTS, (
+    f"_INTENT_DEFAULT_FLAG has keys not in SEMANTIC_INTENT_VALUES: "
+    f"{set(_INTENT_DEFAULT_FLAG) - _INTENT_DEFAULT_FLAG_INTENTS}"
+)
+assert set(_INTENT_DEFAULT_FLAG.values()) <= _INTENT_DEFAULT_FLAG_FLAGS, (
+    f"_INTENT_DEFAULT_FLAG has values not in ParserRequestFlags: "
+    f"{set(_INTENT_DEFAULT_FLAG.values()) - _INTENT_DEFAULT_FLAG_FLAGS}"
+)
 
 
 logger = logging.getLogger(__name__)

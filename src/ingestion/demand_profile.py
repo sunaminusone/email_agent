@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.common.models import DemandProfile, DemandType, GroupDemand, IntentGroup
-from src.ingestion.models import ParserRequestFlags, ParserSignals
+from src.ingestion.models import SEMANTIC_INTENT_VALUES, ParserRequestFlags, ParserSignals
 
 
 INTENT_DEMAND: dict[str, DemandType] = {
@@ -38,6 +38,33 @@ FLAG_DEMAND: dict[str, DemandType] = {
     "needs_invoice": "operational",
     "needs_refund_or_cancellation": "operational",
 }
+
+
+# ---------------------------------------------------------------------------
+# Startup invariants
+# ---------------------------------------------------------------------------
+# Guard the two demand-classification dicts against silent drift relative to
+# the source-of-truth taxonomies (SEMANTIC_INTENT_VALUES + ParserRequestFlags).
+# Direction matters and reflects current real invariants, not aspirational
+# symmetry:
+# - INTENT_DEMAND keys must be ⊆ SEMANTIC_INTENT_VALUES (no phantom intents).
+#   The reverse (every defined intent must be in INTENT_DEMAND) is INTENTIONALLY
+#   not asserted: _resolve_demands falls back to "general" for unmapped intents,
+#   so leaving an intent out is silently OK by design.
+# - FLAG_DEMAND keys must equal ParserRequestFlags fields (every flag must
+#   carry a demand classification, and no phantom flags). Bidirectional == is
+#   safe here because every active flag has to route to a demand family.
+_INTENTS = set(SEMANTIC_INTENT_VALUES)
+_FLAGS = set(ParserRequestFlags.model_fields)
+assert set(INTENT_DEMAND) <= _INTENTS, (
+    f"INTENT_DEMAND has keys not in SEMANTIC_INTENT_VALUES: "
+    f"{set(INTENT_DEMAND) - _INTENTS}"
+)
+assert set(FLAG_DEMAND) == _FLAGS, (
+    f"FLAG_DEMAND keys mismatch ParserRequestFlags: "
+    f"missing={_FLAGS - set(FLAG_DEMAND)}, "
+    f"extra={set(FLAG_DEMAND) - _FLAGS}"
+)
 
 
 def build_demand_profile(

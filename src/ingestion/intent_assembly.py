@@ -15,7 +15,7 @@ Usage:
 from __future__ import annotations
 
 from src.common.models import IntentGroup
-from src.ingestion.models import ParserRequestFlags
+from src.ingestion.models import SEMANTIC_INTENT_VALUES, ParserRequestFlags
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +76,14 @@ assert set(_FLAG_INTENT) == _ALL_FLAGS, (
     f"_FLAG_INTENT keys mismatch ParserRequestFlags: "
     f"missing={_ALL_FLAGS - set(_FLAG_INTENT)}, "
     f"extra={set(_FLAG_INTENT) - _ALL_FLAGS}"
+)
+# Reverse-inferred intents must be valid SEMANTIC_INTENT_VALUES; otherwise
+# _dominant_intent_from_flags can output a phantom intent string that fails
+# downstream validation silently.
+_ALL_INTENTS = set(SEMANTIC_INTENT_VALUES)
+assert set(_FLAG_INTENT.values()) <= _ALL_INTENTS, (
+    f"_FLAG_INTENT has values not in SEMANTIC_INTENT_VALUES: "
+    f"{set(_FLAG_INTENT.values()) - _ALL_INTENTS}"
 )
 
 
