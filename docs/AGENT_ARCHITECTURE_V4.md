@@ -587,7 +587,6 @@ existing ones upserts cleanly.
 Derived from prioritization in the 2026-04-27 alignment session.
 
 ### P1 — Demo / now
-- Streamlit webui (inbound mode) wrapping `run_email_agent`
 - Trust calibration display
 - Daily re-ingest cron
 - 90% draft quality push: prompt tuning, possibly few-shot examples

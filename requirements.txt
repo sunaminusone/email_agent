@@ -18,3 +18,4 @@ chromadb
 langserve[all]
 torch
 transformers
+pytest
