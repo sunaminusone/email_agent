@@ -169,6 +169,57 @@ def _detect_preferred_services(query: str) -> set[str]:
     return matches
 
 
+_FLYER_SERVICE_NAME_INDEX: dict[str, str] | None = None
+
+
+def _flyer_service_name_index() -> dict[str, str]:
+    """Lazy cache of {lowercased service_name: original case} pulled
+    from Chroma metadata. Used to validate that an upstream-resolved
+    service name actually corresponds to an existing flyer family
+    before we use it as the preferred-service signal."""
+    global _FLYER_SERVICE_NAME_INDEX
+    if _FLYER_SERVICE_NAME_INDEX is not None:
+        return _FLYER_SERVICE_NAME_INDEX
+    index: dict[str, str] = {}
+    try:
+        store = get_vectorstore()
+        # ``_collection`` is the underlying chromadb collection; only
+        # this surface exposes a metadata-only sweep.
+        result = store._collection.get(include=["metadatas"])
+        for md in result.get("metadatas") or []:
+            sn = (md or {}).get("service_name")
+            if isinstance(sn, str) and sn:
+                index.setdefault(sn.lower(), sn)
+    except Exception:
+        index = {}
+    _FLYER_SERVICE_NAME_INDEX = index
+    return index
+
+
+def _resolve_preferred_services(
+    query: str,
+    preferred_service_name: str | None,
+) -> set[str]:
+    """Decide which service_name(s) to bias toward in flyer ranking.
+
+    Prefers an explicitly-resolved service from the upstream parser /
+    object resolver (``primary_object.canonical_value`` for service
+    queries) — that is a stronger, more direct signal than re-deriving
+    the service from cell-type keywords in the query. Validates the
+    explicit name against the known Chroma flyer service_name set so
+    parser canonicalisation drift (e.g. "mRNA-LNP packaging" when the
+    flyer is "mRNA-LNP Gene Delivery", or "protein expression" when
+    the flyer is platform-specific) cleanly falls back to the
+    keyword-driven detection rather than silently producing zero hits.
+    """
+    if preferred_service_name:
+        index = _flyer_service_name_index()
+        match = index.get(preferred_service_name.lower())
+        if match:
+            return {match}
+    return _detect_preferred_services(query)
+
+
 def _rerank_by_preferred_service(
     hits: list[tuple[Document, float]],
     preferred_services: set[str],
@@ -258,6 +309,7 @@ def lookup_flyer_pricing(
     query: str,
     top_k: int = 3,
     candidate_pool: int = 35,
+    preferred_service_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Embed-search the service-page Chroma store and return up to
     ``top_k`` primary pricing chunks plus one context companion chunk
@@ -309,7 +361,7 @@ def lookup_flyer_pricing(
     except Exception:
         return []
 
-    preferred_services = _detect_preferred_services(query)
+    preferred_services = _resolve_preferred_services(query, preferred_service_name)
     ranked_hits = _rerank_by_preferred_service(hits, preferred_services)
 
     if preferred_services:

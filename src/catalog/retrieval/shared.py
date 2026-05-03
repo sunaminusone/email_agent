@@ -109,9 +109,23 @@ def candidate_aliases(
 
     from src.catalog.normalization import LOW_SIGNAL_TOKENS
 
-    if not raw_values:
-        for token in split_query_terms(query):
-            if token in LOW_SIGNAL_TOKENS or token in seen:
+    # Also emit individual high-signal tokens from the seed values so
+    # tier-2 alias matching can hit token-level gene symbols like
+    # "tp53" / "cd19" / "il6". Without this, a query such as
+    # "Mouse Monoclonal Antibody to TP53" only ever produces the
+    # whole-phrase candidate, which never exact-matches; the one product
+    # whose aliases include "tp53" (#20338) drops to tier-3 fuzzy and
+    # ranks behind false friends like Rabbit anti-TP53 / TP53BP1 because
+    # its name contains "p53" not "tp53".
+    # Restrict to digit-bearing tokens so we capture gene symbols /
+    # specific identifiers but don't flood tier 2 with generic words
+    # ("mouse", "monoclonal") that would over-match catalog aliases.
+    token_source_values = raw_values or [query]
+    for value in token_source_values:
+        for token in split_query_terms(value):
+            if token in seen or token in LOW_SIGNAL_TOKENS:
+                continue
+            if not any(ch.isdigit() for ch in token):
                 continue
             seen.add(token)
             candidates.append(token)

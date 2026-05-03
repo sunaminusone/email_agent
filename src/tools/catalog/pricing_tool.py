@@ -15,12 +15,50 @@ def execute_pricing_lookup_tool(request: ToolRequest) -> ToolResult:
     match_status = output.get("match_status")
 
     pg_records = [_pricing_record(match) for match in matches]
-    flyer_records = lookup_flyer_pricing(query=request.query, top_k=3)
-    # Flyer records first because the downstream `extract_structured_records`
-    # caps at 8 records (to keep prompt size bounded). PG can easily return
-    # 10+ loose SKU matches for a service-level query, which would otherwise
-    # push the small, high-signal flyer hits past the cap.
-    pricing_records = flyer_records + pg_records
+    primary_object = request.primary_object
+    is_product_query = primary_object is not None and primary_object.object_type == "product"
+    # Skip the flyer Chroma path only when the customer gave us a real,
+    # DB-confirmed catalog # (resolved through lookup_product_by_catalog_no,
+    # not just regex-shaped). For those queries the flyer would only add
+    # unrelated service plans (e.g. CAR-T flyer chunks for a #20338
+    # lookup) since flyer returns top-k nearest-neighbour pricing chunks
+    # with no relevance threshold.
+    # For other product queries (named-product or product-name strings
+    # that the deterministic regex misclassified as catalog_no) we keep
+    # flyer ranked AFTER catalog so service alternatives stay visible —
+    # e.g. "Price for CAR-T?" still surfaces CAR-T service plans below
+    # the catalog products. The 8-record prompt cap downstream naturally
+    # demotes weak flyer chunks when catalog has many high-signal hits.
+    is_resolved_catalog_no = (
+        is_product_query
+        and primary_object is not None
+        and primary_object.identifier_type == "catalog_no"
+        and primary_object.metadata.get("match_strategy") != "unknown_catalog_no"
+    )
+    # Hand the upstream-resolved service name to flyer ranking when the
+    # parser+resolver settled on a service. flyer_pricing validates this
+    # against the known Chroma service_name set and falls back to its
+    # own keyword detection on miss, so passing it is always safe.
+    preferred_service_name = (
+        primary_object.canonical_value
+        if primary_object is not None
+        and primary_object.object_type == "service"
+        and primary_object.canonical_value
+        else None
+    )
+    if is_resolved_catalog_no:
+        flyer_records: list[dict[str, object]] = []
+        pricing_records = pg_records
+    elif is_product_query:
+        flyer_records = lookup_flyer_pricing(
+            query=request.query, top_k=3, preferred_service_name=preferred_service_name,
+        )
+        pricing_records = pg_records + flyer_records
+    else:
+        flyer_records = lookup_flyer_pricing(
+            query=request.query, top_k=3, preferred_service_name=preferred_service_name,
+        )
+        pricing_records = flyer_records + pg_records
 
     facts = {
         "query": request.query,
