@@ -5,18 +5,37 @@ import re
 from src.ingestion.models import DeterministicSignals, EntitySpan, ParserSignals, SourceAttribution, ValueSignal
 
 
+# Catalog-shape patterns derived from a 17,266-row sweep of the live
+# product_catalog table (2026-05-02). The unambiguous shapes are:
+#   P\d{5}              81.0%   e.g. P00072, P02847 (antibody)
+#   \d{5}[A-Z]+          1.6%   e.g. 30484A, 30484P  (variants)
+#   PM-...               1.4%   PM-CAR1234, PM-LNP-0080, PM-CD22-CHO,
+#                                PM-Raji-CD19KO, PM-AB001
+# Pure \d{5} (16%, e.g. 20338) is intentionally NOT in this
+# high-confidence set because it overlaps with order numbers / other
+# numeric IDs; it is left to _classify_numeric_identifiers below,
+# which uses parser context (product vs operational intent) to route
+# the bare numeric.
+# Replaces the previous "any hyphenated token containing a digit"
+# heuristic, which over-matched everyday biotech terms whose tokens
+# happen to have digits ("anti-p53", "anti-CD3", "anti-HER2",
+# "CD3D-positive"). The new alternation is shape-locked: tokens that
+# are not P-prefixed, not 5-digit-with-letter-suffix, and not
+# PM-prefixed cannot match.
+_CATALOG_SHAPE_ALTERNATION = (
+    r"(?:P\d{5})|(?:\d{5}[A-Z]+)|(?:PM-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)"
+)
 _CATALOG_HINT_PATTERN = re.compile(
-    r"\b(?:product|catalog|cat(?:alog)?(?:\s*(?:no|number|#))?|sku|item|id|identifier)\s*[:#-]?\s*((?:PM-CAR\d{4})|(?:PM-LNP-\d{4})|(?:\d{5})|(?:[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+))\b",
+    r"\b(?:product|catalog|cat(?:alog)?(?:\s*(?:no|number|#))?|sku|item|id|identifier)"
+    # Bare \d{5} is also accepted under an explicit hint word (the
+    # customer literally said "catalog #20338"); shape ambiguity is
+    # resolved by the prefix.
+    r"\s*[:#-]?\s*(" + _CATALOG_SHAPE_ALTERNATION + r"|\d{5})\b",
     re.IGNORECASE,
 )
-_HIGH_CONFIDENCE_CATALOG_PATTERNS = (
-    re.compile(r"\bPM-CAR\d{4}\b", re.IGNORECASE),
-    re.compile(r"\bPM-LNP-\d{4}\b", re.IGNORECASE),
-    # Hyphenated tokens are catalog candidates only if they contain a digit
-    # (PM-CAR1234, PM-A431-CD147KO) or use the PM- product prefix
-    # (PM-Jurkat-GFP). This rejects natural-language compounds like
-    # "PRE-TESTED", "CAR-CELLS", "non-profit", "mRNA-LNP".
-    re.compile(r"\b(?=[A-Za-z0-9-]*\d|PM-)[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b", re.IGNORECASE),
+_HIGH_CONFIDENCE_CATALOG_PATTERNS = tuple(
+    re.compile(r"\b" + alt + r"\b", re.IGNORECASE)
+    for alt in (r"P\d{5}", r"\d{5}[A-Z]+", r"PM-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 )
 _NUMERIC_IDENTIFIER_PATTERN = re.compile(r"\b\d{4,6}\b")
 _INVOICE_HINT_PATTERN = re.compile(
