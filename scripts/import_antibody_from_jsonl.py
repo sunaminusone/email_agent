@@ -63,6 +63,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.objects.antibody_names import extract_canonical_symbols
 from src.objects.normalizers import clean_text as _clean_text
 from src.objects.normalizers import normalize_object_alias as _normalize_object_alias
 
@@ -200,6 +201,19 @@ def map_record(rec: dict[str, Any]) -> tuple[dict, dict] | None:
     applications_list = _split_list(metafields.get("application"), ",")
     species_list = _split_list(metafields.get("speciesReactivity"), ",")
 
+    # Web exposes neither target_antigen nor the canonical symbol in
+    # aliases — see src/objects/antibody_names for the title-derivation
+    # rules that fill both. Without this, tier_2 alias_lookup misses the
+    # most common customer phrasing ("do you have anti-X").
+    canonical_symbols = extract_canonical_symbols(title)
+    target_antigen = canonical_symbols[0] if canonical_symbols else None
+    existing_norms = {_normalize_object_alias(a) for a in aliases_list}
+    for sym in canonical_symbols:
+        n = _normalize_object_alias(sym)
+        if n and n not in existing_norms:
+            existing_norms.add(n)
+            aliases_list.append(sym)
+
     images = rec.get("images") or []
     image_url = images[0] if images else None
     tags = rec.get("tags") or []
@@ -210,7 +224,7 @@ def map_record(rec: dict[str, Any]) -> tuple[dict, dict] | None:
         "business_line":      BUSINESS_LINE,
         "record_type":        _strip(metafields.get("type")),         # "Rabbit Polyclonal"
         "name":               title,
-        "target_antigen":     None,                                    # left NULL — not provided on web; future regex from name
+        "target_antigen":     target_antigen,
         "price":              price,
         "price_variants":     jsonb(price_variants) if price_variants else None,
         "currency":           "USD",
