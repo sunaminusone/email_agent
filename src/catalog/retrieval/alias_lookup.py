@@ -67,7 +67,7 @@ def direct_alias_lookup(
         160 AS match_rank,
         'normalized_alias' AS matched_field,
         array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.aliases)), ', ') AS matched_value
-        FROM product_catalog p
+        FROM product_catalog_v2 p
         WHERE {" AND ".join(conditions)}
         ORDER BY p.catalog_no
         LIMIT %s

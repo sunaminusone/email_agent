@@ -35,8 +35,8 @@ PRODUCT_SELECT_SQL = """
         array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.applications)), ', ') AS application_text,
         array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.species_reactivity)), ', ') AS species_reactivity_text,
         p.attributes->>'construct' AS construct,
-        p.product_type,
-        p.format,
+        NULL::text AS product_type,
+        p.size AS format,
         p.attributes->>'unit' AS unit
 """
 

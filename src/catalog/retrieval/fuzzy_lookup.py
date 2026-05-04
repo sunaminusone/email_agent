@@ -71,8 +71,7 @@ def fuzzy_lookup(
                 p.business_line,
                 p.record_type,
                 p.target_antigen,
-                p.product_type,
-                p.format,
+                p.size,
                 array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.applications)), ', '),
                 array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.species_reactivity)), ', '),
                 p.attributes->>'construct',
@@ -106,12 +105,12 @@ def fuzzy_lookup(
                 ELSE 0
             END
             + CASE
-                WHEN %s <> '' AND coalesce(p.format, '') ILIKE %s THEN 2
+                WHEN %s <> '' AND coalesce(p.size, '') ILIKE %s THEN 2
                 ELSE 0
             END AS match_rank,
             'fuzzy' AS matched_field,
             %s AS matched_value
-        FROM product_catalog p
+        FROM product_catalog_v2 p
         WHERE p.is_active = TRUE
           {business_filter_sql}
           AND (

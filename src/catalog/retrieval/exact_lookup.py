@@ -35,7 +35,7 @@ def catalog_number_lookup(
             200 AS match_rank,
             'catalog_no' AS matched_field,
             catalog_no AS matched_value
-        FROM product_catalog p
+        FROM product_catalog_v2 p
         WHERE {" AND ".join(conditions)}
         ORDER BY p.catalog_no
         LIMIT %s

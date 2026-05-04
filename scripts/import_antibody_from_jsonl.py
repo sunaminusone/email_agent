@@ -111,6 +111,21 @@ def _split_list(raw: Any, separator: str) -> list[str]:
     return [p for p in parts if p]
 
 
+def _split_aliases(raw: Any) -> list[str]:
+    """Aliases use mixed separators across the catalog: 87% are ';'-separated
+    (the dominant convention), 0.6% use ',' only (e.g. 20338 "LFS1, TRP53,
+    TP53"), and a few records use both — typically ';' as outer separator
+    with ',' inside individual alias names (e.g. "inhibin, alpha"). Strategy:
+    if ';' is present, split on ';' (preserves comma-inside-name); otherwise
+    split on ','.
+    """
+    if not raw:
+        return []
+    s = str(raw)
+    sep = ";" if ";" in s else ","
+    return _split_list(s, sep)
+
+
 def _cheapest_variant(variants: list[dict] | None) -> dict | None:
     """Pick the variant with the lowest non-zero price.
 
@@ -181,7 +196,7 @@ def map_record(rec: dict[str, Any]) -> tuple[dict, dict] | None:
     all_priced = _all_priced_variants(rec.get("variants"))
     price_variants = all_priced if len(all_priced) > 1 else None
 
-    aliases_list = _split_list(metafields.get("aliases"), ";")
+    aliases_list = _split_aliases(metafields.get("aliases"))
     applications_list = _split_list(metafields.get("application"), ",")
     species_list = _split_list(metafields.get("speciesReactivity"), ",")
 

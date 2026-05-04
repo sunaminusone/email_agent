@@ -20,7 +20,7 @@ PRODUCT_DATA_FILES = {
     "mrna_lnp": BASE_DIR / "data" / "processed" / "mRNA_LNP_products.xlsx",
 }
 PRODUCT_REGISTRY_BACKEND = (os.getenv("OBJECTS_PRODUCT_REGISTRY_BACKEND") or "auto").strip().lower()
-PRODUCT_REGISTRY_TABLE = os.getenv("OBJECTS_PRODUCT_REGISTRY_TABLE", "product_catalog")
+PRODUCT_REGISTRY_TABLE = os.getenv("OBJECTS_PRODUCT_REGISTRY_TABLE", "product_catalog_v2")
 
 
 @dataclass(frozen=True)
@@ -236,6 +236,11 @@ class PostgresProductRegistrySource:
         self._table_name = table_name
 
     def load_entries(self) -> tuple[ProductRegistryEntry, ...]:
+        # v2 schema: format → size; product_type / source_file_path / source_sheet
+        # were dropped (xlsx provenance no longer tracked here, mRNA's old
+        # product_type was promoted into record_type during the 005 migration).
+        # _entry_from_record's record.get(...) returns "" for missing keys,
+        # so dropping them is safe.
         query = f"""
             SELECT
                 catalog_no,
@@ -246,12 +251,9 @@ class PostgresProductRegistrySource:
                 target_antigen,
                 applications,
                 species_reactivity,
-                format,
-                product_type,
+                size AS format,
                 price,
-                attributes,
-                source_file_path,
-                source_sheet
+                attributes
             FROM {self._table_name}
         """
         with psycopg.connect(self._dsn) as conn:
