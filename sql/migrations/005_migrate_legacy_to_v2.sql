@@ -20,6 +20,17 @@
 -- the catalog_no UNIQUE constraint that means it's safe to rerun.
 -- ----------------------------------------------------------------------------
 
+-- Schema-shaping promotions (audit of 250 non-antibody rows on 2026-05-04):
+--   * mRNA-LNP rows have legacy product_type ('Protein'/'CAR'/'Bispecific
+--     Antibody'/'Control'/'Antibody') and format ('10ug in 200ul'). These
+--     are richer than the existing record_type='product' (which is just
+--     the catch-all). Promote product_type into record_type and format
+--     into the new size column.
+--   * CAR-T rows have product_type/format both NULL — no promotion needed;
+--     their record_type='cell_product' stays.
+--   * After promotion, product_type / format are fully represented and
+--     don't need to be carried in attributes as legacy_* keys.
+
 INSERT INTO product_catalog_v2 (
     -- Identity
     id,
@@ -33,6 +44,7 @@ INSERT INTO product_catalog_v2 (
     -- Pricing
     price,
     currency,
+    size,
     lead_time_text,
     -- Collections
     aliases,
@@ -47,37 +59,34 @@ INSERT INTO product_catalog_v2 (
     updated_at
     -- Antibody-specific columns (host / isotype / immunogen / etc.)
     -- intentionally OMITTED so they default to NULL — the legacy
-    -- product_catalog never carried these as first-class columns; if
-    -- any CAR-T / mRNA row happens to have e.g. "host" in attributes
-    -- JSONB it stays in attributes (no auto-promotion).
+    -- product_catalog never carried these as first-class columns.
+    -- Web/audit columns (source_url / raw_metafields / last_synced_at)
+    -- intentionally OMITTED — these rows were not web-sourced.
 )
 SELECT
     pc.id,
     pc.catalog_no,
     pc.business_line,
-    pc.record_type,
+    -- Promote mRNA product_type → record_type (more specific than the
+    -- existing 'product' value); CAR-T keeps its 'cell_product'.
+    CASE
+        WHEN pc.business_line ~* 'mrna' AND pc.product_type IS NOT NULL
+            THEN pc.product_type
+        ELSE pc.record_type
+    END,
     pc.name,
     pc.target_antigen,
     pc.price,
     coalesce(pc.currency, 'USD'),
+    -- Promote legacy format → size (only mRNA rows carry it; CAR-T
+    -- format is NULL).
+    pc.format,
     pc.lead_time_text,
     coalesce(pc.aliases, '[]'::jsonb),
     coalesce(pc.aliases_normalized, '[]'::jsonb),
     coalesce(pc.applications, '[]'::jsonb),
     coalesce(pc.species_reactivity, '[]'::jsonb),
-    -- Old product_type and format are dropped. If a downstream consumer
-    -- still wants them, they survive in attributes via the import
-    -- script's raw_metadata; but the dedicated columns are gone.
-    -- product_type / format were never antibody-relevant either.
-    coalesce(pc.attributes, '{}'::jsonb)
-        -- Carry forward the legacy product_type / format values into
-        -- attributes for any downstream code that still reads them. This
-        -- is a defensive carry — it can be dropped in a follow-up once
-        -- code paths are confirmed to no longer reference them.
-        || coalesce(jsonb_strip_nulls(jsonb_build_object(
-            'legacy_product_type', pc.product_type,
-            'legacy_format',       pc.format
-        )), '{}'::jsonb),
+    coalesce(pc.attributes, '{}'::jsonb),
     coalesce(pc.is_active, TRUE),
     coalesce(pc.created_at, CURRENT_TIMESTAMP),
     coalesce(pc.updated_at, CURRENT_TIMESTAMP)
