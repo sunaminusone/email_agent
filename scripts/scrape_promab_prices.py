@@ -97,6 +97,29 @@ class VariantRecord:
     source_url: str
 
 
+@dataclass
+class ProductRecord:
+    """Full product capture from a single page — every field the front-end
+    surfaces is preserved as-is so downstream transforms can pivot to any
+    format (CAR-T xlsx columns, antibody catalog enrichment, etc.) without
+    re-scraping. Title, bodyHtml description, all metafields (which carry
+    the Product Overview rows like Aliases / Host / Isotype / Immunogen /
+    Formulation / Storage and the Product Applications dilutions like
+    westernBlotting / elisa), all variants (size + price), and image URLs
+    all land here verbatim."""
+
+    source_url: str
+    title: str
+    handle: str
+    vendor: str
+    tags: list[str]
+    body_html: str
+    metafields: dict[str, object]
+    variants: list[dict[str, object]]
+    images: list[str]
+    catalog_no: str  # resolved canonical (prefers metafields.sku, else variant prefix)
+
+
 # ---------------------------------------------------------------------------
 # HTTP helpers
 # ---------------------------------------------------------------------------
@@ -126,42 +149,89 @@ def enumerate_product_urls(sitemap_indices: Iterable[int]) -> list[str]:
 # Page parsing
 # ---------------------------------------------------------------------------
 
-def extract_variants(html: str, source_url: str) -> list[VariantRecord]:
+def _resolve_catalog_no(product: dict, variants: list[dict]) -> str:
+    """Return the canonical catalog_no in upper-case.
+
+    Priority:
+    1. ``metafields.sku`` — most reliable for CAR-T / mRNA where Shopify
+       variant SKUs are null but the catalog # lives in metafields
+       (e.g. PM-CAR1100).
+    2. Strip the size suffix from the first non-empty variant SKU
+       (antibody pattern, e.g. "10005-100μl" → "10005").
+    Returns "" if neither produces a usable value.
+    """
+    mf = product.get("metafields") or {}
+    mf_sku = (mf.get("sku") or "").strip()
+    if mf_sku:
+        return mf_sku.upper()
+    for v in variants:
+        sku = (v.get("sku") or "").strip()
+        if not sku:
+            continue
+        size_match = SIZE_SUFFIX_RE.search(sku)
+        prefix = sku[: size_match.start()] if size_match else sku
+        return prefix.upper()
+    return ""
+
+
+def extract_product_record(html: str, source_url: str) -> ProductRecord | None:
+    """Parse a product detail page's __NEXT_DATA__ JSON and return the full
+    captured record. Returns None when the page has no embedded product
+    object (404-shaped pages, or template that doesn't expose product).
+    """
     m = NEXT_DATA_RE.search(html)
     if not m:
-        return []
+        return None
     try:
         data = json.loads(m.group(1))
     except json.JSONDecodeError:
-        return []
+        return None
     product = (
         data.get("props", {})
         .get("pageProps", {})
         .get("props", {})
         .get("product")
-        or {}
     )
-    raw_variants = product.get("variants") or []
+    if not product:
+        return None
+    variants = product.get("variants") or []
+    images_raw = product.get("images") or []
+    image_urls: list[str] = []
+    for img in images_raw:
+        if isinstance(img, dict):
+            url = img.get("src") or img.get("url") or img.get("originalSrc") or ""
+            if url:
+                image_urls.append(str(url))
+        elif isinstance(img, str):
+            image_urls.append(img)
+    return ProductRecord(
+        source_url=source_url,
+        title=str(product.get("title") or ""),
+        handle=str(product.get("handle") or ""),
+        vendor=str(product.get("vendor") or ""),
+        tags=list(product.get("tags") or []),
+        body_html=str(product.get("bodyHtml") or ""),
+        metafields=dict(product.get("metafields") or {}),
+        variants=[dict(v) for v in variants if isinstance(v, dict)],
+        images=image_urls,
+        catalog_no=_resolve_catalog_no(product, variants),
+    )
 
+
+def variants_from_product(record: ProductRecord) -> list[VariantRecord]:
+    """Project the rich ProductRecord onto the CSV/DB-write VariantRecord
+    schema: one row per priced variant. Skips variants with zero/missing
+    price."""
     out: list[VariantRecord] = []
-    for v in raw_variants:
-        sku = (v.get("sku") or "").strip()
-        if not sku:
-            continue
-        size_match = SIZE_SUFFIX_RE.search(sku)
-        if not size_match:
-            # SKU doesn't end in a recognised size suffix — skip rather
-            # than misclassify. Logged at the caller.
-            catalog_no = sku
-            size = ""
+    for v in record.variants:
+        v_sku = (v.get("sku") or "").strip()
+        title = str(v.get("title") or "")
+        # CAR-T variants have null SKU; size lives in `title`.
+        if v_sku:
+            size_match = SIZE_SUFFIX_RE.search(v_sku)
+            size = size_match.group(0).lstrip("-") if size_match else title
         else:
-            catalog_no = sku[: size_match.start()]
-            size = size_match.group(0).lstrip("-")
-        catalog_no_upper = catalog_no.upper()
-        if not any(p.match(catalog_no_upper) for p in CATALOG_SHAPES):
-            # SKU prefix doesn't match a known catalog shape — keep going
-            # (some legacy SKUs may differ); the DB join will simply miss.
-            pass
+            size = title
         price_raw = v.get("price")
         if price_raw in (None, "", "0", "0.0", "0.00"):
             continue
@@ -171,11 +241,11 @@ def extract_variants(html: str, source_url: str) -> list[VariantRecord]:
             continue
         out.append(
             VariantRecord(
-                catalog_no=catalog_no_upper,
-                sku=sku,
+                catalog_no=record.catalog_no,
+                sku=v_sku or record.catalog_no,
                 size=size,
                 price=price,
-                source_url=source_url,
+                source_url=record.source_url,
             )
         )
     return out
@@ -233,7 +303,14 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--limit", type=int, default=0, help="Cap URLs scraped (0 = no cap).")
     p.add_argument("--rate", type=float, default=0.4, help="Seconds between page requests.")
-    p.add_argument("--csv", default="", help="Optional path to dump scraped variants for review.")
+    p.add_argument(
+        "--jsonl",
+        default="",
+        help="Path to dump full product records (one JSON per product per "
+        "line; preserves title / metafields / bodyHtml / all variants / "
+        "images verbatim). Recommended primary output — CSV is a derived view.",
+    )
+    p.add_argument("--csv", default="", help="Optional flat per-variant view (catalog_no/sku/size/price/url).")
     p.add_argument("--update-db", action="store_true", help="Write prices to product_catalog (default dry-run).")
     return p.parse_args()
 
@@ -249,51 +326,95 @@ def main() -> int:
 
     by_catalog: dict[str, VariantRecord] = {}
     all_variants: list[VariantRecord] = []
-    skipped_no_data = 0
-    skipped_no_variants = 0
-    skipped_no_price = 0
+    products: list[ProductRecord] = []
+    skipped_no_product = 0
+    skipped_no_priced_variants = 0
     fetch_errors = 0
 
-    for i, url in enumerate(urls, 1):
-        try:
-            html = _fetch(url)
-        except (urllib.error.URLError, TimeoutError) as exc:
-            fetch_errors += 1
-            if fetch_errors <= 5:
-                print(f"[warn] fetch failed {url}: {exc}", file=sys.stderr)
+    jsonl_fh = open(args.jsonl, "w") if args.jsonl else None
+
+    try:
+        for i, url in enumerate(urls, 1):
+            try:
+                html = _fetch(url)
+            except (urllib.error.URLError, TimeoutError) as exc:
+                fetch_errors += 1
+                if fetch_errors <= 5:
+                    print(f"[warn] fetch failed {url}: {exc}", file=sys.stderr)
+                time.sleep(args.rate)
+                continue
+            record = extract_product_record(html, url)
+            if record is None:
+                skipped_no_product += 1
+                time.sleep(args.rate)
+                continue
+            products.append(record)
+            if jsonl_fh is not None:
+                jsonl_fh.write(
+                    json.dumps(
+                        {
+                            "source_url": record.source_url,
+                            "catalog_no": record.catalog_no,
+                            "title": record.title,
+                            "handle": record.handle,
+                            "vendor": record.vendor,
+                            "tags": record.tags,
+                            "body_html": record.body_html,
+                            "metafields": record.metafields,
+                            "variants": record.variants,
+                            "images": record.images,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+            variants = variants_from_product(record)
+            if not variants:
+                skipped_no_priced_variants += 1
+            else:
+                all_variants.extend(variants)
+                entry = select_entry_variant(variants)
+                existing = by_catalog.get(entry.catalog_no)
+                if existing is None or entry.price < existing.price:
+                    by_catalog[entry.catalog_no] = entry
+            if i % 100 == 0:
+                print(
+                    f"[progress] {i}/{len(urls)}  products={len(products)}  "
+                    f"unique_catalog={len(by_catalog)}  variants={len(all_variants)}  "
+                    f"fetch_err={fetch_errors}"
+                )
             time.sleep(args.rate)
-            continue
-        variants = extract_variants(html, url)
-        if not variants:
-            # Either no __NEXT_DATA__ (skipped_no_data) or product had no
-            # priced variants. Cheap to lump together for the summary.
-            skipped_no_variants += 1
-        else:
-            all_variants.extend(variants)
-            entry = select_entry_variant(variants)
-            existing = by_catalog.get(entry.catalog_no)
-            if existing is None or entry.price < existing.price:
-                by_catalog[entry.catalog_no] = entry
-        if i % 100 == 0:
-            print(
-                f"[progress] {i}/{len(urls)}  unique_catalog={len(by_catalog)}  "
-                f"variants={len(all_variants)}  fetch_err={fetch_errors}"
-            )
-        time.sleep(args.rate)
+    finally:
+        if jsonl_fh is not None:
+            jsonl_fh.close()
 
     print()
-    print(f"[summary] urls scraped       : {len(urls)}")
-    print(f"[summary] fetch errors       : {fetch_errors}")
-    print(f"[summary] no variants/price  : {skipped_no_variants}")
-    print(f"[summary] total variants     : {len(all_variants)}")
-    print(f"[summary] unique catalog_no  : {len(by_catalog)}")
+    print(f"[summary] urls scraped         : {len(urls)}")
+    print(f"[summary] fetch errors         : {fetch_errors}")
+    print(f"[summary] no product in JSON   : {skipped_no_product}")
+    print(f"[summary] product but no price : {skipped_no_priced_variants}")
+    print(f"[summary] products captured    : {len(products)}")
+    print(f"[summary] total variants       : {len(all_variants)}")
+    print(f"[summary] unique catalog_no    : {len(by_catalog)}")
 
+    if args.jsonl:
+        print(f"[info] wrote JSONL: {args.jsonl}")
     if args.csv:
         with open(args.csv, "w", newline="") as fh:
             w = csv.writer(fh)
-            w.writerow(["catalog_no", "sku", "size", "price", "source_url"])
+            w.writerow(["catalog_no", "title", "sku", "size", "price", "source_url"])
+            # Build catalog_no → title lookup so the per-variant CSV carries
+            # the page heading without a join step downstream.
+            title_by_catalog = {p.catalog_no: p.title for p in products}
             for rec in all_variants:
-                w.writerow([rec.catalog_no, rec.sku, rec.size, str(rec.price), rec.source_url])
+                w.writerow([
+                    rec.catalog_no,
+                    title_by_catalog.get(rec.catalog_no, ""),
+                    rec.sku,
+                    rec.size,
+                    str(rec.price),
+                    rec.source_url,
+                ])
         print(f"[info] wrote CSV: {args.csv}")
 
     if args.update_db:
