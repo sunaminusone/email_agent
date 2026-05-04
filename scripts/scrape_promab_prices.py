@@ -302,6 +302,13 @@ def _parse_args() -> argparse.Namespace:
         help=f"Sub-sitemap indices to process (default 1..{SITEMAP_COUNT}).",
     )
     p.add_argument("--limit", type=int, default=0, help="Cap URLs scraped (0 = no cap).")
+    p.add_argument(
+        "--url-contains",
+        default="",
+        help="Only keep URLs whose path contains this substring "
+        "(e.g. '/primary-antibody/' to skip CAR-T / mRNA / cell-product pages). "
+        "Applied after sitemap collection, before fetch.",
+    )
     p.add_argument("--rate", type=float, default=0.4, help="Seconds between page requests.")
     p.add_argument(
         "--jsonl",
@@ -320,6 +327,10 @@ def main() -> int:
     print(f"[info] sitemaps={args.sitemaps}  limit={args.limit}  update_db={args.update_db}")
 
     urls = enumerate_product_urls(args.sitemaps)
+    if args.url_contains:
+        before = len(urls)
+        urls = [u for u in urls if args.url_contains in u]
+        print(f"[info] url-contains={args.url_contains!r}: {before} → {len(urls)} URLs")
     if args.limit > 0:
         urls = urls[: args.limit]
     print(f"[info] total URLs to scrape: {len(urls)}")
