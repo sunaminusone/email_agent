@@ -82,6 +82,36 @@ Rules:
     with their plan/phase context (e.g. "Plan A · Phase III: $7,350 —
     vector construction"), noting that the full quote depends on
     selected phases.
+- ANTIBODY field semantics (catalog records with `business_line: Antibody`
+  carry these antibody-specific fields when sourced from our web data —
+  use them ONLY when the customer's ASKED FOCUS calls for them; do NOT
+  volunteer the full technical sheet on a generic price ask):
+  * Recommended dilutions per application — map the customer's ask to the
+    matching field:
+      - "Western blot" / "WB"               → `wb_dilution`
+      - "ELISA"                              → `elisa_dilution`
+      - "IHC" / "immunohistochemistry"      → `ihc_dilution`
+      - "ICC" / "immunocytochemistry"       → `icc_dilution`
+      - "FACS" / "flow cytometry" / "FCM"   → `fcm_dilution`
+    Phrase as "recommended at <value> for <application>" (e.g.
+    "recommended at 1/500 - 1/2000 for Western blot"). If the asked
+    application's dilution field is empty, say so explicitly — do NOT
+    substitute a different application's dilution.
+  * "What was used to immunize" / "epitope" / "what's the antigen" →
+    `immunogen` (preserve the verbatim text — it usually contains the
+    peptide / fusion-protein description).
+  * "How should I store it" / "stability" → `storage`.
+  * "How does it ship" → `shipping_information`.
+  * "Host species" / "raised in" / "is it rabbit / mouse" → `host`.
+  * "Isotype" → `isotype`. "Clone" → `clone`. "Molecular weight" / "MW"
+    / "predicted band size" → `molecular_weight`. "Entrez gene ID" /
+    "gene ID" → `gene_id`.
+  * "Any publications" / "papers" / "references" → `references_text`
+    (it's HTML — the LLM should extract the citation text, not paste
+    raw `<br />` tags).
+  * `sequence` is the immunogen amino-acid sequence when available;
+    values "full" / "" / "N" are sentinels meaning "no public sequence
+    on file" — treat as missing, do not paraphrase as "full sequence".
 - OPERATIONAL RECORDS (orders / invoices / shipping) are also authoritative —
   cite order numbers, statuses, and tracking IDs exactly as given.
 - QuickBooks field semantics (don't mistranslate these):

@@ -39,26 +39,31 @@ PRODUCT_SELECT_SQL = """
         p.size AS format,
         p.attributes->>'unit' AS unit,
         -- Antibody-facet columns from the LEFT JOIN child (NULL on non-antibody rows).
-        -- description_html and raw_metafields are deliberately omitted from the
-        -- always-loaded shape: the former is a large HTML blob (per-page bodyHtml)
-        -- and the latter is a raw verbatim JSONB; both should be lazy-loaded by
-        -- callers that actually need them, not pulled on every catalog query.
-        a.host                 AS antibody_host,
-        a.isotype              AS antibody_isotype,
-        a.clone                AS antibody_clone,
-        a.molecular_weight     AS antibody_molecular_weight,
-        a.gene_id              AS antibody_gene_id,
-        a.sequence             AS antibody_sequence,
-        a.elisa_dilution       AS antibody_elisa_dilution,
-        a.wb_dilution          AS antibody_wb_dilution,
-        a.fcm_dilution         AS antibody_fcm_dilution,
-        a.ihc_dilution         AS antibody_ihc_dilution,
-        a.icc_dilution         AS antibody_icc_dilution,
-        a.immunogen            AS antibody_immunogen,
-        a.formulation          AS antibody_formulation,
-        a.storage              AS antibody_storage,
-        a.shipping_information AS antibody_shipping_information,
-        a.references_text      AS antibody_references_text
+        -- Aliased without prefix because none of the names collide with parent
+        -- columns and the registry path already uses these unprefixed (host /
+        -- clone / isotype / etc. as ProductRegistryEntry fields). One naming
+        -- convention across both retrieval paths simplifies downstream consumers
+        -- (draft prompt, sections renderer, extractor metadata).
+        -- description_html and raw_metafields are deliberately omitted: the
+        -- former is a multi-KB HTML blob (per-page bodyHtml) and the latter
+        -- is a raw verbatim JSONB; both should be lazy-loaded by callers that
+        -- actually need them, not pulled on every catalog query.
+        a.host,
+        a.isotype,
+        a.clone,
+        a.molecular_weight,
+        a.gene_id,
+        a.sequence,
+        a.elisa_dilution,
+        a.wb_dilution,
+        a.fcm_dilution,
+        a.ihc_dilution,
+        a.icc_dilution,
+        a.immunogen,
+        a.formulation,
+        a.storage,
+        a.shipping_information,
+        a.references_text
 """
 
 # Shared FROM clause: parent table left-joined to the antibody facet so
@@ -112,23 +117,24 @@ def serialize_match(row: dict[str, Any]) -> dict[str, Any]:
         "product_type": row.get("product_type"),
         "format": row.get("format"),
         "unit": row.get("unit"),
-        # Antibody facet (None on non-antibody rows via LEFT JOIN).
-        "antibody_host": row.get("antibody_host"),
-        "antibody_isotype": row.get("antibody_isotype"),
-        "antibody_clone": row.get("antibody_clone"),
-        "antibody_molecular_weight": row.get("antibody_molecular_weight"),
-        "antibody_gene_id": row.get("antibody_gene_id"),
-        "antibody_sequence": row.get("antibody_sequence"),
-        "antibody_elisa_dilution": row.get("antibody_elisa_dilution"),
-        "antibody_wb_dilution": row.get("antibody_wb_dilution"),
-        "antibody_fcm_dilution": row.get("antibody_fcm_dilution"),
-        "antibody_ihc_dilution": row.get("antibody_ihc_dilution"),
-        "antibody_icc_dilution": row.get("antibody_icc_dilution"),
-        "antibody_immunogen": row.get("antibody_immunogen"),
-        "antibody_formulation": row.get("antibody_formulation"),
-        "antibody_storage": row.get("antibody_storage"),
-        "antibody_shipping_information": row.get("antibody_shipping_information"),
-        "antibody_references_text": row.get("antibody_references_text"),
+        # Antibody facet (None on non-antibody rows via LEFT JOIN). No prefix —
+        # aligns with registry path's unprefixed naming.
+        "host": row.get("host"),
+        "isotype": row.get("isotype"),
+        "clone": row.get("clone"),
+        "molecular_weight": row.get("molecular_weight"),
+        "gene_id": row.get("gene_id"),
+        "sequence": row.get("sequence"),
+        "elisa_dilution": row.get("elisa_dilution"),
+        "wb_dilution": row.get("wb_dilution"),
+        "fcm_dilution": row.get("fcm_dilution"),
+        "ihc_dilution": row.get("ihc_dilution"),
+        "icc_dilution": row.get("icc_dilution"),
+        "immunogen": row.get("immunogen"),
+        "formulation": row.get("formulation"),
+        "storage": row.get("storage"),
+        "shipping_information": row.get("shipping_information"),
+        "references_text": row.get("references_text"),
         "score": round(float(row.get("score") or 0.0), 4),
         "match_rank": int(row.get("match_rank") or 0),
         "matched_field": row.get("matched_field"),
