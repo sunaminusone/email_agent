@@ -28,6 +28,7 @@ class ProductRegistryEntry:
     catalog_no: str
     canonical_name: str
     business_line: str
+    record_type: str = ""
     aliases: tuple[str, ...] = ()
     synonyms: tuple[str, ...] = ()
     target_antigen: str = ""
@@ -35,6 +36,9 @@ class ProductRegistryEntry:
     applications: tuple[str, ...] = ()
     species_reactivity_text: str = ""
     format_or_size: str = ""
+    # Antibody facet (sourced from antibody_product_catalog_v2 via LEFT JOIN
+    # in PostgresProductRegistrySource; empty on non-antibody rows).
+    host: str = ""
     clone: str = ""
     clonality: str = ""
     isotype: str = ""
@@ -42,6 +46,19 @@ class ProductRegistryEntry:
     gene_id: str = ""
     gene_accession: str = ""
     swissprot: str = ""
+    molecular_weight: str = ""
+    sequence: str = ""
+    elisa_dilution: str = ""
+    wb_dilution: str = ""
+    fcm_dilution: str = ""
+    ihc_dilution: str = ""
+    icc_dilution: str = ""
+    immunogen: str = ""
+    formulation: str = ""
+    storage: str = ""
+    shipping_information: str = ""
+    references_text: str = ""
+    # CAR-T / mRNA / shared
     costimulatory_domain: str = ""
     construct: str = ""
     product_type: str = ""
@@ -241,20 +258,44 @@ class PostgresProductRegistrySource:
         # product_type was promoted into record_type during the 005 migration).
         # _entry_from_record's record.get(...) returns "" for missing keys,
         # so dropping them is safe.
+        # LEFT JOIN antibody_product_catalog_v2: antibody-only first-class
+        # fields (host / isotype / clone / dilutions / immunogen / etc.) used
+        # to live in attributes JSONB; in v2 they're in the child table.
+        # Non-antibody rows JOIN to NULL on every antibody column, which
+        # _entry_from_record handles via _safe_text / record.get fallback.
+        # NOTE: hardcoded antibody_product_catalog_v2 — after 006 swap this
+        # will rename to antibody_product_catalog (mechanical search/replace).
         query = f"""
             SELECT
-                catalog_no,
-                name,
-                business_line,
-                record_type,
-                aliases,
-                target_antigen,
-                applications,
-                species_reactivity,
-                size AS format,
-                price,
-                attributes
-            FROM {self._table_name}
+                p.catalog_no,
+                p.name,
+                p.business_line,
+                p.record_type,
+                p.aliases,
+                p.target_antigen,
+                p.applications,
+                p.species_reactivity,
+                p.size AS format,
+                p.price,
+                p.attributes,
+                a.host,
+                a.isotype,
+                a.clone,
+                a.molecular_weight,
+                a.gene_id,
+                a.sequence,
+                a.elisa_dilution,
+                a.wb_dilution,
+                a.fcm_dilution,
+                a.ihc_dilution,
+                a.icc_dilution,
+                a.immunogen,
+                a.formulation,
+                a.storage,
+                a.shipping_information,
+                a.references_text
+            FROM {self._table_name} p
+            LEFT JOIN antibody_product_catalog_v2 a ON a.product_id = p.id
         """
         with psycopg.connect(self._dsn) as conn:
             with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -399,6 +440,7 @@ def _entry_from_record(record: dict[str, Any]) -> ProductRegistryEntry:
         catalog_no=_safe_text(record.get("catalog_no")),
         canonical_name=canonical_name,
         business_line=_safe_text(record.get("business_line")),
+        record_type=record_type,
         aliases=tuple(dedupe_preserve_order(list(aliases))),
         synonyms=tuple(
             dedupe_preserve_order([
@@ -410,13 +452,29 @@ def _entry_from_record(record: dict[str, Any]) -> ProductRegistryEntry:
         applications=applications if applications else _normalize_application_tokens(application_text),
         species_reactivity_text=species_reactivity_text,
         format_or_size=_safe_text(record.get("format_or_size") or record.get("format")),
-        clone=_safe_text(attributes.get("clone")),
+        # Antibody facet — JOIN-sourced top-level keys take precedence;
+        # fallback to attributes JSONB for legacy rows that may still carry
+        # them (defensive for any pre-v2 import paths).
+        host=_safe_text(record.get("host") or attributes.get("host")),
+        clone=_safe_text(record.get("clone") or attributes.get("clone")),
         clonality=_infer_clonality_from_record_type(record_type),
-        isotype=_normalize_isotype(attributes.get("isotype")),
+        isotype=_normalize_isotype(record.get("isotype") or attributes.get("isotype")),
         ig_class=_safe_text(attributes.get("ig_class")),
-        gene_id=_safe_text(attributes.get("gene_id")),
+        gene_id=_safe_text(record.get("gene_id") or attributes.get("gene_id")),
         gene_accession=_safe_text(attributes.get("gene_accession")),
         swissprot=_safe_text(attributes.get("swissprot")),
+        molecular_weight=_safe_text(record.get("molecular_weight")),
+        sequence=_safe_text(record.get("sequence")),
+        elisa_dilution=_safe_text(record.get("elisa_dilution")),
+        wb_dilution=_safe_text(record.get("wb_dilution")),
+        fcm_dilution=_safe_text(record.get("fcm_dilution")),
+        ihc_dilution=_safe_text(record.get("ihc_dilution")),
+        icc_dilution=_safe_text(record.get("icc_dilution")),
+        immunogen=_safe_text(record.get("immunogen")),
+        formulation=_safe_text(record.get("formulation")),
+        storage=_safe_text(record.get("storage")),
+        shipping_information=_safe_text(record.get("shipping_information")),
+        references_text=_safe_text(record.get("references_text")),
         costimulatory_domain=_safe_text(attributes.get("costimulatory_domain")),
         construct=_safe_text(attributes.get("construct")),
         product_type=_safe_text(record.get("product_type")),

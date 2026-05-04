@@ -13,6 +13,58 @@ def _product_name(match: dict[str, object], fallback: str) -> str:
     return str(match.get("name") or match.get("canonical_name") or fallback)
 
 
+# Keys to surface from a product registry match dict into ObjectCandidate.metadata.
+# Three call sites (alias-single / alias-ambiguous / catalog_no) all need the same
+# shape; centralising avoids each one drifting independently when new fields land.
+# Antibody facet (host / dilutions / immunogen / etc.) is sourced from the
+# antibody_product_catalog_v2 child via the registry's LEFT JOIN; CAR-T / mRNA
+# rows have empty strings on those keys.
+_METADATA_TEXT_KEYS = (
+    "record_type",
+    "target_antigen",
+    "application_text",
+    "species_reactivity_text",
+    "format_or_size",
+    "host",
+    "clone",
+    "clonality",
+    "isotype",
+    "ig_class",
+    "gene_id",
+    "molecular_weight",
+    "sequence",
+    "elisa_dilution",
+    "wb_dilution",
+    "fcm_dilution",
+    "ihc_dilution",
+    "icc_dilution",
+    "immunogen",
+    "formulation",
+    "storage",
+    "shipping_information",
+    "references_text",
+    "costimulatory_domain",
+    "construct",
+    "product_type",
+    "group_name",
+    "group_type",
+    "group_subtype",
+    "group_summary",
+    "unit",
+    "cell_number",
+    "marker",
+)
+_METADATA_LIST_KEYS = ("aliases", "applications")
+
+
+def _match_to_metadata(match: dict[str, object], **extras: object) -> dict[str, object]:
+    metadata: dict[str, object] = {key: match.get(key, []) for key in _METADATA_LIST_KEYS}
+    for key in _METADATA_TEXT_KEYS:
+        metadata[key] = match.get(key, "")
+    metadata.update(extras)
+    return metadata
+
+
 def extract_product_candidates(ingestion_bundle: IngestionBundle) -> ExtractorOutput:
     parser_entities = ingestion_bundle.turn_signals.parser_signals.entities
     deterministic = ingestion_bundle.turn_signals.deterministic_signals
@@ -60,29 +112,7 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
                 recency="CURRENT_TURN",
                 source_type="parser",
                 evidence_spans=[span],
-                metadata={
-                    "aliases": match.get("aliases", []),
-                    "target_antigen": match.get("target_antigen", ""),
-                    "application_text": match.get("application_text", ""),
-                    "applications": match.get("applications", []),
-                    "species_reactivity_text": match.get("species_reactivity_text", ""),
-                    "format_or_size": match.get("format_or_size", ""),
-                    "clone": match.get("clone", ""),
-                    "clonality": match.get("clonality", ""),
-                    "isotype": match.get("isotype", ""),
-                    "ig_class": match.get("ig_class", ""),
-                    "costimulatory_domain": match.get("costimulatory_domain", ""),
-                    "construct": match.get("construct", ""),
-                    "product_type": match.get("product_type", ""),
-                    "group_name": match.get("group_name", ""),
-                    "group_type": match.get("group_type", ""),
-                    "group_subtype": match.get("group_subtype", ""),
-                    "group_summary": match.get("group_summary", ""),
-                    "unit": match.get("unit", ""),
-                    "cell_number": match.get("cell_number", ""),
-                    "marker": match.get("marker", ""),
-                    "matched_alias_kinds": alias_kinds,
-                },
+                metadata=_match_to_metadata(match, matched_alias_kinds=alias_kinds),
             )
         ], []
 
@@ -100,22 +130,7 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
                 recency="CURRENT_TURN",
                 source_type="parser",
                 evidence_spans=[span],
-                metadata={
-                    "aliases": match.get("aliases", []),
-                    "target_antigen": match.get("target_antigen", ""),
-                    "application_text": match.get("application_text", ""),
-                    "applications": match.get("applications", []),
-                    "species_reactivity_text": match.get("species_reactivity_text", ""),
-                    "format_or_size": match.get("format_or_size", ""),
-                    "clonality": match.get("clonality", ""),
-                    "isotype": match.get("isotype", ""),
-                    "ig_class": match.get("ig_class", ""),
-                    "costimulatory_domain": match.get("costimulatory_domain", ""),
-                    "construct": match.get("construct", ""),
-                    "group_name": match.get("group_name", ""),
-                    "marker": match.get("marker", ""),
-                    "matched_alias_kinds": alias_kinds,
-                },
+                metadata=_match_to_metadata(match, matched_alias_kinds=alias_kinds),
                 is_ambiguous=True,
             )
             for match in matches
@@ -179,26 +194,5 @@ def _extract_catalog_number_candidate(
         recency="CURRENT_TURN",
         source_type=source_type,
         evidence_spans=evidence_spans,
-        metadata={
-            "aliases": match.get("aliases", []),
-            "target_antigen": match.get("target_antigen", ""),
-            "application_text": match.get("application_text", ""),
-            "applications": match.get("applications", []),
-            "species_reactivity_text": match.get("species_reactivity_text", ""),
-            "format_or_size": match.get("format_or_size", ""),
-            "clone": match.get("clone", ""),
-            "clonality": match.get("clonality", ""),
-            "isotype": match.get("isotype", ""),
-            "ig_class": match.get("ig_class", ""),
-            "costimulatory_domain": match.get("costimulatory_domain", ""),
-            "construct": match.get("construct", ""),
-            "product_type": match.get("product_type", ""),
-            "group_name": match.get("group_name", ""),
-            "group_type": match.get("group_type", ""),
-            "group_subtype": match.get("group_subtype", ""),
-            "group_summary": match.get("group_summary", ""),
-            "unit": match.get("unit", ""),
-            "cell_number": match.get("cell_number", ""),
-            "marker": match.get("marker", ""),
-        },
+        metadata=_match_to_metadata(match),
     )
