@@ -204,22 +204,57 @@ def main() -> int:
             if key in web:
                 matched_keys.add(key)
 
-    # Surface web catalog_no that didn't match any xlsx row. This is real
-    # data discovery — the storefront sometimes carries products in
-    # numbering ranges the source xlsx doesn't (e.g. 10000-series 5-digit
-    # antibodies vs xlsx's P-prefix Polyclonals).
+    # Web catalog_no's the xlsx doesn't index — append into whichever sheet
+    # their URL path implies (monoclonal-antibody/ vs polyclonal-antibody/).
+    # We deliberately union into the existing Mono / Poly sheets rather
+    # than emit a separate "Web Only" sheet so downstream consumers see
+    # one unified catalog per kind. Original xlsx columns are left NULL on
+    # these new rows since we have no curated value — only the web_*
+    # columns are populated. NULL in the curated column is the signal that
+    # the row originated from the web side of the merge.
     unmatched_keys = sorted(set(web.keys()) - matched_keys)
     if unmatched_keys:
-        rows = []
+        appended_per_sheet: dict[str, list[dict]] = {s: [] for s in enriched}
+        # Heuristic for sheet assignment: URL path segment.
         for key in unmatched_keys:
             rec = web[key]
-            row = {"Catalog#": key, "title": rec.get("title", "")}
+            url = (rec.get("source_url") or "").lower()
+            if "/monoclonal-antibody/" in url:
+                target = "Monoclonal Antibody"
+            elif "/polyclonal-antibody/" in url:
+                target = "Polyclonal Antibody"
+            else:
+                # Fallback to metafields.type if URL is ambiguous.
+                t = (rec.get("metafields") or {}).get("type", "").lower()
+                if "monoclonal" in t:
+                    target = "Monoclonal Antibody"
+                elif "polyclonal" in t:
+                    target = "Polyclonal Antibody"
+                else:
+                    target = "Polyclonal Antibody"  # safest default — most antibodies are poly
+            if target not in appended_per_sheet:
+                continue
+            row: dict = {"Catalog#": key, "title": rec.get("title", "")}
             for col, (path, fn) in WEB_COLUMNS.items():
                 value = _walk(rec, path)
                 row[col] = fn(value) if value not in (None, "") else None
-            rows.append(row)
-        enriched["Web Only (no xlsx match)"] = pd.DataFrame(rows)
-        print(f"[info] web-only catalog_no (no xlsx row): {len(unmatched_keys)} → 'Web Only' sheet")
+            appended_per_sheet[target].append(row)
+
+        for sheet, rows in appended_per_sheet.items():
+            if not rows:
+                continue
+            base_df = enriched[sheet]
+            append_df = pd.DataFrame(rows)
+            # Keep column order: existing columns first (curated cols come
+            # first so users still recognise the sheet); fill missing.
+            enriched[sheet] = pd.concat(
+                [base_df, append_df.reindex(columns=base_df.columns, fill_value=None)],
+                ignore_index=True,
+            )
+            print(
+                f"[info] sheet={sheet!r}: appended {len(rows)} web-only rows "
+                f"(now {len(enriched[sheet])} rows)"
+            )
 
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         for sheet, out_df in enriched.items():
