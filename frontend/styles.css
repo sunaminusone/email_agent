@@ -1798,7 +1798,8 @@ button {
 
 .inspector {
   gap: 16px;
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
   padding: 20px 18px 24px;
   background: #f7f7f6;
   border-left: 1px solid rgba(19, 21, 26, 0.08);
@@ -2096,6 +2097,8 @@ pre {
   .inspector {
     position: static;
     min-height: auto;
+    height: auto;
+    overflow-y: visible;
   }
 
   .sidebar-toggle-btn {
