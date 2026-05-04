@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import antibody web JSONL into product_catalog_v2 + antibody_product_catalog_v2.
+"""Import antibody web JSONL into product_catalog + antibody_product_catalog.
 
 B2' of the antibody web-as-source-of-truth plan; replaces the legacy xlsx
 import path (scripts/import_product_catalog.py) for the antibody business
@@ -8,9 +8,9 @@ line. See memory project_antibody_web_enrichment_plan.md.
 CTI write pattern
 -----------------
 Each web record yields two rows in one transaction:
-  1. product_catalog_v2 — shared columns (catalog_no / business_line='Antibody'
+  1. product_catalog — shared columns (catalog_no / business_line='Antibody'
      / record_type / name / price / size / aliases / applications / etc.)
-  2. antibody_product_catalog_v2 — antibody-only columns (host / isotype /
+  2. antibody_product_catalog — antibody-only columns (host / isotype /
      dilutions / immunogen / formulation / storage / description_html /
      references_text / raw_metafields / etc.)
 
@@ -132,7 +132,7 @@ def _cheapest_variant(variants: list[dict] | None) -> dict | None:
     Multi-size antibody variants are rare on the web (most are single-size,
     e.g. "100μl"); when they exist (e.g. "100μl" / "500μl") we keep the
     cheapest as the displayed price + size. Future enhancement: stuff the
-    full variant list into product_catalog_v2.price_variants.
+    full variant list into product_catalog.price_variants.
     """
     priced = []
     for v in variants or []:
@@ -289,7 +289,7 @@ def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
 # Database write
 # ---------------------------------------------------------------------------
 PARENT_INSERT = """
-    INSERT INTO product_catalog_v2 (
+    INSERT INTO product_catalog (
         catalog_no, business_line, record_type, name, target_antigen,
         price, price_variants, currency, size, lead_time_text,
         aliases, aliases_normalized, applications, species_reactivity, web_tags,
@@ -325,7 +325,7 @@ PARENT_INSERT = """
 """
 
 CHILD_UPSERT = """
-    INSERT INTO antibody_product_catalog_v2 (
+    INSERT INTO antibody_product_catalog (
         product_id, host, isotype, clone, molecular_weight, gene_id, sequence,
         elisa_dilution, wb_dilution, fcm_dilution, ihc_dilution, icc_dilution,
         immunogen, formulation, storage, shipping_information,
@@ -359,14 +359,14 @@ CHILD_UPSERT = """
 
 
 def wipe_antibody_rows(conn) -> int:
-    """Delete existing antibody rows from product_catalog_v2.
+    """Delete existing antibody rows from product_catalog.
 
     Child rows are removed automatically by ON DELETE CASCADE on the FK.
     Returns the number of parent rows deleted.
     """
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM product_catalog_v2 WHERE business_line ~* 'antibody'"
+            "DELETE FROM product_catalog WHERE business_line ~* 'antibody'"
         )
         return cur.rowcount
 
@@ -399,7 +399,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--apply", action="store_true",
                    help="Actually write to PG. Without this flag, the script only parses + reports.")
     p.add_argument("--wipe-antibody", action="store_true",
-                   help="Before writing, DELETE existing antibody rows from product_catalog_v2 "
+                   help="Before writing, DELETE existing antibody rows from product_catalog "
                         "(child rows go via FK CASCADE). Use on the initial cutover.")
     p.add_argument("--limit", type=int, default=0,
                    help="Process only the first N JSONL records (debug / smoke).")

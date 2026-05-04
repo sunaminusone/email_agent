@@ -17,7 +17,7 @@ def _product_name(match: dict[str, object], fallback: str) -> str:
 # Three call sites (alias-single / alias-ambiguous / catalog_no) all need the same
 # shape; centralising avoids each one drifting independently when new fields land.
 # Antibody facet (host / dilutions / immunogen / etc.) is sourced from the
-# antibody_product_catalog_v2 child via the registry's LEFT JOIN; CAR-T / mRNA
+# antibody_product_catalog child via the registry's LEFT JOIN; CAR-T / mRNA
 # rows have empty strings on those keys.
 _METADATA_TEXT_KEYS = (
     "record_type",

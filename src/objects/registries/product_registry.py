@@ -20,7 +20,7 @@ PRODUCT_DATA_FILES = {
     "mrna_lnp": BASE_DIR / "data" / "processed" / "mRNA_LNP_products.xlsx",
 }
 PRODUCT_REGISTRY_BACKEND = (os.getenv("OBJECTS_PRODUCT_REGISTRY_BACKEND") or "auto").strip().lower()
-PRODUCT_REGISTRY_TABLE = os.getenv("OBJECTS_PRODUCT_REGISTRY_TABLE", "product_catalog_v2")
+PRODUCT_REGISTRY_TABLE = os.getenv("OBJECTS_PRODUCT_REGISTRY_TABLE", "product_catalog")
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class ProductRegistryEntry:
     applications: tuple[str, ...] = ()
     species_reactivity_text: str = ""
     format_or_size: str = ""
-    # Antibody facet (sourced from antibody_product_catalog_v2 via LEFT JOIN
+    # Antibody facet (sourced from antibody_product_catalog via LEFT JOIN
     # in PostgresProductRegistrySource; empty on non-antibody rows).
     host: str = ""
     clone: str = ""
@@ -258,12 +258,12 @@ class PostgresProductRegistrySource:
         # product_type was promoted into record_type during the 005 migration).
         # _entry_from_record's record.get(...) returns "" for missing keys,
         # so dropping them is safe.
-        # LEFT JOIN antibody_product_catalog_v2: antibody-only first-class
+        # LEFT JOIN antibody_product_catalog: antibody-only first-class
         # fields (host / isotype / clone / dilutions / immunogen / etc.) used
         # to live in attributes JSONB; in v2 they're in the child table.
         # Non-antibody rows JOIN to NULL on every antibody column, which
         # _entry_from_record handles via _safe_text / record.get fallback.
-        # NOTE: hardcoded antibody_product_catalog_v2 — after 006 swap this
+        # NOTE: hardcoded antibody_product_catalog — after 006 swap this
         # will rename to antibody_product_catalog (mechanical search/replace).
         query = f"""
             SELECT
@@ -295,7 +295,7 @@ class PostgresProductRegistrySource:
                 a.shipping_information,
                 a.references_text
             FROM {self._table_name} p
-            LEFT JOIN antibody_product_catalog_v2 a ON a.product_id = p.id
+            LEFT JOIN antibody_product_catalog a ON a.product_id = p.id
         """
         with psycopg.connect(self._dsn) as conn:
             with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:

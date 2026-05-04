@@ -71,8 +71,8 @@ PRODUCT_SELECT_SQL = """
 # having to know the schema split. Non-antibody rows JOIN to NULL on every
 # antibody_* column — serialize_match passes that through cleanly.
 PRODUCT_FROM_SQL = """
-    FROM product_catalog_v2 p
-    LEFT JOIN antibody_product_catalog_v2 a ON a.product_id = p.id
+    FROM product_catalog p
+    LEFT JOIN antibody_product_catalog a ON a.product_id = p.id
 """
 
 BUSINESS_LINE_MATCH_SQL = "POSITION(LOWER(REPLACE(%s, '-', '_')) IN LOWER(REPLACE({field}, '-', '_'))) > 0"
