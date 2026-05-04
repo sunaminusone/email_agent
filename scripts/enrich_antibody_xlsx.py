@@ -215,16 +215,22 @@ def main() -> int:
     unmatched_keys = sorted(set(web.keys()) - matched_keys)
     if unmatched_keys:
         appended_per_sheet: dict[str, list[dict]] = {s: [] for s in enriched}
-        # Heuristic for sheet assignment: URL path segment.
+        # Heuristic for sheet assignment: match any URL segment ending in
+        # ``-monoclonal-antibody`` / ``-polyclonal-antibody`` (or the bare
+        # form). The storefront partitions monoclonals further by host
+        # species: ``/monoclonal-antibody/`` (Mouse / general),
+        # ``/rabbit-monoclonal-antibody/``, ``/rat-monoclonal-antibody/``,
+        # etc. — all of these are still Monoclonals and belong in the same
+        # xlsx sheet. Substring without leading slash catches every
+        # variant; metafields.type is the fallback when the URL is silent.
         for key in unmatched_keys:
             rec = web[key]
             url = (rec.get("source_url") or "").lower()
-            if "/monoclonal-antibody/" in url:
+            if "monoclonal-antibody" in url:
                 target = "Monoclonal Antibody"
-            elif "/polyclonal-antibody/" in url:
+            elif "polyclonal-antibody" in url:
                 target = "Polyclonal Antibody"
             else:
-                # Fallback to metafields.type if URL is ambiguous.
                 t = (rec.get("metafields") or {}).get("type", "").lower()
                 if "monoclonal" in t:
                     target = "Monoclonal Antibody"
