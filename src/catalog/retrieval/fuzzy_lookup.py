@@ -14,6 +14,7 @@ from src.catalog.normalization import (
 )
 from .shared import (
     BUSINESS_LINE_MATCH_SQL,
+    PRODUCT_FROM_SQL,
     PRODUCT_SELECT_SQL,
     dict_row,
     serialize_match,
@@ -110,7 +111,7 @@ def fuzzy_lookup(
             END AS match_rank,
             'fuzzy' AS matched_field,
             %s AS matched_value
-        FROM product_catalog_v2 p
+        {PRODUCT_FROM_SQL}
         WHERE p.is_active = TRUE
           {business_filter_sql}
           AND (

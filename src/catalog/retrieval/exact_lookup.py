@@ -5,6 +5,7 @@ from typing import Any
 from src.catalog.normalization import DEFAULT_LIMIT, normalize_business_line_hint
 from .shared import (
     BUSINESS_LINE_MATCH_SQL,
+    PRODUCT_FROM_SQL,
     PRODUCT_SELECT_SQL,
     dict_row,
     serialize_match,
@@ -35,7 +36,7 @@ def catalog_number_lookup(
             200 AS match_rank,
             'catalog_no' AS matched_field,
             catalog_no AS matched_value
-        FROM product_catalog_v2 p
+        {PRODUCT_FROM_SQL}
         WHERE {" AND ".join(conditions)}
         ORDER BY p.catalog_no
         LIMIT %s

@@ -6,6 +6,7 @@ from src.catalog.normalization import DEFAULT_LIMIT, normalize_business_line_hin
 from src.objects.normalizers import normalize_object_alias
 from .shared import (
     BUSINESS_LINE_MATCH_SQL,
+    PRODUCT_FROM_SQL,
     PRODUCT_SELECT_SQL,
     candidate_aliases,
     dict_row,
@@ -67,7 +68,7 @@ def direct_alias_lookup(
         160 AS match_rank,
         'normalized_alias' AS matched_field,
         array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.aliases)), ', ') AS matched_value
-        FROM product_catalog_v2 p
+        {PRODUCT_FROM_SQL}
         WHERE {" AND ".join(conditions)}
         ORDER BY p.catalog_no
         LIMIT %s

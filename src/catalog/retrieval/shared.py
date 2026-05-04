@@ -37,7 +37,37 @@ PRODUCT_SELECT_SQL = """
         p.attributes->>'construct' AS construct,
         NULL::text AS product_type,
         p.size AS format,
-        p.attributes->>'unit' AS unit
+        p.attributes->>'unit' AS unit,
+        -- Antibody-facet columns from the LEFT JOIN child (NULL on non-antibody rows).
+        -- description_html and raw_metafields are deliberately omitted from the
+        -- always-loaded shape: the former is a large HTML blob (per-page bodyHtml)
+        -- and the latter is a raw verbatim JSONB; both should be lazy-loaded by
+        -- callers that actually need them, not pulled on every catalog query.
+        a.host                 AS antibody_host,
+        a.isotype              AS antibody_isotype,
+        a.clone                AS antibody_clone,
+        a.molecular_weight     AS antibody_molecular_weight,
+        a.gene_id              AS antibody_gene_id,
+        a.sequence             AS antibody_sequence,
+        a.elisa_dilution       AS antibody_elisa_dilution,
+        a.wb_dilution          AS antibody_wb_dilution,
+        a.fcm_dilution         AS antibody_fcm_dilution,
+        a.ihc_dilution         AS antibody_ihc_dilution,
+        a.icc_dilution         AS antibody_icc_dilution,
+        a.immunogen            AS antibody_immunogen,
+        a.formulation          AS antibody_formulation,
+        a.storage              AS antibody_storage,
+        a.shipping_information AS antibody_shipping_information,
+        a.references_text      AS antibody_references_text
+"""
+
+# Shared FROM clause: parent table left-joined to the antibody facet so
+# antibody-specific fields are exposed in PRODUCT_SELECT_SQL without callers
+# having to know the schema split. Non-antibody rows JOIN to NULL on every
+# antibody_* column — serialize_match passes that through cleanly.
+PRODUCT_FROM_SQL = """
+    FROM product_catalog_v2 p
+    LEFT JOIN antibody_product_catalog_v2 a ON a.product_id = p.id
 """
 
 BUSINESS_LINE_MATCH_SQL = "POSITION(LOWER(REPLACE(%s, '-', '_')) IN LOWER(REPLACE({field}, '-', '_'))) > 0"
@@ -82,6 +112,23 @@ def serialize_match(row: dict[str, Any]) -> dict[str, Any]:
         "product_type": row.get("product_type"),
         "format": row.get("format"),
         "unit": row.get("unit"),
+        # Antibody facet (None on non-antibody rows via LEFT JOIN).
+        "antibody_host": row.get("antibody_host"),
+        "antibody_isotype": row.get("antibody_isotype"),
+        "antibody_clone": row.get("antibody_clone"),
+        "antibody_molecular_weight": row.get("antibody_molecular_weight"),
+        "antibody_gene_id": row.get("antibody_gene_id"),
+        "antibody_sequence": row.get("antibody_sequence"),
+        "antibody_elisa_dilution": row.get("antibody_elisa_dilution"),
+        "antibody_wb_dilution": row.get("antibody_wb_dilution"),
+        "antibody_fcm_dilution": row.get("antibody_fcm_dilution"),
+        "antibody_ihc_dilution": row.get("antibody_ihc_dilution"),
+        "antibody_icc_dilution": row.get("antibody_icc_dilution"),
+        "antibody_immunogen": row.get("antibody_immunogen"),
+        "antibody_formulation": row.get("antibody_formulation"),
+        "antibody_storage": row.get("antibody_storage"),
+        "antibody_shipping_information": row.get("antibody_shipping_information"),
+        "antibody_references_text": row.get("antibody_references_text"),
         "score": round(float(row.get("score") or 0.0), 4),
         "match_rank": int(row.get("match_rank") or 0),
         "matched_field": row.get("matched_field"),
@@ -135,6 +182,7 @@ def candidate_aliases(
 __all__ = [
     "BUSINESS_LINE_MATCH_SQL",
     "PRODUCT_SELECT_SQL",
+    "PRODUCT_FROM_SQL",
     "build_connection_string",
     "serialize_match",
     "candidate_aliases",
