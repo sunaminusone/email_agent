@@ -25,6 +25,7 @@ _METADATA_TEXT_KEYS = (
     "application_text",
     "species_reactivity_text",
     "format_or_size",
+    # Antibody facet (sourced from antibody_product_catalog child).
     "host",
     "clone",
     "clonality",
@@ -39,20 +40,29 @@ _METADATA_TEXT_KEYS = (
     "ihc_dilution",
     "icc_dilution",
     "immunogen",
-    "formulation",
-    "storage",
-    "shipping_information",
     "references_text",
+    # CAR-T facet (sourced from cart_product_catalog child).
     "costimulatory_domain",
     "construct",
-    "product_type",
     "group_name",
     "group_type",
     "group_subtype",
     "group_summary",
-    "unit",
     "cell_number",
     "marker",
+    "unit",
+    # mRNA-LNP facet (sourced from lnp_product_catalog child).
+    "lnp_type",
+    "lnp_application",
+    "application_handling",
+    "cell_type_tested",
+    "data_sheet_url",
+    # Common provenance — COALESCEd across the three children in retrieval.
+    "formulation",
+    "storage",
+    "shipping",
+    "description",
+    "product_type",
 )
 _METADATA_LIST_KEYS = ("aliases", "applications")
 

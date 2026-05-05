@@ -34,20 +34,9 @@ PRODUCT_SELECT_SQL = """
         p.target_antigen,
         array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.applications)), ', ') AS application_text,
         array_to_string(ARRAY(SELECT jsonb_array_elements_text(p.species_reactivity)), ', ') AS species_reactivity_text,
-        p.attributes->>'construct' AS construct,
         NULL::text AS product_type,
         p.size AS format,
-        p.attributes->>'unit' AS unit,
-        -- Antibody-facet columns from the LEFT JOIN child (NULL on non-antibody rows).
-        -- Aliased without prefix because none of the names collide with parent
-        -- columns and the registry path already uses these unprefixed (host /
-        -- clone / isotype / etc. as ProductRegistryEntry fields). One naming
-        -- convention across both retrieval paths simplifies downstream consumers
-        -- (draft prompt, sections renderer, extractor metadata).
-        -- description_html and raw_metafields are deliberately omitted: the
-        -- former is a multi-KB HTML blob (per-page bodyHtml) and the latter
-        -- is a raw verbatim JSONB; both should be lazy-loaded by callers that
-        -- actually need them, not pulled on every catalog query.
+        -- Antibody-facet columns (NULL on non-antibody rows via LEFT JOIN).
         a.host,
         a.isotype,
         a.clone,
@@ -60,19 +49,43 @@ PRODUCT_SELECT_SQL = """
         a.ihc_dilution,
         a.icc_dilution,
         a.immunogen,
-        a.formulation,
-        a.storage,
-        a.shipping_information,
-        a.references_text
+        a.references_text,
+        -- CAR-T-facet columns (NULL on non-CAR-T rows).
+        c.construct,
+        c.costimulatory_domain,
+        c.group_name,
+        c.group_type,
+        c.group_subtype,
+        c.group_summary,
+        c.cell_number,
+        c.marker,
+        c.unit,
+        -- mRNA-LNP-facet columns (NULL on non-LNP rows). `lnp_` prefix on the
+        -- two names that would collide with parent (record_type) or with the
+        -- existing applications array (application_text).
+        l.type AS lnp_type,
+        l.application AS lnp_application,
+        l.application_handling,
+        l.cell_type_tested,
+        l.data_sheet_url,
+        -- Common provenance fields exist on all three child tables. COALESCE
+        -- across the three: each row only has data on its own facet, so the
+        -- non-NULL value wins.
+        COALESCE(a.formulation, c.formulation, l.formulation) AS formulation,
+        COALESCE(a.shipping,    c.shipping,    l.shipping)    AS shipping,
+        COALESCE(a.storage,     c.storage,     l.storage)     AS storage,
+        COALESCE(a.description, c.description, l.description) AS description
 """
 
-# Shared FROM clause: parent table left-joined to the antibody facet so
-# antibody-specific fields are exposed in PRODUCT_SELECT_SQL without callers
-# having to know the schema split. Non-antibody rows JOIN to NULL on every
-# antibody_* column — serialize_match passes that through cleanly.
+# Shared FROM clause: parent table left-joined to all three CTI facets so
+# business-line-specific fields are exposed in PRODUCT_SELECT_SQL without
+# callers having to know the schema split. A row only ever has data on the
+# child for its own business line; the other JOINs return NULL columns.
 PRODUCT_FROM_SQL = """
     FROM product_catalog p
     LEFT JOIN antibody_product_catalog a ON a.product_id = p.id
+    LEFT JOIN cart_product_catalog     c ON c.product_id = p.id
+    LEFT JOIN lnp_product_catalog      l ON l.product_id = p.id
 """
 
 BUSINESS_LINE_MATCH_SQL = "POSITION(LOWER(REPLACE(%s, '-', '_')) IN LOWER(REPLACE({field}, '-', '_'))) > 0"
@@ -113,12 +126,9 @@ def serialize_match(row: dict[str, Any]) -> dict[str, Any]:
         "target_antigen": row.get("target_antigen"),
         "application_text": row.get("application_text"),
         "species_reactivity_text": row.get("species_reactivity_text"),
-        "construct": row.get("construct"),
         "product_type": row.get("product_type"),
         "format": row.get("format"),
-        "unit": row.get("unit"),
-        # Antibody facet (None on non-antibody rows via LEFT JOIN). No prefix —
-        # aligns with registry path's unprefixed naming.
+        # Antibody facet (None on non-antibody rows via LEFT JOIN).
         "host": row.get("host"),
         "isotype": row.get("isotype"),
         "clone": row.get("clone"),
@@ -131,10 +141,28 @@ def serialize_match(row: dict[str, Any]) -> dict[str, Any]:
         "ihc_dilution": row.get("ihc_dilution"),
         "icc_dilution": row.get("icc_dilution"),
         "immunogen": row.get("immunogen"),
+        "references_text": row.get("references_text"),
+        # CAR-T facet (None on non-CAR-T rows).
+        "construct": row.get("construct"),
+        "costimulatory_domain": row.get("costimulatory_domain"),
+        "group_name": row.get("group_name"),
+        "group_type": row.get("group_type"),
+        "group_subtype": row.get("group_subtype"),
+        "group_summary": row.get("group_summary"),
+        "cell_number": row.get("cell_number"),
+        "marker": row.get("marker"),
+        "unit": row.get("unit"),
+        # mRNA-LNP facet (None on non-LNP rows).
+        "lnp_type": row.get("lnp_type"),
+        "lnp_application": row.get("lnp_application"),
+        "application_handling": row.get("application_handling"),
+        "cell_type_tested": row.get("cell_type_tested"),
+        "data_sheet_url": row.get("data_sheet_url"),
+        # Common provenance (COALESCEd across the three facets).
         "formulation": row.get("formulation"),
         "storage": row.get("storage"),
-        "shipping_information": row.get("shipping_information"),
-        "references_text": row.get("references_text"),
+        "shipping": row.get("shipping"),
+        "description": row.get("description"),
         "score": round(float(row.get("score") or 0.0), 4),
         "match_rank": int(row.get("match_rank") or 0),
         "matched_field": row.get("matched_field"),

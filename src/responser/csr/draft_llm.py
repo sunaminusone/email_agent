@@ -82,10 +82,14 @@ Rules:
     with their plan/phase context (e.g. "Plan A · Phase III: $7,350 —
     vector construction"), noting that the full quote depends on
     selected phases.
-- ANTIBODY field semantics (catalog records with `business_line: Antibody`
-  carry these antibody-specific fields when sourced from our web data —
-  use them ONLY when the customer's ASKED FOCUS calls for them; do NOT
-  volunteer the full technical sheet on a generic price ask):
+- COMMON catalog provenance (every business line carries these — use them
+  when the customer's ASKED FOCUS calls for them; do NOT volunteer them on
+  a generic price ask):
+  * "How should I store it" / "stability"   → `storage`.
+  * "How does it ship" / "shipping"         → `shipping`.
+  * "What's it formulated in" / "buffer"    → `formulation`.
+  * "What is this product" / general intro  → `description` (plaintext).
+- ANTIBODY-only field semantics (records with `business_line: Antibody`):
   * Recommended dilutions per application — map the customer's ask to the
     matching field:
       - "Western blot" / "WB"               → `wb_dilution`
@@ -100,18 +104,31 @@ Rules:
   * "What was used to immunize" / "epitope" / "what's the antigen" →
     `immunogen` (preserve the verbatim text — it usually contains the
     peptide / fusion-protein description).
-  * "How should I store it" / "stability" → `storage`.
-  * "How does it ship" → `shipping_information`.
   * "Host species" / "raised in" / "is it rabbit / mouse" → `host`.
   * "Isotype" → `isotype`. "Clone" → `clone`. "Molecular weight" / "MW"
     / "predicted band size" → `molecular_weight`. "Entrez gene ID" /
     "gene ID" → `gene_id`.
   * "Any publications" / "papers" / "references" → `references_text`
-    (it's HTML — the LLM should extract the citation text, not paste
+    (HTML markup may be present — extract citation text, do not paste
     raw `<br />` tags).
   * `sequence` is the immunogen amino-acid sequence when available;
     values "full" / "" / "N" are sentinels meaning "no public sequence
     on file" — treat as missing, do not paraphrase as "full sequence".
+- CAR-T / CAR-NK-only field semantics (records with `business_line: CAR-T/CAR-NK`):
+  * "What's the construct" / "scFv-CD28-CD3z" → `construct`.
+  * "Costimulatory domain" / "CD28 vs 4-1BB" → `costimulatory_domain`.
+  * "Which product group" / "what kind"      → `group_name` / `group_type`.
+  * "How many cells per vial"                → `cell_number` (text e.g. "1×10^6").
+  * "What marker"                             → `marker`.
+- mRNA-LNP-only field semantics (records with `business_line: mRNA-LNP`):
+  * "What does this LNP encode" / "payload type"  → `lnp_type` (Protein /
+    CAR / Antibody / Control).
+  * "What application is this for"                 → `lnp_application` (free
+    text, e.g. "Chimeric antigen receptor").
+  * "How do I use this in my application" / handling notes →
+    `application_handling` (free-form instructions).
+  * "What cell line was this tested on"            → `cell_type_tested`.
+  * "Is there a datasheet" / "spec sheet"          → `data_sheet_url` (PDF link).
 - OPERATIONAL RECORDS (orders / invoices / shipping) are also authoritative —
   cite order numbers, statuses, and tracking IDs exactly as given.
 - QuickBooks field semantics (don't mistranslate these):

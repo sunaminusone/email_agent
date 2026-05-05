@@ -54,22 +54,32 @@ class ProductRegistryEntry:
     ihc_dilution: str = ""
     icc_dilution: str = ""
     immunogen: str = ""
-    formulation: str = ""
-    storage: str = ""
-    shipping_information: str = ""
     references_text: str = ""
-    # CAR-T / mRNA / shared
+    # CAR-T facet (sourced from cart_product_catalog via LEFT JOIN; empty on
+    # non-CAR-T rows).
     costimulatory_domain: str = ""
     construct: str = ""
-    product_type: str = ""
     group_name: str = ""
     group_type: str = ""
     group_subtype: str = ""
     group_summary: str = ""
-    price_usd: str = ""
-    unit: str = ""
     cell_number: str = ""
     marker: str = ""
+    unit: str = ""
+    # mRNA-LNP facet (sourced from lnp_product_catalog via LEFT JOIN).
+    lnp_type: str = ""
+    lnp_application: str = ""
+    application_handling: str = ""
+    cell_type_tested: str = ""
+    data_sheet_url: str = ""
+    # Common provenance — COALESCEd across the three facets in the SQL path.
+    formulation: str = ""
+    storage: str = ""
+    shipping: str = ""
+    description: str = ""
+    # Misc
+    product_type: str = ""
+    price_usd: str = ""
     source_file: str = ""
     source_sheet: str = ""
 
@@ -253,18 +263,9 @@ class PostgresProductRegistrySource:
         self._table_name = table_name
 
     def load_entries(self) -> tuple[ProductRegistryEntry, ...]:
-        # v2 schema: format → size; product_type / source_file_path / source_sheet
-        # were dropped (xlsx provenance no longer tracked here, mRNA's old
-        # product_type was promoted into record_type during the 005 migration).
-        # _entry_from_record's record.get(...) returns "" for missing keys,
-        # so dropping them is safe.
-        # LEFT JOIN antibody_product_catalog: antibody-only first-class
-        # fields (host / isotype / clone / dilutions / immunogen / etc.) used
-        # to live in attributes JSONB; in v2 they're in the child table.
-        # Non-antibody rows JOIN to NULL on every antibody column, which
-        # _entry_from_record handles via _safe_text / record.get fallback.
-        # NOTE: hardcoded antibody_product_catalog — after 006 swap this
-        # will rename to antibody_product_catalog (mechanical search/replace).
+        # CTI 三子表 LEFT JOIN: 每行只在自己业务线的子表上有数据,其它两张 JOIN
+        # 到 NULL。COALESCE 把 formulation/shipping/storage/description 合并
+        # 到一个顶级字段(每行只有一张子表非空)。
         query = f"""
             SELECT
                 p.catalog_no,
@@ -290,12 +291,29 @@ class PostgresProductRegistrySource:
                 a.ihc_dilution,
                 a.icc_dilution,
                 a.immunogen,
-                a.formulation,
-                a.storage,
-                a.shipping_information,
-                a.references_text
+                a.references_text,
+                c.construct,
+                c.costimulatory_domain,
+                c.group_name,
+                c.group_type,
+                c.group_subtype,
+                c.group_summary,
+                c.cell_number,
+                c.marker,
+                c.unit,
+                l.type AS lnp_type,
+                l.application AS lnp_application,
+                l.application_handling,
+                l.cell_type_tested,
+                l.data_sheet_url,
+                COALESCE(a.formulation, c.formulation, l.formulation) AS formulation,
+                COALESCE(a.shipping,    c.shipping,    l.shipping)    AS shipping,
+                COALESCE(a.storage,     c.storage,     l.storage)     AS storage,
+                COALESCE(a.description, c.description, l.description) AS description
             FROM {self._table_name} p
             LEFT JOIN antibody_product_catalog a ON a.product_id = p.id
+            LEFT JOIN cart_product_catalog     c ON c.product_id = p.id
+            LEFT JOIN lnp_product_catalog      l ON l.product_id = p.id
         """
         with psycopg.connect(self._dsn) as conn:
             with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -471,21 +489,32 @@ def _entry_from_record(record: dict[str, Any]) -> ProductRegistryEntry:
         ihc_dilution=_safe_text(record.get("ihc_dilution")),
         icc_dilution=_safe_text(record.get("icc_dilution")),
         immunogen=_safe_text(record.get("immunogen")),
+        references_text=_safe_text(record.get("references_text")),
+        # CAR-T facet — JOIN-sourced (cart_product_catalog). Pre-007 these
+        # lived in attributes JSONB; that bag was purged during the 007
+        # data migration.
+        costimulatory_domain=_safe_text(record.get("costimulatory_domain")),
+        construct=_safe_text(record.get("construct")),
+        group_name=_safe_text(record.get("group_name")),
+        group_type=_safe_text(record.get("group_type")),
+        group_subtype=_safe_text(record.get("group_subtype")),
+        group_summary=_safe_text(record.get("group_summary")),
+        cell_number=_safe_text(record.get("cell_number")),
+        marker=_safe_text(record.get("marker")),
+        unit=_safe_text(record.get("unit")),
+        # mRNA-LNP facet — JOIN-sourced (lnp_product_catalog).
+        lnp_type=_safe_text(record.get("lnp_type")),
+        lnp_application=_safe_text(record.get("lnp_application")),
+        application_handling=_safe_text(record.get("application_handling")),
+        cell_type_tested=_safe_text(record.get("cell_type_tested")),
+        data_sheet_url=_safe_text(record.get("data_sheet_url")),
+        # Common provenance — COALESCEd in SQL.
         formulation=_safe_text(record.get("formulation")),
         storage=_safe_text(record.get("storage")),
-        shipping_information=_safe_text(record.get("shipping_information")),
-        references_text=_safe_text(record.get("references_text")),
-        costimulatory_domain=_safe_text(attributes.get("costimulatory_domain")),
-        construct=_safe_text(attributes.get("construct")),
+        shipping=_safe_text(record.get("shipping")),
+        description=_safe_text(record.get("description")),
         product_type=_safe_text(record.get("product_type")),
-        group_name=_safe_text(attributes.get("group_name")),
-        group_type=_safe_text(attributes.get("group_type")),
-        group_subtype=_safe_text(attributes.get("group_subtype")),
-        group_summary=_safe_text(attributes.get("group_summary")),
         price_usd=_safe_text(record.get("price_usd") or record.get("price")),
-        unit=_safe_text(attributes.get("unit")),
-        cell_number=_safe_text(attributes.get("cell_number")),
-        marker=_safe_text(attributes.get("marker")),
         source_file=Path(source_file_path).name if source_file_path else "",
         source_sheet=_safe_text(record.get("source_sheet")),
     )
