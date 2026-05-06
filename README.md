@@ -186,6 +186,26 @@ pytest -q tests/test_technical_inquiry.py tests/test_response_service.py tests/t
 
 That subset currently passes.
 
+### Integration tests (real backends)
+
+Tests marked `@pytest.mark.integration` hit real PG / Chroma / S3 / QuickBooks
+sandbox and are **skipped by default**. Run them manually before merging
+schema changes, rotating credentials, or shipping a release:
+
+```bash
+pytest --integration tests/test_integration_*.py
+```
+
+Prerequisites:
+
+- PG SSM tunnel is up (`build_connection_string()` reaches RDS)
+- AWS credentials loaded (`aws sts get-caller-identity` works)
+- `data/quickbooks_tokens.json` present and `QB_ENVIRONMENT=sandbox`
+- Local Chroma directories exist (`data/processed/chroma_*`)
+
+The QB refresh-token round-trip rewrites `data/quickbooks_tokens.json`
+on success — that's intended (it's the cred-rot canary).
+
 ## Design Docs
 
 Start here:
