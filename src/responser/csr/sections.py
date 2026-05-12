@@ -167,21 +167,26 @@ def format_structured_section(records: list[dict[str, Any]]) -> str:
 
 
 def format_document_files_section(files: list[dict[str, Any]]) -> str:
+    # The clickable URL itself is rendered as a chip by the frontend
+    # (chat-document-actions, populated from execution_run.executed_actions).
+    # This section is informational: title + type only, no URL — so the
+    # Slack-style renderer (which doesn't parse markdown links) doesn't
+    # spill the raw presigned URL into the message body.
     lines = ["*📁 Matched document files*"]
     for i, f in enumerate(files, 1):
         title = (
-            f.get("document_name")
+            f.get("title")
+            or f.get("document_name")
             or f.get("file_name")
-            or f.get("path")
-            or f.get("source_path")
             or f"file {i}"
         )
         doc_type = f.get("document_type") or ""
-        path = f.get("path") or f.get("source_path") or ""
         suffix = f" ({doc_type})" if doc_type else ""
         lines.append(f"   *[{i}]* {title}{suffix}")
-        if path:
-            lines.append(f"      • path: `{path}`")
+        if not (f.get("document_url") or "").strip():
+            # Surface a warning only when presigning failed so CSR knows the
+            # download chip below may not appear.
+            lines.append("      • (link unavailable — check S3 access)")
     return "\n".join(lines)
 
 

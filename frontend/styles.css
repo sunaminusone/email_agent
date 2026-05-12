@@ -1342,6 +1342,12 @@ button {
   color: var(--text);
   width: min(100%, 760px);
   justify-self: center;
+  /* Assistant messages format their own line breaks via formatSlackMessage
+     (<div> per line + <br/> for blanks). The bubble-level pre-wrap on
+     .chat-message would otherwise render every template-literal newline +
+     indent as visible whitespace, producing huge gaps between sections
+     and between the message body and the document-action chip below. */
+  white-space: normal;
 }
 
 .chat-message-assistant .chat-message-header {
@@ -1968,7 +1974,7 @@ button {
 }
 
 .chat-document-actions {
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .content-block-item-download {
@@ -1979,22 +1985,36 @@ button {
 .download-file-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: fit-content;
-  margin-top: 12px;
-  padding: 10px 16px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  color: #fff;
-  font-weight: 700;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 12px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-muted);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
   text-decoration: none;
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
-  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
 .download-file-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.28);
+  background: var(--bg-strong);
+  border-color: var(--border-strong);
+  color: var(--accent-strong);
+}
+
+.download-file-btn .download-file-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.download-file-btn .download-file-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 340px;
 }
 
 pre {

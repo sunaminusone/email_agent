@@ -51,6 +51,18 @@ def run_document_selection(
     matches: list[dict[str, Any]] = []
 
     for item in inventory:
+        # Per-SKU lock-down: when the caller specified catalog_numbers and
+        # the inventory item is a product-scope row (carries its own
+        # catalog_no), require an exact catalog_no match. Otherwise items
+        # with the same business line + document_type ("flyer") squeak
+        # through the strong_match path on doc-type/BL alone and we end
+        # up returning sibling SKUs (PM-CAR1001/1003/1004 when only
+        # PM-CAR1000 was asked). Service-scope items (catalog_no="")
+        # still play by the existing token/strong-match rules.
+        item_catalog_no = (item.get("catalog_no") or "").upper()
+        if catalog_numbers and item_catalog_no and item_catalog_no not in catalog_numbers:
+            continue
+
         score = 0
         strong_match = False
         matched_tokens = sorted(query_tokens.intersection(item["tokens"]))
@@ -70,6 +82,12 @@ def run_document_selection(
                 continue
 
         if any(name and normalize_text(name) in item["normalized_name"] for name in product_names + document_names):
+            score += 6
+            strong_match = True
+
+        # Exact catalog_no match is itself the strongest signal — promote it
+        # so the row clears the score<10 floor even if name/BL bonuses miss.
+        if catalog_numbers and item_catalog_no and item_catalog_no in catalog_numbers:
             score += 6
             strong_match = True
 

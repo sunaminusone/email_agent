@@ -23,6 +23,9 @@ Inputs you will see:
 5. Relevant documentation chunks from our knowledge base.
 6. OPERATIONAL RECORDS — order / invoice / shipping / customer data from
    QuickBooks (only present when those tools fired).
+7. MATCHED DOCUMENT FILES — presigned PDF links for product flyers / service
+   brochures matched to the inquiry. Each entry has `title`, `catalog_no`,
+   `document_type`, and a `document_url` (https) that's clickable for ~1 hour.
 
 Rules:
 - Write a clear, professional draft reply addressed to the new customer.
@@ -82,53 +85,15 @@ Rules:
     with their plan/phase context (e.g. "Plan A · Phase III: $7,350 —
     vector construction"), noting that the full quote depends on
     selected phases.
-- COMMON catalog provenance (every business line carries these — use them
-  when the customer's ASKED FOCUS calls for them; do NOT volunteer them on
-  a generic price ask):
-  * "How should I store it" / "stability"   → `storage`.
-  * "How does it ship" / "shipping"         → `shipping`.
-  * "What's it formulated in" / "buffer"    → `formulation`.
-  * "What is this product" / general intro  → `description` (plaintext).
-- ANTIBODY-only field semantics (records with `business_line: Antibody`):
-  * Recommended dilutions per application — map the customer's ask to the
-    matching field:
-      - "Western blot" / "WB"               → `wb_dilution`
-      - "ELISA"                              → `elisa_dilution`
-      - "IHC" / "immunohistochemistry"      → `ihc_dilution`
-      - "ICC" / "immunocytochemistry"       → `icc_dilution`
-      - "FACS" / "flow cytometry" / "FCM"   → `fcm_dilution`
-    Phrase as "recommended at <value> for <application>" (e.g.
-    "recommended at 1/500 - 1/2000 for Western blot"). If the asked
-    application's dilution field is empty, say so explicitly — do NOT
-    substitute a different application's dilution.
-  * "What was used to immunize" / "epitope" / "what's the antigen" →
-    `immunogen` (preserve the verbatim text — it usually contains the
-    peptide / fusion-protein description).
-  * "Host species" / "raised in" / "is it rabbit / mouse" → `host`.
-  * "Isotype" → `isotype`. "Clone" → `clone`. "Molecular weight" / "MW"
-    / "predicted band size" → `molecular_weight`. "Entrez gene ID" /
-    "gene ID" → `gene_id`.
-  * "Any publications" / "papers" / "references" → `references_text`
-    (HTML markup may be present — extract citation text, do not paste
-    raw `<br />` tags).
-  * `sequence` is the immunogen amino-acid sequence when available;
-    values "full" / "" / "N" are sentinels meaning "no public sequence
-    on file" — treat as missing, do not paraphrase as "full sequence".
-- CAR-T / CAR-NK-only field semantics (records with `business_line: CAR-T/CAR-NK`):
-  * "What's the construct" / "scFv-CD28-CD3z" → `construct`.
-  * "Costimulatory domain" / "CD28 vs 4-1BB" → `costimulatory_domain`.
-  * "Which product group" / "what kind"      → `group_name` / `group_type`.
-  * "How many cells per vial"                → `cell_number` (text e.g. "1×10^6").
-  * "What marker"                             → `marker`.
-- mRNA-LNP-only field semantics (records with `business_line: mRNA-LNP`):
-  * "What does this LNP encode" / "payload type"  → `lnp_type` (Protein /
-    CAR / Antibody / Control).
-  * "What application is this for"                 → `lnp_application` (free
-    text, e.g. "Chimeric antigen receptor").
-  * "How do I use this in my application" / handling notes →
-    `application_handling` (free-form instructions).
-  * "What cell line was this tested on"            → `cell_type_tested`.
-  * "Is there a datasheet" / "spec sheet"          → `data_sheet_url` (PDF link).
+- Catalog record fields are pre-serialized for you — field names (e.g.
+  `wb_dilution`, `construct`, `lnp_type`, `formulation`, `storage`,
+  `shipping`, `data_sheet_url`) are self-describing; match them to the
+  customer's ask. Empty / missing fields are already omitted from the
+  record — if the field the customer asked about isn't there, say so per
+  the general ASKED FOCUS rule. When a field carries free-form citation
+  text (e.g. `references_text`, `immunogen`), quote it verbatim; if HTML
+  markup is present, extract the citation/description text and drop raw
+  `<br />` etc.
 - OPERATIONAL RECORDS (orders / invoices / shipping) are also authoritative —
   cite order numbers, statuses, and tracking IDs exactly as given.
 - QuickBooks field semantics (don't mistranslate these):
@@ -152,6 +117,16 @@ Rules:
     (Invoice records only — SalesReceipts skip this). Possible values:
 __PAYMENT_STATUS_VOCABULARY__
     Do NOT volunteer payment status unless the customer asked about it.
+- MATCHED DOCUMENT FILES → render as a markdown link in the draft prose
+  whenever the customer asked for product info, documentation, or basic
+  introduction to a product. Format: `[Title](document_url)` (e.g.
+  `[PM-CAR1000 Product Flyer](https://...)`). The frontend renders this as
+  a clickable blue link the customer can preview directly. The link is
+  signed and expires in ~1 hour, so do not paraphrase or omit the URL.
+  Surface ONE link per document file; do not list multiple files in a row
+  unless the customer asked for several products. Skip entirely when the
+  asked_focus is a narrow factual lookup (e.g. "what's the cell number")
+  that the structured catalog already answers.
 - Lean on past sales replies for TONE and STRUCTURE — how our team talks to
   customers — but not for specific numbers when live data exists.
 - Use documentation chunks to cite technical specs and process details only
@@ -223,6 +198,7 @@ def _build_draft_prompts(
     asked_focus: str | None,
     threads: list[dict[str, Any]],
     documents: list[dict[str, Any]],
+    document_files: list[dict[str, Any]],
     structured_records: list[dict[str, Any]],
     operational_records: list[dict[str, Any]],
     trust_signal: dict[str, Any],
@@ -296,6 +272,27 @@ def _build_draft_prompts(
     else:
         parts.append("\nPRIMARY SERVICE DOCUMENT AVAILABLE: (none)")
 
+    if document_files:
+        parts.append(
+            "\nMATCHED DOCUMENT FILES (presigned PDF links — render as markdown "
+            "`[Title](document_url)` inline in the draft when relevant):"
+        )
+        for i, f in enumerate(document_files, 1):
+            parts.append(
+                f"\n--- file {i} ---\n"
+                + render_record_for_llm(
+                    {
+                        "title": f.get("title", ""),
+                        "catalog_no": f.get("catalog_no", ""),
+                        "document_type": f.get("document_type", ""),
+                        "business_line": f.get("business_line", ""),
+                        "document_url": f.get("document_url", ""),
+                    }
+                )
+            )
+    else:
+        parts.append("\nMATCHED DOCUMENT FILES: (none)")
+
     if operational_records:
         parts.append(
             "\nOPERATIONAL RECORDS (orders / invoices / shipping / customer — AUTHORITATIVE):"
@@ -328,6 +325,7 @@ def generate_draft(
     asked_focus: str | None,
     threads: list[dict[str, Any]],
     documents: list[dict[str, Any]],
+    document_files: list[dict[str, Any]],
     structured_records: list[dict[str, Any]],
     operational_records: list[dict[str, Any]],
     trust_signal: dict[str, Any],
@@ -341,6 +339,7 @@ def generate_draft(
         asked_focus=asked_focus,
         threads=threads,
         documents=documents,
+        document_files=document_files,
         structured_records=structured_records,
         operational_records=operational_records,
         trust_signal=trust_signal,
@@ -364,6 +363,7 @@ def stream_draft(
     asked_focus: str | None,
     threads: list[dict[str, Any]],
     documents: list[dict[str, Any]],
+    document_files: list[dict[str, Any]],
     structured_records: list[dict[str, Any]],
     operational_records: list[dict[str, Any]],
     trust_signal: dict[str, Any],
@@ -380,6 +380,7 @@ def stream_draft(
         asked_focus=asked_focus,
         threads=threads,
         documents=documents,
+        document_files=document_files,
         structured_records=structured_records,
         operational_records=operational_records,
         trust_signal=trust_signal,

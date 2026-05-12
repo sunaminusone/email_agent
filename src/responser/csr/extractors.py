@@ -5,6 +5,7 @@ from typing import Any
 
 from src.common.execution_models import ExecutedToolCall
 from src.responser.models import ResponseInput
+from src.responser.csr.dedup_keys import dedupe_calls
 from src.documents.retrieval.service_documents import get_primary_service_document_link
 
 _TOOL_BUCKETS: dict[str, str] = {
@@ -23,7 +24,14 @@ _TOOL_BUCKETS: dict[str, str] = {
 def collect_calls_by_bucket(
     response_input: ResponseInput,
 ) -> dict[str, list[ExecutedToolCall]]:
-    """Iterate every executed tool call once and bucket by tool_name."""
+    """Iterate every executed tool call once and bucket by tool_name.
+
+    Runs ``dedupe_calls`` first so each tool appears at most once with its
+    primary_records merged — necessary because the executor leaves raw
+    duplicate entries in ``executed_calls`` (cross-group cache reuse and
+    retry-with-fallback both produce same-tool repeats by design, for
+    audit visibility).
+    """
     buckets: dict[str, list[ExecutedToolCall]] = {
         "historical": [],
         "technical_docs": [],
@@ -32,7 +40,8 @@ def collect_calls_by_bucket(
         "operational": [],
         "unknown": [],
     }
-    for call in response_input.execution_result.executed_calls:
+    deduped = dedupe_calls(response_input.execution_result.executed_calls)
+    for call in deduped:
         if call.result is None:
             continue
         bucket = _TOOL_BUCKETS.get(call.tool_name, "unknown")
@@ -65,6 +74,9 @@ def extract_retrieval_confidence(calls: list[ExecutedToolCall]) -> dict[str, Any
 
 
 def extract_document_files(calls: list[ExecutedToolCall]) -> list[dict[str, Any]]:
+    # Dedup is handled upstream by ``collect_calls_by_bucket`` → ``dedupe_calls``,
+    # which collapses same-tool repeats and merges primary_records by S3 URI.
+    # This extractor just flattens the bucket and caps to top 5.
     out: list[dict[str, Any]] = []
     for call in calls:
         matches = call.result.primary_records or []
@@ -116,7 +128,10 @@ def extract_structured_records(calls: list[ExecutedToolCall]) -> list[dict[str, 
         facts = call.result.structured_facts or {}
         records = facts.get("pricing_records")
         if not records:
-            records = call.result.primary_records or []
+            # Prefer llm_records (tool-side serialized view); fall back to
+            # primary_records when the tool hasn't been migrated yet.
+            # Contract: docs/RESPONDER_DESIGN_V4.md ⭐ section.
+            records = call.result.llm_records or call.result.primary_records or []
         for record in records:
             if not isinstance(record, dict):
                 continue
@@ -130,7 +145,8 @@ def extract_structured_records(calls: list[ExecutedToolCall]) -> list[dict[str, 
 def extract_operational_records(calls: list[ExecutedToolCall]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for call in calls:
-        records = call.result.primary_records or []
+        # Prefer llm_records over primary_records (see contract above).
+        records = call.result.llm_records or call.result.primary_records or []
         for record in records:
             if not isinstance(record, dict):
                 continue

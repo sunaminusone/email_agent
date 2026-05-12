@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.catalog.retrieval.llm_serializer import serialize_catalog_record
 from src.catalog.service import lookup_catalog_products
 from src.tools.result_builders import empty_result, error_result, ok_result, partial_result
 from src.tools.models import ToolRequest, ToolResult
@@ -24,6 +25,11 @@ def execute_catalog_lookup(request: ToolRequest) -> ToolResult:
         return ok_result(
             tool_name=request.tool_name,
             primary_records=matches,
+            # Parallel LLM-ready view — drops scoring / cross-facet None
+            # fields / sequence sentinels so the drafter doesn't need to
+            # carry schema knowledge in its prompt. See
+            # docs/RESPONDER_DESIGN_V4.md ⭐ section.
+            llm_records=[serialize_catalog_record(m) for m in matches],
             structured_facts=facts,
             debug_info={"catalog_params": params},
         )

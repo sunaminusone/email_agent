@@ -49,11 +49,10 @@ function escapeHtml(value) {
 
 function buildDownloadLabel(label, fileName) {
   const preferred = String(label || fileName || "").trim();
-  if (!preferred) {
-    return "Download files";
-  }
-  return `Download ${preferred}`;
+  return preferred || "PDF document";
 }
+
+const PDF_CHIP_ICON = `<svg class="download-file-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
 
 function closeAllHistoryMenus() {
   document.querySelectorAll(".history-menu").forEach((menu) => {
@@ -590,7 +589,7 @@ function renderChatHistory(options = {}) {
       : "";
     const documentLinks = (message.metadata?.documents || []).map((doc) => `
       <a class="download-file-btn" href="${escapeHtml(doc.document_url || "")}" target="_blank" rel="noopener noreferrer" download>
-        ${escapeHtml(buildDownloadLabel(doc.label, doc.file_name))}
+        ${PDF_CHIP_ICON}<span class="download-file-label">${escapeHtml(buildDownloadLabel(doc.label, doc.file_name))}</span>
       </a>
     `).join("");
     const documentSection = documentLinks
@@ -879,7 +878,7 @@ function normalizeAssistantMessage(output) {
     .map((match) => ({
       file_name: match.file_name || "",
       document_url: match.document_url || "",
-      label: match.file_name || "Document",
+      label: match.title || match.file_name || "Document",
       source: "document_lookup",
     }));
   const servicePrimaryDocuments = (output.response_content_blocks || [])
@@ -1199,7 +1198,7 @@ function renderResponseContentBlocks(output) {
               ${fileName ? `<p class="content-block-text">${escapeHtml(fileName)}</p>` : ""}
               ${url ? `
                 <a class="download-file-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" download>
-                  ${escapeHtml(buildDownloadLabel(title, fileName))}
+                  ${PDF_CHIP_ICON}<span class="download-file-label">${escapeHtml(buildDownloadLabel(title, fileName))}</span>
                 </a>
               ` : ""}
             </div>

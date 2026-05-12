@@ -72,6 +72,13 @@ class ToolResult(_ToolModel):
     tool_name: str
     status: str = "empty"
     primary_records: list[dict[str, Any]] = Field(default_factory=list)
+    # LLM-ready parallel view of primary_records — same length, same order
+    # (1:1 by index). Tool wrappers SHOULD populate this with a
+    # serialize_for_llm-transformed copy so the drafter doesn't carry
+    # per-tool schema knowledge in its system prompt.
+    # Contract: docs/RESPONDER_DESIGN_V4.md ⭐ section.
+    # Empty list = fallback path; responder uses primary_records directly.
+    llm_records: list[dict[str, Any]] = Field(default_factory=list)
     supporting_records: list[dict[str, Any]] = Field(default_factory=list)
     structured_facts: dict[str, Any] = Field(default_factory=dict)
     unstructured_snippets: list[dict[str, Any]] = Field(default_factory=list)
