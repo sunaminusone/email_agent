@@ -11,7 +11,16 @@ CATALOG_NUMBER_PATTERNS = [
     re.compile(r"\b\d{5}\b"),
     re.compile(r"\bPM-CAR\d{4}\b", re.IGNORECASE),
     re.compile(r"\bPM-LNP-\d{4}\b", re.IGNORECASE),
-    re.compile(r"\b[A-Z0-9]+(?:-[A-Z0-9]+)+\b", re.IGNORECASE),
+    # Generic hyphenated catalog fallback — must be PM-prefixed OR contain
+    # a digit, otherwise plain English compounds ("PRE-TESTED", "CAR-CELLS",
+    # "non-profit", "mRNA-LNP") match and propagate as bogus catalog
+    # candidates into catalog/selection.py. Mirrors the tightening commit
+    # 2c5922c applied to src/ingestion/deterministic_signals.py for the
+    # same shape there.
+    re.compile(
+        r"\b(?:PM-[A-Z0-9]+(?:-[A-Z0-9]+)*|[A-Z]*\d[A-Z0-9]*(?:-[A-Z0-9]+)+|[A-Z0-9]+-[A-Z0-9]*\d[A-Z0-9]*(?:-[A-Z0-9]+)*)\b",
+        re.IGNORECASE,
+    ),
 ]
 LOW_SIGNAL_TOKENS = {
     "a",
