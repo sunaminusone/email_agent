@@ -1,4 +1,4 @@
-"""Tests for memory v3: recall, reflect, salience scoring, intent drift detection."""
+"""Tests for the v4-compatible memory lifecycle: recall, reflect, and drift handling."""
 from pathlib import Path
 import sys
 
@@ -112,6 +112,14 @@ class TestTrajectoryDetection:
         assert t.has_pending_clarification is True
 
     def test_follow_up(self):
+        snapshot = MemorySnapshot(
+            thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="csr_draft"),
+            response_memory=ResponseMemory(last_response_topics=["knowledge_lookup"]),
+        )
+        t = _compute_trajectory(snapshot)
+        assert t.phase == "follow_up"
+
+    def test_follow_up_legacy_turn_type_still_supported(self):
         snapshot = MemorySnapshot(
             thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="answer"),
         )
@@ -249,7 +257,7 @@ class TestRecall:
             ),
             response_memory=ResponseMemory(
                 revealed_attributes=["identity", "applications"],
-                last_response_topics=["direct_answer"],
+                last_response_topics=["knowledge_lookup"],
             ),
         )
 
@@ -272,10 +280,11 @@ class TestRecall:
     def test_recall_surfaces_prior_intent_groups_when_following_up(self):
         groups = [IntentGroup(intent="technical_question", object_display_name="CAR-T", confidence=0.85)]
         snapshot = MemorySnapshot(
-            thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="answer"),
+            thread_memory=ThreadMemory(thread_id="t1", active_route="execute", last_turn_type="csr_draft"),
+            response_memory=ResponseMemory(last_response_topics=["knowledge_lookup"]),
             intent_memory=IntentMemory(
                 prior_intent_groups=groups,
-                prior_primary_intent="technical_question",
+                prior_semantic_intent="technical_question",
             ),
         )
         ctx = recall(thread_id="t1", user_query="tell me more about CAR-T", prior_state=snapshot)
@@ -299,7 +308,6 @@ class TestReflectMergeContributions:
             MemoryContribution(
                 source="routing",
                 active_route="execute",
-                route_phase="active",
             ),
             MemoryContribution(
                 source="response",
@@ -307,7 +315,7 @@ class TestReflectMergeContributions:
                 set_last_response_topics=["pricing_question"],
             ),
         ]
-        update = _merge_contributions(contribs, "t1", "find product A100", "answer")
+        update = _merge_contributions(contribs, "t1", "find product A100", "csr_draft")
 
         assert update.thread_memory.thread_id == "t1"
         assert update.thread_memory.active_route == "execute"
@@ -449,6 +457,35 @@ class TestIntentGroupStorage:
         result = _store_intent_groups(snapshot, contribs)
         assert result.intent_memory.turns_since_last_intent_change == 3
 
+    def test_follow_up_intent_does_not_overwrite_prior_semantic_intent(self):
+        """Chain follow-ups must keep prior_semantic_intent pointing at the
+        last meaningful retrieval bucket (backlog #8 writer side)."""
+        snapshot = MemorySnapshot(
+            intent_memory=IntentMemory(
+                prior_intent_groups=[IntentGroup(intent="pricing_question")],
+                prior_semantic_intent="pricing_question",
+            ),
+        )
+        new_groups = [IntentGroup(intent="follow_up", object_display_name="CAR-T")]
+        contribs = [MemoryContribution(source="ingestion", intent_groups=new_groups)]
+        result = _store_intent_groups(snapshot, contribs)
+        # prior_intent_groups gets the new follow_up group (drift tracking unchanged)
+        assert result.intent_memory.prior_intent_groups[0].intent == "follow_up"
+        # But prior_semantic_intent stays pinned to the meaningful intent
+        assert result.intent_memory.prior_semantic_intent == "pricing_question"
+
+    def test_unknown_intent_does_not_overwrite_prior_semantic_intent(self):
+        snapshot = MemorySnapshot(
+            intent_memory=IntentMemory(
+                prior_intent_groups=[IntentGroup(intent="technical_question")],
+                prior_semantic_intent="technical_question",
+            ),
+        )
+        new_groups = [IntentGroup(intent="unknown")]
+        contribs = [MemoryContribution(source="ingestion", intent_groups=new_groups)]
+        result = _store_intent_groups(snapshot, contribs)
+        assert result.intent_memory.prior_semantic_intent == "technical_question"
+
     def test_stack_depth_limited(self):
         snapshot = MemorySnapshot(
             intent_memory=IntentMemory(
@@ -494,7 +531,6 @@ class TestReflectIntegration:
             MemoryContribution(
                 source="routing",
                 active_route="execute",
-                route_phase="active",
             ),
             MemoryContribution(
                 source="ingestion",
@@ -512,7 +548,7 @@ class TestReflectIntegration:
             contributions=contribs,
             thread_id="t1",
             normalized_query="find product A100",
-            last_turn_type="answer",
+            last_turn_type="csr_draft",
         )
 
         assert result.thread_memory.active_route == "execute"
@@ -552,7 +588,7 @@ class TestReflectIntegration:
             contributions=contribs_t1,
             thread_id="t1",
             normalized_query="check order 12345 and explain CAR-T",
-            last_turn_type="answer",
+            last_turn_type="csr_draft",
         )
 
         # Verify turn 1 results

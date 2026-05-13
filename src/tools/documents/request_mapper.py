@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.common.utils import dedupe_strings
+from src.common.utils import dedupe_strings, first_non_empty
 from src.tools.models import ToolRequest
 
 
@@ -26,7 +26,7 @@ def build_document_lookup_params(request: ToolRequest) -> dict[str, Any]:
             if product_label:
                 product_names.append(product_label)
 
-    catalog_no = _first_non_empty(
+    catalog_no = first_non_empty(
         resolved_constraints.get("catalog_number"),
         resolved_constraints.get("catalog_no"),
         resolved_constraints.get("identifier"),
@@ -34,14 +34,14 @@ def build_document_lookup_params(request: ToolRequest) -> dict[str, Any]:
     if catalog_no:
         catalog_numbers.append(catalog_no)
 
-    product_name = _first_non_empty(
+    product_name = first_non_empty(
         resolved_constraints.get("product_name"),
         resolved_constraints.get("canonical_value"),
     )
     if product_name:
         product_names.append(product_name)
 
-    document_name = _first_non_empty(
+    document_name = first_non_empty(
         resolved_constraints.get("document_name"),
         resolved_constraints.get("document_title"),
     )
@@ -62,13 +62,5 @@ def build_document_lookup_params(request: ToolRequest) -> dict[str, Any]:
         "business_line_hint": business_line_hint,
         "top_k": 5,
     }
-
-
-def _first_non_empty(*values: Any) -> str:
-    for value in values:
-        cleaned = str(value or "").strip()
-        if cleaned:
-            return cleaned
-    return ""
 
 

@@ -4,22 +4,24 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.memory.models import MemoryContribution
 from src.ingestion.models import AttributeConstraint, EntitySpan, RecencyType, SourceType
-from src.common.models import ObjectType
+from src.common.models import ObjectRef, ObjectType
 
 
 class _ObjectsModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ObjectCandidate(_ObjectsModel):
-    object_type: ObjectType = "unknown"
+class ObjectCandidate(ObjectRef):
+    """Full object candidate — extends ObjectRef with resolution metadata.
+
+    Shared fields (object_type, identifier, identifier_type, display_name,
+    business_line) are inherited from ObjectRef.  ObjectCandidate IS-A
+    ObjectRef, so it can be used wherever an ObjectRef is expected.
+    """
     raw_value: str = ""
     canonical_value: str = ""
-    display_name: str = ""
-    identifier: str = ""
-    identifier_type: str = ""
-    business_line: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     recency: RecencyType = "CURRENT_TURN"
     source_type: SourceType = "parser"
@@ -27,7 +29,7 @@ class ObjectCandidate(_ObjectsModel):
     attribute_constraints: list[AttributeConstraint] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     is_ambiguous: bool = False
-    used_stateful_anchor: bool = False
+    used_memory_context: bool = False
 
 
 class AmbiguousObjectSet(_ObjectsModel):
@@ -59,7 +61,35 @@ class ResolvedObjectState(_ObjectsModel):
     secondary_objects: list[ObjectCandidate] = Field(default_factory=list)
     ambiguous_sets: list[AmbiguousObjectSet] = Field(default_factory=list)
     active_object: ObjectCandidate | None = None
-    used_stateful_anchor: bool = False
+    used_memory_context: bool = False
     resolution_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     resolution_reason: str = ""
     resolution_phase: str = ""
+
+
+def build_objects_memory_contribution(
+    resolved_object_state: ResolvedObjectState,
+    should_soft_reset: bool,
+) -> MemoryContribution:
+    active_object = (
+        None
+        if should_soft_reset
+        else (resolved_object_state.primary_object or resolved_object_state.active_object)
+    )
+    recent_objects = [
+        item
+        for item in [
+            active_object,
+            resolved_object_state.active_object,
+            *resolved_object_state.secondary_objects,
+        ]
+        if item is not None
+    ]
+    return MemoryContribution(
+        source="objects",
+        set_active_object=active_object,
+        secondary_active_objects=list(resolved_object_state.secondary_objects),
+        append_recent_objects=recent_objects,
+        soft_reset_current_topic=should_soft_reset,
+        reason="objects: resolved from current turn",
+    )

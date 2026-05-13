@@ -101,12 +101,23 @@ def test_overall_action_respond():
 
 def test_merged_execution_result_combines_calls():
     state = AgentState()
-    state.record(_group("pricing"), _route(), _execution("ok", "pricing_lookup_tool"), status="resolved")
-    state.record(_group("technical"), _route(), _execution("ok", "technical_rag_tool"), status="resolved")
+    state.record(
+        _group("pricing"),
+        _route(),
+        _execution("ok", "pricing_lookup_tool").model_copy(update={"iteration_count": 1}),
+        status="resolved",
+    )
+    state.record(
+        _group("technical"),
+        _route(),
+        _execution("ok", "technical_rag_tool").model_copy(update={"iteration_count": 2}),
+        status="resolved",
+    )
 
     merged = state.merged_execution_result
     assert len(merged.executed_calls) == 2
     assert merged.final_status == "ok"
+    assert merged.iteration_count == 3
     tool_names = {c.tool_name for c in merged.executed_calls}
     assert tool_names == {"pricing_lookup_tool", "technical_rag_tool"}
 

@@ -28,6 +28,7 @@ class AgentRequest(_ApiModel):
     thread_id: str = ""
     user_query: str
     locale: str = "en"
+    start_new_conversation: bool = False
     conversation_history: list[ConversationMessage] = Field(default_factory=list)
     attachments: list[RequestAttachment] = Field(default_factory=list)
 
@@ -36,7 +37,6 @@ class FinalResponsePayload(_ApiModel):
     message: str = ""
     response_type: str = "answer"
     grounded_action_types: list[str] = Field(default_factory=list)
-    needs_human_handoff: bool = False
     missing_information_requested: list[str] = Field(default_factory=list)
 
 
@@ -48,10 +48,10 @@ class AgentPrototypeResponse(_ApiModel):
     reply_preview: str = ""
     execution_plan: dict[str, Any] = Field(default_factory=dict)
     execution_run: dict[str, Any] = Field(default_factory=dict)
-    response_resolution: dict[str, Any] = Field(default_factory=dict)
+    answer_focus: str = ""
     response_topic: str = ""
     response_content_blocks: list[dict[str, Any]] = Field(default_factory=list)
     response_content_summary: str = ""
-    response_path: str = "deterministic"
+    response_path: str = "csr_renderer_direct"
     final_response: FinalResponsePayload = Field(default_factory=FinalResponsePayload)
     assistant_message: dict[str, Any] = Field(default_factory=dict)

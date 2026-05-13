@@ -4,6 +4,7 @@ pydantic
 python-dotenv
 python-multipart
 requests
+boto3
 redis
 pandas
 openpyxl
@@ -17,3 +18,4 @@ chromadb
 langserve[all]
 torch
 transformers
+pytest

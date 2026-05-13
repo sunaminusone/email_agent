@@ -1,0 +1,108 @@
+How To Connect To Our RDS PostgreSQL Database
+
+We connect to the database through AWS SSM Port Forwarding + an EC2 bastion host, not through a traditional SSH tunnel.
+
+Your local client connects to:
+- Host: 127.0.0.1
+- Port: 5433
+
+Behind the scenes, AWS SSM forwards that traffic through our EC2 bastion to the RDS instance.
+
+What you need
+
+1. AWS access with permission to use SSM
+Your AWS identity needs permission for:
+- ssm:StartSession
+- ssm:TerminateSession
+- ssm:ResumeSession
+- ssm:DescribeInstanceInformation
+
+2. AWS CLI installed locally
+
+aws --version
+
+3. Session Manager plugin installed locally
+AWS official docs:
+https://docs.aws.amazon.com/systems-manager/latest/userguide/install-plugin-macos-overview.html
+
+4. PostgreSQL client (psql) installed locally
+
+If you use Homebrew on Mac:
+
+brew install libpq
+brew link --force libpq
+
+Step 1: Verify your AWS CLI identity
+
+Run:
+
+aws sts get-caller-identity
+
+This should return your AWS identity details.
+
+Step 2: Start the SSM port-forwarding session
+
+Run this in your local terminal:
+
+aws ssm start-session \
+  --target i-00f21dfd43650d98b \
+  --region us-east-1 \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters '{"host":["promab-database.cuxmicmquovc.us-east-1.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["5433"]}'
+
+If successful, you should see something like:
+
+Port 5433 opened for sessionId ...
+Waiting for connections...
+
+Keep that terminal window open.
+
+Step 3: Connect to PostgreSQL
+
+Open a second local terminal window and run:
+
+psql "host=127.0.0.1 port=5433 dbname=postgres user=postgres sslmode=require"
+
+If the database name is not postgres, replace it with the correct database name.
+If the username is not postgres, replace it with the correct username.
+
+After entering the DB password, a successful connection should look like:
+
+postgres=>
+
+To exit psql:
+
+\q
+
+Important notes
+
+- You must start the SSM tunnel before connecting to the database.
+- If the SSM session window closes, the DB connection will stop working.
+- Your local DB client should always use:
+  Host: 127.0.0.1
+  Port: 5433
+- Do not use the RDS endpoint directly from your laptop unless you have a separate network path such as VPN.
+
+Common issues
+
+1. SessionManagerPlugin is not found
+The Session Manager plugin is not installed locally.
+
+2. zsh: command not found: psql
+PostgreSQL client is not installed locally.
+
+3. AccessDeniedException
+Your AWS identity does not yet have the required SSM permissions.
+
+4. Database connection fails
+Check:
+- the SSM tunnel window is still open
+- you are connecting to 127.0.0.1:5433
+- your DB username/password is correct
+
+Why we use this setup
+
+- No dependency on changing local public IP addresses
+- No traditional SSH tunnel required
+- Better for team access
+- Each person can connect using their own AWS identity

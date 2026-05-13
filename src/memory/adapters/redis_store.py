@@ -70,3 +70,13 @@ class RedisSessionAdapter:
             serialized,
             ex=int(self.settings.get("ttl_seconds", 7200)),
         )
+
+    def delete(self, thread_id: str | None) -> None:
+        if not thread_id or not self.is_configured():
+            return
+
+        client = self.get_client()
+        if client is None:
+            return
+
+        client.delete(self.session_key(thread_id))

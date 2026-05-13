@@ -9,13 +9,13 @@ Usage:
     groups = assemble_intent_groups(
         request_flags=ingestion_bundle.turn_signals.parser_signals.request_flags,
         resolved_objects=[resolved_object_state.primary_object, *resolved_object_state.secondary_objects],
-        primary_intent=ingestion_bundle.turn_signals.parser_signals.context.primary_intent,
+        semantic_intent=ingestion_bundle.turn_signals.parser_signals.context.semantic_intent,
     )
 """
 from __future__ import annotations
 
 from src.common.models import IntentGroup
-from src.ingestion.models import ParserRequestFlags
+from src.ingestion.models import SEMANTIC_INTENT_VALUES, ParserRequestFlags
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +63,29 @@ _FLAG_INTENT: dict[str, str] = {
     "needs_refund_or_cancellation": "order_support",
 }
 
+# ---------------------------------------------------------------------------
+# Startup validation: mappings must cover every flag in ParserRequestFlags
+# ---------------------------------------------------------------------------
+_ALL_FLAGS = set(ParserRequestFlags.model_fields)
+assert set(_FLAG_OBJECT_AFFINITY) == _ALL_FLAGS, (
+    f"_FLAG_OBJECT_AFFINITY keys mismatch ParserRequestFlags: "
+    f"missing={_ALL_FLAGS - set(_FLAG_OBJECT_AFFINITY)}, "
+    f"extra={set(_FLAG_OBJECT_AFFINITY) - _ALL_FLAGS}"
+)
+assert set(_FLAG_INTENT) == _ALL_FLAGS, (
+    f"_FLAG_INTENT keys mismatch ParserRequestFlags: "
+    f"missing={_ALL_FLAGS - set(_FLAG_INTENT)}, "
+    f"extra={set(_FLAG_INTENT) - _ALL_FLAGS}"
+)
+# Reverse-inferred intents must be valid SEMANTIC_INTENT_VALUES; otherwise
+# _dominant_intent_from_flags can output a phantom intent string that fails
+# downstream validation silently.
+_ALL_INTENTS = set(SEMANTIC_INTENT_VALUES)
+assert set(_FLAG_INTENT.values()) <= _ALL_INTENTS, (
+    f"_FLAG_INTENT has values not in SEMANTIC_INTENT_VALUES: "
+    f"{set(_FLAG_INTENT.values()) - _ALL_INTENTS}"
+)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -71,7 +94,7 @@ _FLAG_INTENT: dict[str, str] = {
 def assemble_intent_groups(
     request_flags: ParserRequestFlags,
     resolved_objects: list,
-    primary_intent: str = "unknown",
+    semantic_intent: str = "unknown",
 ) -> list[IntentGroup]:
     """Deterministically bind active request_flags to resolved objects.
 
@@ -79,7 +102,7 @@ def assemble_intent_groups(
         request_flags: flat boolean flags from ingestion parser.
         resolved_objects: list of ObjectCandidate (or any object with
             object_type, identifier, display_name attributes).
-        primary_intent: fallback intent from parser context.
+        semantic_intent: fallback intent from parser context.
 
     Returns:
         List of IntentGroup, one per resolved-object (or one unbound group
@@ -89,7 +112,7 @@ def assemble_intent_groups(
     active_flags = _get_active_flags(request_flags)
 
     if not active_flags:
-        return _single_group_from_intent(primary_intent, objects)
+        return _single_group_from_intent(semantic_intent, objects)
 
     # Step 1: For each flag, find objects whose type matches the flag's affinity
     flag_bindings: dict[str, list] = {}
@@ -116,7 +139,7 @@ def assemble_intent_groups(
         obj = _find_object_by_key(obj_key, objects)
         deduped_flags = list(dict.fromkeys(flags))
         groups.append(IntentGroup(
-            intent=_infer_group_intent(deduped_flags, primary_intent),
+            intent=_infer_group_intent(deduped_flags, semantic_intent),
             request_flags=deduped_flags,
             object_type=getattr(obj, "object_type", "") if obj else "",
             object_identifier=getattr(obj, "identifier", "") if obj else "",
@@ -127,37 +150,12 @@ def assemble_intent_groups(
     # Step 4: Unbound flags → general group (no specific object)
     if unbound_flags:
         groups.append(IntentGroup(
-            intent=_infer_group_intent(unbound_flags, primary_intent),
+            intent=_infer_group_intent(unbound_flags, semantic_intent),
             request_flags=list(dict.fromkeys(unbound_flags)),
             confidence=0.60,
         ))
 
-    return groups or _single_group_from_intent(primary_intent, objects)
-
-
-def build_flag_object_affinity() -> dict[str, set[str]]:
-    """Derive flag-to-object-type mapping from tool capabilities in the registry.
-
-    Call at startup to auto-update affinity when new tools are registered.
-    Falls back to the hardcoded _FLAG_OBJECT_AFFINITY if the registry is empty.
-    """
-    try:
-        from src.tools.registry import list_registry_entries
-    except ImportError:
-        return dict(_FLAG_OBJECT_AFFINITY)
-
-    entries = list_registry_entries()
-    if not entries:
-        return dict(_FLAG_OBJECT_AFFINITY)
-
-    affinity: dict[str, set[str]] = {}
-    for entry in entries:
-        cap = entry.capability
-        if cap is None:
-            continue
-        for flag in getattr(cap, "supported_request_flags", []):
-            affinity.setdefault(flag, set()).update(cap.supported_object_types)
-    return affinity or dict(_FLAG_OBJECT_AFFINITY)
+    return groups or _single_group_from_intent(semantic_intent, objects)
 
 
 # ---------------------------------------------------------------------------
@@ -195,13 +193,13 @@ def _infer_group_intent(flags: list[str], fallback_intent: str) -> str:
     return fallback_intent
 
 
-def _single_group_from_intent(primary_intent: str, objects: list) -> list[IntentGroup]:
-    """Fallback: no active flags → one group from primary_intent."""
+def _single_group_from_intent(semantic_intent: str, objects: list) -> list[IntentGroup]:
+    """Fallback: no active flags → one group from semantic_intent."""
     if not objects:
-        return [IntentGroup(intent=primary_intent, confidence=0.50)]
+        return [IntentGroup(intent=semantic_intent, confidence=0.50)]
     primary = objects[0]
     return [IntentGroup(
-        intent=primary_intent,
+        intent=semantic_intent,
         object_type=getattr(primary, "object_type", ""),
         object_identifier=getattr(primary, "identifier", ""),
         object_display_name=getattr(primary, "display_name", ""),

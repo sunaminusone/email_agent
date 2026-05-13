@@ -121,3 +121,33 @@ def test_observations_dict():
     obs = cache.observations
     assert "product_name" in obs
     assert "business_line" in obs
+
+
+# --- cached_for_object: cross-group dedup support ---
+
+def test_cached_for_object_returns_tools_for_matching_object():
+    cache = ToolCallCache()
+    cache.store(_make_call("catalog_lookup_tool"), "product", "CD3")
+    cache.store(_make_call("technical_rag_tool"), "product", "CD3")
+
+    assert cache.cached_for_object("product", "CD3") == {
+        "catalog_lookup_tool",
+        "technical_rag_tool",
+    }
+
+
+def test_cached_for_object_does_not_leak_across_objects():
+    cache = ToolCallCache()
+    cache.store(_make_call("catalog_lookup_tool"), "product", "CD3")
+    cache.store(_make_call("technical_rag_tool"), "product", "CD19")
+
+    assert cache.cached_for_object("product", "CD3") == {"catalog_lookup_tool"}
+    assert cache.cached_for_object("product", "CD19") == {"technical_rag_tool"}
+
+
+def test_cached_for_object_empty_when_no_match():
+    cache = ToolCallCache()
+    cache.store(_make_call("catalog_lookup_tool"), "product", "CD3")
+
+    assert cache.cached_for_object("product", "OTHER") == set()
+    assert cache.cached_for_object("service", "CD3") == set()

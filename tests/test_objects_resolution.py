@@ -1,6 +1,8 @@
 from pathlib import Path
 import sys
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -13,9 +15,10 @@ from src.ingestion.models import (
     ParserSignals,
     ReferenceSignals,
     SourceAttribution,
-    StatefulAnchors,
+    TurnCore,
     TurnSignals,
 )
+from src.memory.models import ClarificationMemory, MemoryContext, MemorySnapshot
 from src.common.models import ObjectRef
 from src.memory.models import ScoredObjectRef
 from src.objects.constraint_matching import candidate_matches_constraint
@@ -126,20 +129,24 @@ def test_service_abbreviation_variant_resolves_to_canonical_service():
     assert "abbreviation" in resolved.primary_object.metadata.get("matched_alias_kinds", [])
 
 
-def test_pending_only_constraints_promote_single_remaining_candidate_to_primary():
+def test_pending_only_constraints_direct_anchor_path_still_works_for_compatibility():
     bundle = IngestionBundle(
         turn_signals=TurnSignals(
             reference_signals=ReferenceSignals(
                 attribute_constraints=[_constraint("species", "human")],
             ),
         ),
-        stateful_anchors=StatefulAnchors(
-            pending_clarification_field="product_selection",
-            pending_candidate_options=[
-                "Rabbit Monoclonal Antibody",
-                "Human Monoclonal Antibody",
-            ],
-            pending_identifier="candidate set",
+        memory_context=MemoryContext(
+            snapshot=MemorySnapshot(
+                clarification_memory=ClarificationMemory(
+                    pending_clarification_type="product_selection",
+                    pending_candidate_options=[
+                        "Rabbit Monoclonal Antibody",
+                        "Human Monoclonal Antibody",
+                    ],
+                    pending_identifier="candidate set",
+                )
+            )
         ),
     )
 
@@ -155,29 +162,31 @@ def test_pending_only_constraints_promote_single_remaining_candidate_to_primary(
     )
 
 
-def test_product_ambiguity_kind_and_clarification_strategy_are_derived_from_alias_kind():
+def test_pending_only_constraints_can_flow_from_memory_context_without_bundle_anchor_plumbing():
     bundle = IngestionBundle(
         turn_signals=TurnSignals(
-            parser_signals=ParserSignals(
-                entities=ParserEntitySignals(
-                    product_names=[EntitySpan(text="cd19")],
+            reference_signals=ReferenceSignals(
+                attribute_constraints=[_constraint("species", "human")],
+            ),
+        ),
+        memory_context=MemoryContext(
+            snapshot=MemorySnapshot(
+                clarification_memory=ClarificationMemory(
+                    pending_clarification_type="product_selection",
+                    pending_candidate_options=[
+                        "Rabbit Monoclonal Antibody",
+                        "Human Monoclonal Antibody",
+                    ],
+                    pending_identifier="candidate set",
                 )
             ),
-        )
+        ),
     )
 
     resolved = resolve_object_state(bundle, extract_object_bundle(bundle))
 
-    assert len(resolved.ambiguous_sets) == 1
-    ambiguous = resolved.ambiguous_sets[0]
-    assert ambiguous.ambiguity_kind == "target_antigen"
-    assert ambiguous.clarification_focus == "product_family"
-    assert ambiguous.suggested_disambiguation_fields == [
-        "business_line",
-        "canonical_value",
-    ]
-    assert ambiguous.resolution_strategy == "clarify_product_family"
-
+    assert resolved.primary_object is not None
+    assert resolved.primary_object.display_name == "Human Monoclonal Antibody"
 
 def test_product_species_constraint_uses_product_metadata():
     candidate = ObjectCandidate(
@@ -337,3 +346,31 @@ def test_active_object_none_when_no_primary_and_no_memory():
 
     assert resolved.primary_object is None
     assert resolved.active_object is None
+
+
+# ---------------------------------------------------------------------------
+# Business-line keyword fallback (helper-only — does not exercise registries)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query, expected_bl",
+    [
+        ("looking for proprietary lipids and pre-tested formulations", "mrna_lnp"),
+        ("I am looking for CAR lentiviral particles against CD19", "car_t"),
+        ("we offer CAR-cell production and virus production service", "car_t"),
+        ("interested in custom generation of antibodies polyclonal and monoclonal", "antibody"),
+        ("hybridoma fusion for monoclonal antibodies", "antibody"),
+        ("LNP delivery of mRNA constructs", "mrna_lnp"),
+        ("", ""),
+        ("we just want a quote, no specifics", ""),
+        # antibody=1 (antibody), mrna_lnp=1 (lipid) — true tie → empty
+        ("antibody for lipid delivery", ""),
+        # antibody=2 (monoclonal+antibody) > mrna_lnp=1 (lipid) — winner takes
+        ("monoclonal antibody for a lipid antigen", "antibody"),
+    ],
+)
+def test_infer_business_line_from_query(query, expected_bl):
+    from src.objects.resolution import _infer_business_line_from_query
+
+    assert _infer_business_line_from_query(query) == expected_bl

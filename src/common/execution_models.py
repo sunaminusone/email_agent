@@ -46,3 +46,4 @@ class ExecutionResult(_ExecutionModel):
     merged_results: MergedResults = Field(default_factory=MergedResults)
     final_status: ExecutionStatus = "empty"
     reason: str = ""
+    iteration_count: int = 0

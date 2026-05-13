@@ -9,7 +9,6 @@ RecencyType = Literal["CURRENT_TURN", "CONTEXTUAL"]
 SourceType = Literal[
     "parser",
     "deterministic",
-    "stateful_anchor",
     "attachment",
     "registry",
     "tool",

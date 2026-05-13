@@ -9,12 +9,14 @@ from langchain_core.documents import Document
 from src.rag.ingestion_config import IngestionSection, build_chunk_metadata, build_embedding_string, normalize_tags
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_RAG_READY_ROOT = _PROJECT_ROOT / "data" / "processed" / "rag_ready_files"
 SERVICE_PAGE_SOURCE_DIRS = [
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk"),
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp"),
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody"),
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays"),
-    Path("/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/protein-expression"),
+    _RAG_READY_ROOT / "car-t:car-nk",
+    _RAG_READY_ROOT / "mrna-lnp",
+    _RAG_READY_ROOT / "antibody",
+    _RAG_READY_ROOT / "cell-based-assays",
+    _RAG_READY_ROOT / "protein-expression",
 ]
 # Backward-compatible alias for older imports; the retriever now reads from all
 # directories listed in SERVICE_PAGE_SOURCE_DIRS.
@@ -62,9 +64,14 @@ _METADATA_FIELDS: Set[str] = {
     "unit",
     "unit_price_usd",
     "setup_fee_usd",
+    "total_price_usd",
     "stage_type",
 }
 EXPLICIT_SUBCHUNK_SECTION_TYPES = {"plan_summary", "service_phase", "workflow_step"}
+# SKU tables served by the structured catalog pipeline (catalog_lookup_tool,
+# Excel-backed product_registry). Strip them from the RAG parent section body
+# so long SKU listings don't dilute the service-level embedding.
+_RAW_STRUCTURED_FIELDS: Set[str] = {"products"}
 
 
 def _stringify(value: Any) -> str:
@@ -222,7 +229,7 @@ def _render_section_body(fields: Dict[str, str]) -> str:
         rendered.append(f"{key.replace('_', ' ').title()}: {value}")
 
     for key, value in fields.items():
-        if key in seen or key in _METADATA_FIELDS:
+        if key in seen or key in _METADATA_FIELDS or key in _RAW_STRUCTURED_FIELDS:
             continue
         cleaned = value.strip()
         if not cleaned:
@@ -272,6 +279,7 @@ def _base_section_metadata(document_fields: Dict[str, str], section_fields: Dict
         "unit",
         "unit_price_usd",
         "setup_fee_usd",
+        "total_price_usd",
         "stage_type",
     ):
         if section_fields.get(key):
@@ -582,6 +590,16 @@ def parse_service_page_file(path: Path) -> List[Document]:
             extra_metadata=_base_section_metadata(document_fields, section_fields, title, section_order, path),
         )
         documents.append(section_doc)
+
+        subchunks = _build_subchunks(
+            path=path,
+            document_fields=document_fields,
+            section_fields=section_fields,
+            section_title=title,
+            section_order=section_order,
+            next_index=len(documents),
+        )
+        documents.extend(subchunks)
 
     return documents
 

@@ -3,148 +3,162 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Biotech Chatbot Workspace</title>
+  <title>CSR Co-Pilot Workspace</title>
   <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__" />
 </head>
 <body>
-  <main class="app-shell">
-    <aside class="sidebar">
+  <main class="app-shell sidebar-open" id="app_shell">
+    <button
+      type="button"
+      id="sidebar-toggle-btn"
+      class="sidebar-toggle-btn"
+      aria-controls="app_sidebar"
+      aria-expanded="true"
+      aria-label="Collapse sidebar"
+      title="Collapse sidebar"
+    >
+      <span class="sidebar-toggle-icon" aria-hidden="true">
+        <span class="sidebar-toggle-bars">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </span>
+    </button>
+
+    <aside class="sidebar" id="app_sidebar">
       <div class="sidebar-top">
         <div class="brand-block">
-          <div class="brand-mark">B</div>
-          <div>
-            <p class="brand-kicker">Biotech AI</p>
-            <h1>Assistant Hub</h1>
+          <a
+            class="brand-mark brand-mark-link"
+            href="https://www.promab.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open ProMab website"
+            title="Open ProMab website"
+          >
+            <img class="brand-mark-image" src="/static/assets/logo.png" alt="ProMab logo" />
+          </a>
+          <div class="brand-copy">
+            <p class="brand-kicker">ProMab Internal</p>
+            <div class="brand-title-row">
+              <h1>CSR Co-Pilot</h1>
+            </div>
           </div>
         </div>
 
-        <button type="button" id="new-chat-btn" class="primary-btn full-width">New Chat</button>
-
-        <nav class="nav-groups">
-          <button type="button" class="nav-item nav-item-active">
-            <span>Workspace</span>
-            <small>Current session</small>
-          </button>
-          <button type="button" class="nav-item">
-            <span>Search</span>
-            <small>Find docs and threads</small>
-          </button>
-          <button type="button" class="nav-item">
-            <span>Knowledge Base</span>
-            <small>RAG sources</small>
-          </button>
-        </nav>
+        <button type="button" id="new-chat-btn" class="new-chat-btn full-width">
+          <span class="new-chat-btn-icon" aria-hidden="true">
+            <svg
+              class="new-chat-btn-icon-svg"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              role="presentation"
+              focusable="false"
+            >
+              <path
+                d="M12 22C17.5 22 22 17.5 22 12C22 6.5 17.5 2 12 2C6.5 2 2 6.5 2 12C2 17.5 6.5 22 12 22Z"
+                stroke-width="1.5"
+              ></path>
+              <path d="M8 12H16" stroke-width="1.5"></path>
+              <path d="M12 16V8" stroke-width="1.5"></path>
+            </svg>
+          </span>
+          <span class="new-chat-btn-label">New Chat</span>
+        </button>
       </div>
 
       <section class="sidebar-section">
         <div class="section-heading">
           <span>History</span>
-          <button type="button" id="clear-chat-btn" class="ghost-btn">Clear</button>
         </div>
         <div id="history_nav" class="history-list">
           <p class="history-empty">No conversation yet.</p>
         </div>
       </section>
 
-      <section class="sidebar-section">
-        <div class="section-heading">
-          <span>Suggested Actions</span>
-        </div>
-        <div class="quick-actions">
-          <button type="button" class="quick-card">
-            <strong>Product Lookup</strong>
-            <span>Search catalog and specs</span>
-          </button>
-          <button type="button" class="quick-card">
-            <strong>Pricing Request</strong>
-            <span>Prepare quote-ready reply</span>
-          </button>
-          <button type="button" class="quick-card">
-            <strong>Tech Docs</strong>
-            <span>Retrieve protocols and data</span>
-          </button>
-          <button type="button" class="quick-card">
-            <strong>Email Drafting</strong>
-            <span>Generate a polished response</span>
-          </button>
-        </div>
-      </section>
     </aside>
 
     <section class="main-column">
-      <header class="hero-panel">
-        <div class="hero-copy">
-          <p class="eyebrow">Enterprise Biotech Chatbot</p>
-          <h2>Your AI Sales Assistant</h2>
-          <p class="hero-subtitle">
-            A trusted workspace for internal teams and future customers to explore products,
-            retrieve technical evidence, and generate grounded replies with full visibility.
-          </p>
-        </div>
-        <div class="hero-orbit" aria-hidden="true">
-          <div class="orbit-glow"></div>
-          <div class="orbit-card">
-            <span class="status-dot"></span>
-            <p>RAG + LLM active</p>
-          </div>
-        </div>
-      </header>
-
-      <section class="feature-grid">
-        <article class="feature-tile">
-          <span class="feature-label">Intent Ready</span>
-          <h3>Understand product, pricing, and technical requests</h3>
-          <p>Structured intent routing improves trust and speeds up triage across internal and external use cases.</p>
-        </article>
-        <article class="feature-tile">
-          <span class="feature-label">Traceable Answers</span>
-          <h3>Ground every response with retrievable evidence</h3>
-          <p>Surface catalog entries, technical snippets, and source paths directly in the workflow.</p>
-        </article>
-        <article class="feature-tile">
-          <span class="feature-label">Enterprise UX</span>
-          <h3>Designed for efficient, confident decision-making</h3>
-          <p>Focused conversation space, clear actions, and transparent reasoning for high-stakes biotech tasks.</p>
-        </article>
-      </section>
-
       <section class="chat-workspace">
-        <div class="chat-stage">
-          <div class="chat-stage-header">
-            <div>
-              <p class="chat-stage-label">Conversation</p>
-              <h3>Biotech Assistant Workspace</h3>
-              <p id="session_hint" class="session-hint">Session ready</p>
-            </div>
-            <div class="status-pill">Secure session</div>
-          </div>
+        <div class="chat-stage" id="chat_stage">
+          <p id="session_hint" class="sr-only session-hint">Session ready</p>
 
           <div id="chat_history" class="chat-history">
             <div class="chat-empty-state">
               <p class="chat-empty-title">Start a new conversation</p>
-              <p class="chat-empty">Ask about a product, request a quote, or retrieve technical documentation.</p>
+              <p class="chat-empty">Paste a customer inquiry to draft a reply with similar past threads and relevant docs.</p>
             </div>
-          </div>
-
-          <div class="intent-row" id="intent_tags">
-            <span class="intent-tag">Product Inquiry</span>
-            <span class="intent-tag">Pricing</span>
-            <span class="intent-tag">Technical Question</span>
           </div>
 
           <form id="agent-form" class="composer-panel">
             <div class="composer-shell">
               <label class="sr-only" for="user_query">用户输入</label>
-              <textarea
-                id="user_query"
-                name="user_query"
-                rows="4"
-                placeholder="Ask about a catalog item, lead time, technical protocol, or draft a customer-ready reply..."
-                required
-              ></textarea>
+              <div class="input-wrapper">
+                <div class="composer-tools-menu">
+                  <button
+                    type="button"
+                    id="composer-tools-trigger"
+                    class="composer-tools-trigger"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    title="Open tools"
+                  >
+                    <span class="icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                        <path d="M12 5V19"></path>
+                        <path d="M5 12H19"></path>
+                      </svg>
+                    </span>
+                  </button>
 
-              <div class="composer-toolbar">
-                <button type="submit" id="submit-btn" class="primary-btn">Send Message</button>
+                  <div id="composer-tools-dropdown" class="composer-tools-dropdown" role="menu" aria-label="Composer tools">
+                    <button type="button" class="composer-tool-item" role="menuitem">
+                      <span class="composer-tool-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false">
+                          <path d="M8 4H16V20H8Z"></path>
+                          <path d="M10 7H14"></path>
+                          <path d="M10 11H14"></path>
+                          <path d="M10 15H13"></path>
+                        </svg>
+                      </span>
+                      <span>Upload image</span>
+                    </button>
+                    <button type="button" class="composer-tool-item" role="menuitem">
+                      <span class="composer-tool-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false">
+                          <path d="M8 3H16L20 7V19A2 2 0 0 1 18 21H8A2 2 0 0 1 6 19V5A2 2 0 0 1 8 3Z"></path>
+                          <path d="M16 3V8H20"></path>
+                        </svg>
+                      </span>
+                      <span>Upload files</span>
+                    </button>
+                    <button type="button" class="composer-tool-item" role="menuitem">
+                      <span class="composer-tool-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false">
+                          <path d="M4 6H20V18H4Z"></path>
+                          <path d="M4 8L12 13L20 8"></path>
+                        </svg>
+                      </span>
+                      <span>Connect Outlook</span>
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  id="user_query"
+                  name="user_query"
+                  rows="1"
+                  class="input"
+                  placeholder="Message"
+                  required
+                ></textarea>
+                <button type="submit" id="submit-btn" class="Subscribe-btn" aria-label="Send message" title="Send message">
+                  <span class="arrow" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                      <path d="M4 19V5L20 12L4 19Z"></path>
+                    </svg>
+                  </span>
+                </button>
               </div>
             </div>
           </form>
@@ -153,89 +167,73 @@
     </section>
 
     <aside class="inspector">
-      <section class="inspector-card">
+      <section class="inspector-card inspector-tabs-shell">
         <div class="section-heading">
-          <span>Agent Overview</span>
+          <span>Context Panel</span>
         </div>
-        <div class="overview-grid">
-          <div>
-            <p class="metric-label">Current Intent</p>
-            <p id="current_intent" class="metric-value">Awaiting input</p>
+        <div class="inspector-tab-row">
+          <button type="button" class="inspector-tab inspector-tab-active" data-panel-target="docs_panel">Docs</button>
+          <button type="button" class="inspector-tab" data-panel-target="history_panel">History</button>
+          <button type="button" class="inspector-tab" data-panel-target="signals_panel">Signals</button>
+          <button type="button" class="inspector-tab" data-panel-target="blocks_panel">Blocks</button>
+        </div>
+
+        <div id="docs_panel" class="inspector-panel inspector-panel-active">
+          <div class="section-heading">
+            <span>Relevant Documents</span>
           </div>
-          <div>
-            <p class="metric-label">Confidence</p>
-            <p id="current_confidence" class="metric-value">-</p>
+          <div id="document_results" class="signal-summary">
+            <p class="signal-state">等待输入...</p>
           </div>
-          <div>
-            <p class="metric-label">Route</p>
-            <p id="current_route" class="metric-value">-</p>
+
+          <div class="section-heading">
+            <span>Technical Retrieval Detail</span>
           </div>
-          <div>
-            <p class="metric-label">Status</p>
-            <p id="current_status" class="metric-value">Idle</p>
+          <div id="technical_results" class="signal-summary">
+            <p class="signal-state">等待输入...</p>
           </div>
         </div>
-      </section>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Reasoning & Context</span>
+        <div id="history_panel" class="inspector-panel">
+          <div class="section-heading">
+            <span>Similar Past Inquiries</span>
+          </div>
+          <div id="historical_results" class="signal-summary">
+            <p class="signal-state">等待输入...</p>
+          </div>
         </div>
-        <div id="routing_summary" class="signal-summary">
-          <p class="signal-state">Waiting for routing evidence.</p>
-        </div>
-        <div id="secondary_routes_summary" class="signal-summary compact-summary">
-          <p class="signal-state">No secondary routes detected.</p>
-        </div>
-      </section>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Workflow Suggestions</span>
-        </div>
-        <ul id="workflow" class="workflow-list"></ul>
-      </section>
+        <div id="signals_panel" class="inspector-panel">
+          <div class="section-heading">
+            <span>Retrieval Trust</span>
+          </div>
+          <div id="trust_summary" class="signal-summary">
+            <p class="signal-state">Submit a query to see retrieval confidence.</p>
+          </div>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Reply Preview</span>
-        </div>
-        <pre id="reply_preview">等待输入...</pre>
-      </section>
+          <div class="section-heading">
+            <span>AI Routing Note</span>
+          </div>
+          <div id="routing_note_summary" class="signal-summary compact-summary">
+            <p class="signal-state">No routing flag yet.</p>
+          </div>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Response Topic</span>
+          <div class="section-heading">
+            <span>Workflow Steps</span>
+          </div>
+          <div id="workflow_meta" class="signal-summary compact-summary">
+            <p class="signal-state">Submit a query to see execution rounds.</p>
+          </div>
+          <ul id="workflow" class="workflow-list"></ul>
         </div>
-        <div id="response_topic_summary" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
-      </section>
 
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Content Blocks</span>
-        </div>
-        <div id="response_content_blocks" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
-      </section>
-
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Document Results</span>
-        </div>
-        <div id="document_results" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
-        </div>
-      </section>
-
-      <section class="inspector-card">
-        <div class="section-heading">
-          <span>Technical Retrieval</span>
-        </div>
-        <div id="technical_results" class="signal-summary">
-          <p class="signal-state">等待输入...</p>
+        <div id="blocks_panel" class="inspector-panel">
+          <div class="section-heading">
+            <span>Content Blocks</span>
+          </div>
+          <div id="response_content_blocks" class="signal-summary">
+            <p class="signal-state">等待输入...</p>
+          </div>
         </div>
       </section>
 
@@ -243,12 +241,14 @@
         <summary>Debug Payloads</summary>
         <div class="debug-stack">
           <div class="debug-block">
-            <h4>Route Result</h4>
-            <pre id="route_result">{}</pre>
+            <h4>Response Topic / Focus</h4>
+            <div id="response_topic_summary" class="signal-summary">
+              <p class="signal-state">等待输入...</p>
+            </div>
           </div>
           <div class="debug-block">
-            <h4>Routing Signals</h4>
-            <pre id="routing_signals">{}</pre>
+            <h4>Route Result</h4>
+            <pre id="route_result">{}</pre>
           </div>
           <div class="debug-block">
             <h4>Parsed Result</h4>
@@ -267,8 +267,8 @@
             <pre id="execution_run">{}</pre>
           </div>
           <div class="debug-block">
-            <h4>Response Resolution</h4>
-            <pre id="response_resolution">{}</pre>
+            <h4>Answer Focus</h4>
+            <pre id="answer_focus"></pre>
           </div>
         </div>
       </details>

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import re
+import warnings
 from typing import Any, Dict, List, Mapping
 
 from src.rag.query_scope import (
+    canonicalize_service_name,
+    detect_intent_bucket,
+    get_bucket_mode,
     normalize_scope_query,
     query_has_product_scope_marker,
-    query_matches_non_technical_fallback_path,
     query_has_service_scope_marker,
+    query_mentions_scope,
     resolve_effective_scope,
 )
 from src.rag.retriever import retrieve_chunks
@@ -36,39 +40,21 @@ _REFERENTIAL_SCOPE_PATTERNS = (
     re.compile(r"\bit\b", re.I),
 )
 
-_INTENT_EXPANSION_PACKS: dict[str, list[str]] = {
-    "service_plan": [
-        "discovery services plan",
-        "phases",
-        "project timeline",
-        "workflow summary",
-    ],
-    "workflow": [
-        "workflow",
-        "workflow overview",
-        "workflow step",
-        "next step",
-    ],
-    "model_support": [
-        "supported models",
-        "model support",
-        "cell types",
-        "application models",
-    ],
-}
-
-_EXPANSION_DENYLIST = (
-    "contact",
-    "representative",
-    "sales rep",
-    "support team",
-    "customer support",
-    "technical support",
-    "connect me",
-    "put me in touch",
-)
-
 _MAX_EXPANDED_QUERIES = 4
+
+
+# Keywords injected into the expanded-query pool when parser reports a
+# demand-shaped semantic_intent. The biencoder+reranker needs lexical signal
+# to prefer pricing/timeline/etc. sections; the raw user query often lacks it.
+_SEMANTIC_INTENT_KEYWORDS: dict[str, str] = {
+    "pricing_question": "pricing",
+    "timeline_question": "timeline",
+    "workflow_question": "workflow",
+    "model_support_question": "model support",
+    "service_plan_question": "service plan",
+    "documentation_request": "documentation",
+    "customization_request": "customization",
+}
 
 
 def _first_value(values: Any) -> str:
@@ -93,50 +79,71 @@ def _dedupe_variants(values: List[str]) -> List[str]:
     return deduped
 
 
+def _normalize_retrieval_context(
+    retrieval_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    raw_context = dict(retrieval_context or {})
+    normalized: dict[str, Any] = {}
+
+    for key in (
+        "usage_context",
+        "experiment_type",
+        "customer_goal",
+        "pain_point",
+        "requested_action",
+        "regulatory_or_compliance_note",
+    ):
+        value = str(raw_context.get(key) or "").strip()
+        if value:
+            normalized[key] = value
+
+    keywords = [
+        str(item).strip()
+        for item in (raw_context.get("keywords") or [])
+        if str(item).strip()
+    ]
+    if keywords:
+        normalized["keywords"] = _dedupe_variants(keywords)
+
+    return normalized
+
+
 def _default_scope_context(
     *,
     query: str,
     active_service_name: str,
     active_product_name: str,
-    active_target: str,
     product_names: List[str],
     service_names: List[str],
-    targets: List[str],
 ) -> dict[str, Any]:
     active_entity_kind = ""
     if active_service_name:
         active_entity_kind = "service"
     elif active_product_name:
         active_entity_kind = "product"
-    elif active_target:
-        active_entity_kind = "scientific_target"
 
     return {
         "query": query,
         "original_query": query,
         "effective_query": query,
         "context": {
-            "primary_intent": "technical_question",
+            "semantic_intent": "",
         },
         "entities": {
             "service_names": list(service_names),
             "product_names": list(product_names),
             "catalog_numbers": [],
-            "targets": list(targets),
         },
         "product_lookup_keys": {
             "service_names": [],
             "product_names": [],
             "catalog_numbers": [],
-            "targets": [],
         },
         "active_service_name": active_service_name,
         "active_product_name": active_product_name,
-        "active_target": active_target,
         "session_payload": {
             "active_service_name": active_service_name,
             "active_product_name": active_product_name,
-            "active_target": active_target,
             "active_entity": {
                 "entity_kind": active_entity_kind,
             },
@@ -155,72 +162,6 @@ def _default_scope_context(
     }
 
 
-def _resolve_retrieval_scope(
-    *,
-    query: str,
-    active_service_name: str,
-    active_product_name: str,
-    active_target: str,
-    product_names: List[str],
-    service_names: List[str],
-    targets: List[str],
-    scope_context: Mapping[str, Any] | None,
-) -> dict[str, str]:
-    scope_input = dict(scope_context or _default_scope_context(
-        query=query,
-        active_service_name=active_service_name,
-        active_product_name=active_product_name,
-        active_target=active_target,
-        product_names=product_names,
-        service_names=service_names,
-        targets=targets,
-    ))
-
-    resolved_scope = resolve_effective_scope(scope_input)
-    if resolved_scope.get("scope_type"):
-        return resolved_scope
-
-    if active_service_name and _query_mentions_scope(query, active_service_name):
-        return {
-            "scope_type": "service",
-            "source": "current",
-            "name": active_service_name,
-            "reason": "query_mentions_active_service_name",
-        }
-    if active_product_name and _query_mentions_scope(query, active_product_name):
-        return {
-            "scope_type": "product",
-            "source": "current",
-            "name": active_product_name,
-            "reason": "query_mentions_active_product_name",
-        }
-    if active_target and _query_mentions_scope(query, active_target):
-        return {
-            "scope_type": "scientific_target",
-            "source": "current",
-            "name": active_target,
-            "reason": "query_mentions_active_target",
-        }
-
-    if active_service_name and not query_matches_non_technical_fallback_path(query):
-        service_intent_bucket = _detect_intent_bucket(query, "service")
-        if service_intent_bucket in {"service_plan", "model_support", "workflow", "validation"}:
-            return {
-                "scope_type": "service",
-                "source": "active",
-                "name": active_service_name,
-                "reason": f"active_service_retrieval_fallback_{service_intent_bucket}",
-            }
-
-    return resolved_scope
-
-
-def _query_mentions_scope(query: str, scope_name: str) -> bool:
-    normalized_query = normalize_scope_query(query)
-    normalized_scope = normalize_scope_query(scope_name)
-    return bool(normalized_scope and normalized_scope in normalized_query)
-
-
 def _is_context_dependent_query(query: str) -> bool:
     normalized_query = normalize_scope_query(query)
     if not normalized_query:
@@ -230,59 +171,37 @@ def _is_context_dependent_query(query: str) -> bool:
     return len(normalized_query.split()) <= 7
 
 
-def _detect_intent_bucket(query: str, scope_type: str) -> str:
-    normalized_query = normalize_scope_query(query)
-    if not normalized_query:
-        return "general_technical"
-
-    if scope_type == "service":
-        if any(term in normalized_query for term in ("service plan", "plan", "timeline", "phase", "stages")):
-            return "service_plan"
-        if any(term in normalized_query for term in ("model", "models", "cell types")):
-            return "model_support"
-        if any(term in normalized_query for term in ("workflow", "next step", "happens next", "what happens next", "process", "after")):
-            return "workflow"
-        if any(term in normalized_query for term in ("validate", "validation", "assay", "quality evidence")):
-            return "validation"
-    if scope_type in {"product", "scientific_target"}:
-        if any(term in normalized_query for term in ("price", "pricing", "cost", "quote")):
-            return "pricing_detail"
-        if any(term in normalized_query for term in ("application", "validated", "species", "reactivity", "host")):
-            return "product_attributes"
-
-    return "general_technical"
-
-
-def _is_expansion_eligible(query: str, scope: Mapping[str, str], intent_bucket: str) -> bool:
-    normalized_query = normalize_scope_query(query)
-    if not normalized_query:
-        return False
-    if not scope.get("scope_type") or not scope.get("name"):
-        return False
-    if intent_bucket not in _INTENT_EXPANSION_PACKS:
-        return False
-    if any(term in normalized_query for term in _EXPANSION_DENYLIST):
-        return False
-    return True
+def _inject_intent_keyword(query: str, semantic_intent: str) -> str:
+    keyword = _SEMANTIC_INTENT_KEYWORDS.get(str(semantic_intent or "").strip(), "")
+    cleaned = str(query or "").strip()
+    if not keyword or not cleaned:
+        return ""
+    if keyword in cleaned.lower():
+        return ""
+    suffix = cleaned.rstrip(" ?")
+    return f"{suffix} {keyword}"
 
 
 def _build_expanded_queries(
     *,
-    query: str,
-    scope: Mapping[str, str],
-    intent_bucket: str,
+    query: str = "",
+    semantic_intent: str = "",
     retrieval_hints: Mapping[str, Any] | None = None,
 ) -> list[str]:
     retrieval_hints = retrieval_hints or {}
-    if not _is_expansion_eligible(query, scope, intent_bucket):
-        return _dedupe_variants(list(retrieval_hints.get("expanded_queries", [])))
+    candidates: list[str] = []
+    intent_variant = _inject_intent_keyword(query, semantic_intent)
+    if intent_variant:
+        candidates.append(intent_variant)
+    candidates.extend(retrieval_hints.get("expanded_queries", []))
+    return _dedupe_variants(candidates)[:_MAX_EXPANDED_QUERIES]
 
-    scope_name = str(scope.get("name") or "").strip()
-    pack = _INTENT_EXPANSION_PACKS.get(intent_bucket, [])
 
-    generated = [f"{scope_name} {term}".strip() for term in pack if term.strip()]
-    deduped = _dedupe_variants(generated + list(retrieval_hints.get("expanded_queries", [])))
-    return deduped[:_MAX_EXPANDED_QUERIES]
+def _extract_semantic_intent(scope_input: Mapping[str, Any]) -> str:
+    context = scope_input.get("context") if isinstance(scope_input, Mapping) else None
+    if not isinstance(context, Mapping):
+        return ""
+    return str(context.get("semantic_intent") or "").strip()
 
 
 def _rewrite_query(query: str, scope: Mapping[str, str], intent_bucket: str) -> tuple[str, str]:
@@ -315,37 +234,47 @@ def build_retrieval_queries(
     *,
     query: str,
     retrieval_hints: Dict[str, Any] | None = None,
+    retrieval_context: Mapping[str, Any] | None = None,
     active_service_name: str = "",
     active_product_name: str = "",
-    active_target: str = "",
     product_names: List[str] | None = None,
     service_names: List[str] | None = None,
-    targets: List[str] | None = None,
     scope_context: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     retrieval_hints = retrieval_hints or {}
     product_names = product_names or []
     service_names = service_names or []
-    targets = targets or []
 
-    effective_scope = _resolve_retrieval_scope(
+    scope_input = _default_scope_context(
         query=query,
         active_service_name=active_service_name,
         active_product_name=active_product_name,
-        active_target=active_target,
         product_names=product_names,
         service_names=service_names,
-        targets=targets,
-        scope_context=scope_context,
     )
+    if scope_context:
+        scope_input.update(scope_context)
+    effective_scope = resolve_effective_scope(scope_input)
+    semantic_intent = _extract_semantic_intent(scope_input)
 
     rewrite_reason = "no_rewrite_no_scope"
     rewritten_query = ""
-    intent_bucket = _detect_intent_bucket(query, effective_scope.get("scope_type", ""))
+    intent_bucket = detect_intent_bucket(query, semantic_intent=semantic_intent)
+    bucket_mode = get_bucket_mode(intent_bucket)
+    # Weak enforcement: non_rag buckets reaching build_retrieval_queries means
+    # an upstream caller routed a non-technical intent into RAG. Log and carry
+    # on for now; strong short-circuit is a separate PR once callers are audited.
+    if bucket_mode == "non_rag":
+        warnings.warn(
+            f"RAG invoked with non_rag bucket {intent_bucket!r} "
+            f"(semantic_intent={semantic_intent!r}); upstream should avoid routing "
+            "non-technical intents here.",
+            stacklevel=2,
+        )
 
     if not effective_scope.get("scope_type"):
         rewrite_reason = f"no_rewrite_{effective_scope.get('reason', 'no_scope')}"
-    elif _query_mentions_scope(query, effective_scope.get("name", "")):
+    elif query_mentions_scope(query, effective_scope.get("name", "")):
         rewrite_reason = "no_rewrite_query_already_scoped"
     else:
         normalized_query = normalize_scope_query(query)
@@ -360,10 +289,22 @@ def build_retrieval_queries(
         else:
             rewrite_reason = "no_rewrite_query_self_contained"
 
+    # Intent-keyword injection runs on top of any scope rewrite. The rerank
+    # cross-encoder scores against rewritten_query when set, so pushing the
+    # keyword here — not just into expanded_queries — is what moves the
+    # reranker to prefer the intent-aligned section (ablation evidence).
+    keyword_source = rewritten_query or query
+    intent_injected = _inject_intent_keyword(keyword_source, semantic_intent)
+    if intent_injected:
+        rewritten_query = intent_injected
+        if rewrite_reason.startswith("injected_scope"):
+            rewrite_reason = f"{rewrite_reason}_plus_intent_keyword"
+        else:
+            rewrite_reason = "injected_intent_keyword"
+
     expanded_queries = _build_expanded_queries(
         query=query,
-        scope=effective_scope,
-        intent_bucket=intent_bucket,
+        semantic_intent=semantic_intent,
         retrieval_hints=retrieval_hints,
     )
 
@@ -373,8 +314,11 @@ def build_retrieval_queries(
         "expanded_queries": expanded_queries,
         "rewrite_reason": rewrite_reason,
         "intent_bucket": intent_bucket,
+        "bucket_mode": bucket_mode,
+        "semantic_intent": semantic_intent,
         "used_llm_contextualizer": False,
         "effective_scope": effective_scope,
+        "retrieval_context": _normalize_retrieval_context(retrieval_context),
     }
 
 
@@ -383,29 +327,27 @@ def retrieve_technical_knowledge(
     query: str,
     business_line_hint: str = "",
     retrieval_hints: Dict[str, Any] | None = None,
+    retrieval_context: Mapping[str, Any] | None = None,
     active_service_name: str = "",
     active_product_name: str = "",
-    active_target: str = "",
     product_names: List[str] | None = None,
     service_names: List[str] | None = None,
-    targets: List[str] | None = None,
     top_k: int = 5,
     scope_context: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     retrieval_hints = retrieval_hints or {}
     product_names = product_names or []
     service_names = service_names or []
-    targets = targets or []
+    active_service_name = canonicalize_service_name(active_service_name)
 
     query_plan = build_retrieval_queries(
         query=query,
         retrieval_hints=retrieval_hints,
+        retrieval_context=retrieval_context,
         active_service_name=active_service_name,
         active_product_name=active_product_name,
-        active_target=active_target,
         product_names=product_names,
         service_names=service_names,
-        targets=targets,
         scope_context=scope_context,
     )
 
@@ -416,23 +358,28 @@ def retrieve_technical_knowledge(
         business_line_hint=business_line_hint,
         active_service_name=active_service_name,
         active_product_name=active_product_name,
-        active_target=active_target,
         product_names=product_names,
         service_names=service_names,
-        targets=targets,
         expanded_queries=query_plan["expanded_queries"],
         intent_bucket=query_plan["intent_bucket"],
+        retrieval_context=query_plan["retrieval_context"],
     )
 
     matches = []
-    boosted_sections: List[Dict[str, Any]] = []
     for item in result["matches"]:
         metadata = item["metadata"]
-        section_boost = round(float(item.get("section_boost", 0.0) or 0.0), 4)
+        breakdown = item.get("score_breakdown") or {}
         matches.append(
             {
+                "chunk_key": metadata.get("chunk_key", ""),
                 "score": round(item["score"], 4),
                 "raw_score": round(item["raw_score"], 4),
+                "priority_tier": item.get("priority_tier", 5),
+                "final_score": round(float(item.get("final_score") or item["score"]), 4),
+                "score_breakdown": {
+                    k: (round(float(v), 4) if isinstance(v, (int, float)) else v)
+                    for k, v in breakdown.items()
+                },
                 "query_variant": item["query_variant"],
                 "chunk_strategy": metadata.get("chunk_strategy", "unknown"),
                 "section_type": metadata.get("section_type", ""),
@@ -445,14 +392,6 @@ def retrieve_technical_knowledge(
                 "content_preview": item["content"][:700],
             }
         )
-        if section_boost > 0:
-            boosted_sections.append(
-                {
-                    "section_type": metadata.get("section_type", ""),
-                    "chunk_label": metadata.get("chunk_label", ""),
-                    "section_boost": section_boost,
-                }
-            )
 
     effective_scope = query_plan["effective_scope"]
 
@@ -463,6 +402,7 @@ def retrieve_technical_knowledge(
         "business_line_hint": business_line_hint,
         "documents_found": len(matches),
         "matches": matches,
+        "confidence": result.get("confidence", {}),
         "retrieval_debug": {
             "effective_scope_type": effective_scope.get("scope_type", ""),
             "effective_scope_name": effective_scope.get("name", ""),
@@ -471,13 +411,12 @@ def retrieve_technical_knowledge(
             "rewritten_query": query_plan["rewritten_query"],
             "rewrite_reason": query_plan["rewrite_reason"],
             "intent_bucket": query_plan["intent_bucket"],
+            "bucket_mode": query_plan["bucket_mode"],
+            "semantic_intent": query_plan["semantic_intent"],
             "expanded_queries": query_plan["expanded_queries"],
-            "section_boost_applied": {
-                "intent_bucket": query_plan["intent_bucket"],
-                "boosted_match_count": len(boosted_sections),
-                "boosted_sections": boosted_sections[:3],
-            },
+            "retrieval_context": query_plan["retrieval_context"],
             "used_llm_contextualizer": query_plan["used_llm_contextualizer"],
+            "variant_observability": result.get("variant_observability", {}),
         },
     }
 

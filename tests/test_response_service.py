@@ -1,18 +1,22 @@
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import src.response.composer as composer_module
-
-from src.agent.state import AgentState, GroupOutcome
+from src.agent.state import GroupOutcome
 from src.common.execution_models import ExecutedToolCall, ExecutionResult
 from src.common.models import DemandProfile, IntentGroup
+from src.ingestion.models import ParserConstraints
+from src.objects.models import ObjectCandidate, ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
-from src.response import ResponseInput, build_response_bundle, compose_response
+from src.app.service import _serialize_execution_plan
+from src.responser import ResponseInput, build_response_bundle, compose_response
+from src.responser.csr.composer import render_csr_draft_response
+from src.responser.models import ResponsePlan, build_response_memory_contribution
 
 
 def _empty_execution_result(
@@ -24,7 +28,48 @@ def _empty_execution_result(
     )
 
 
-def test_compose_response_returns_direct_answer_for_grounded_lookup() -> None:
+def test_execution_plan_serialization_uses_true_iteration_count() -> None:
+    payload = _serialize_execution_plan(
+        ExecutionResult(
+            executed_calls=[
+                ExecutedToolCall(
+                    call_id="1",
+                    tool_name="catalog_lookup_tool",
+                    status="ok",
+                    request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+                    result=ToolResult(tool_name="catalog_lookup_tool", status="ok"),
+                )
+            ],
+            iteration_count=2,
+            reason="retried with rag fallback",
+        )
+    )
+
+    assert payload["iterations"] == 2
+
+
+class _FakeStructuredLLM:
+    def __init__(self, draft: str) -> None:
+        self._draft = draft
+
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, _messages):
+        class _Result:
+            draft = ""
+
+        result = _Result()
+        result.draft = self._draft
+        return result
+
+
+# ---------------------------------------------------------------------------
+# answer_focus + csr_draft renderer wiring
+# ---------------------------------------------------------------------------
+
+
+def test_grounded_lookup_yields_commercial_focus_in_csr_draft() -> None:
     executed_call = ExecutedToolCall(
         call_id="1",
         tool_name="catalog_lookup_tool",
@@ -45,30 +90,11 @@ def test_compose_response_returns_direct_answer_for_grounded_lookup() -> None:
         )
     )
 
-    assert plan.response_mode == "direct_answer"
-    assert response.response_type == "answer"
-    assert "CD3" in response.message
+    assert plan.answer_focus == "commercial_or_operational_lookup"
+    assert response.response_type == "csr_draft"
 
 
-def test_compose_response_returns_clarification_prompt() -> None:
-    response, plan = compose_response(
-        ResponseInput(
-            query="that one",
-            execution_result=_empty_execution_result(),
-            action="clarify",
-            clarification=ClarificationPayload(
-                prompt="Which product did you mean?",
-                missing_information=["product identifier"],
-            ),
-        )
-    )
-
-    assert plan.response_mode == "clarification"
-    assert response.response_type == "clarification"
-    assert response.message == "Which product did you mean?"
-
-
-def test_compose_response_returns_termination_message() -> None:
+def test_termination_signal_sets_conversation_close_focus() -> None:
     response, plan = compose_response(
         ResponseInput(
             query="stop",
@@ -81,12 +107,80 @@ def test_compose_response_returns_termination_message() -> None:
         )
     )
 
-    assert plan.response_mode == "termination"
-    assert response.response_type == "termination"
-    assert response.message == "Understood. I will stop here on this topic."
+    assert plan.answer_focus == "conversation_close"
+    assert response.response_type == "csr_draft"
+    # Termination must trigger soft_reset so the next turn starts fresh.
+    assert plan.memory_update.soft_reset_current_topic is True
 
 
-def test_build_response_bundle_derives_resolution_and_path() -> None:
+def test_closing_without_terminate_signal_yields_conversation_control() -> None:
+    response, plan = compose_response(
+        ResponseInput(
+            query="ok thanks",
+            locale="en",
+            dialogue_act=DialogueActResult(act="closing"),
+            execution_result=_empty_execution_result(),
+        )
+    )
+
+    assert plan.answer_focus == "conversation_control"
+    assert response.response_type == "csr_draft"
+    assert plan.memory_update.soft_reset_current_topic is False
+
+
+def test_response_memory_contribution_preserves_soft_reset_control_signal() -> None:
+    _, plan = compose_response(
+        ResponseInput(
+            query="stop",
+            locale="en",
+            dialogue_act=DialogueActResult(
+                act="closing",
+                matched_signals=["terminate_pattern"],
+            ),
+            execution_result=_empty_execution_result(),
+        )
+    )
+
+    contribution = build_response_memory_contribution(plan)
+
+    assert contribution.soft_reset_current_topic is True
+
+
+def test_clarify_action_yields_missing_information_focus() -> None:
+    _, plan = compose_response(
+        ResponseInput(
+            query="that one",
+            execution_result=_empty_execution_result(),
+            action="clarify",
+            clarification=ClarificationPayload(
+                prompt="Which product did you mean?",
+                missing_information=["product identifier"],
+            ),
+        )
+    )
+
+    assert plan.answer_focus == "missing_information"
+
+
+def test_handoff_action_yields_human_review_focus() -> None:
+    _, plan = compose_response(
+        ResponseInput(
+            query="I need to speak to a manager",
+            locale="en",
+            execution_result=_empty_execution_result(),
+            action="handoff",
+        )
+    )
+
+    assert plan.answer_focus == "human_review"
+
+
+# ---------------------------------------------------------------------------
+# response_topic + response_path derivation
+# ---------------------------------------------------------------------------
+
+
+def test_build_response_bundle_derives_topic_and_path() -> None:
     executed_call = ExecutedToolCall(
         call_id="1",
         tool_name="technical_rag_tool",
@@ -106,39 +200,14 @@ def test_build_response_bundle_derives_resolution_and_path() -> None:
         )
     )
 
-    assert bundle.response_resolution.answer_focus == "knowledge_lookup"
+    assert bundle.response_plan.answer_focus == "knowledge_lookup"
     assert bundle.response_topic == "knowledge_lookup"
-    assert bundle.response_path in {"deterministic", "llm_rewrite"}
+    assert bundle.response_path == "csr_renderer_direct"
 
 
-def test_compose_response_falls_back_when_rewrite_fails(monkeypatch) -> None:
-    executed_call = ExecutedToolCall(
-        call_id="1",
-        tool_name="catalog_lookup_tool",
-        status="ok",
-        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
-            tool_name="catalog_lookup_tool",
-            status="ok",
-            primary_records=[{"display_name": "CD3 Antibody"}],
-            structured_facts={"species": ["human"]},
-        ),
-    )
-
-    def _raise_rewrite(*args, **kwargs):
-        raise RuntimeError("rewrite unavailable")
-
-    monkeypatch.setattr(composer_module, "_rewrite_message", _raise_rewrite)
-
-    bundle = build_response_bundle(
-        ResponseInput(
-            query="CD3",
-            execution_result=_empty_execution_result(executed_calls=[executed_call]),
-        )
-    )
-
-    assert bundle.response_path == "deterministic"
-    assert bundle.composed_response.debug_info["rewrite_applied"] is False
+# ---------------------------------------------------------------------------
+# Memory update wiring
+# ---------------------------------------------------------------------------
 
 
 def test_response_plan_updates_last_tool_results_memory() -> None:
@@ -172,53 +241,41 @@ def test_response_plan_updates_last_tool_results_memory() -> None:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Locale tests
-# ---------------------------------------------------------------------------
-
-def test_compose_response_acknowledgement_zh() -> None:
-    response, plan = compose_response(
-        ResponseInput(
-            query="好的",
-            locale="zh",
-            dialogue_act=DialogueActResult(act="closing"),
-            execution_result=_empty_execution_result(),
-        )
+def test_memory_update_stores_primary_demand_only() -> None:
+    """Memory should store primary demand's flags, not all flags from mixed query."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool", status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+        ),
     )
-    assert plan.response_mode == "acknowledgement"
-    assert "收到" in response.message
 
+    bundle = build_response_bundle(ResponseInput(
+        query="CD3 price and protocol",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        demand_profile=DemandProfile(
+            primary_demand="technical",
+            secondary_demands=["commercial"],
+            active_request_flags=["needs_protocol", "needs_price"],
+        ),
+    ))
 
-def test_compose_response_acknowledgement_en() -> None:
-    response, plan = compose_response(
-        ResponseInput(
-            query="ok thanks",
-            locale="en",
-            dialogue_act=DialogueActResult(act="closing"),
-            execution_result=_empty_execution_result(),
-        )
-    )
-    assert plan.response_mode == "acknowledgement"
-    assert "Understood" in response.message
-
-
-def test_compose_response_handoff_en() -> None:
-    response, plan = compose_response(
-        ResponseInput(
-            query="I need to speak to a manager",
-            locale="en",
-            execution_result=_empty_execution_result(),
-            action="handoff",
-        )
-    )
-    assert plan.response_mode == "handoff"
-    assert response.response_type == "handoff"
-    assert "human review" in response.message.lower()
+    mem = bundle.response_plan.memory_update.response_memory
+    assert mem.last_demand_type == "technical"
+    # Only technical flags stored — needs_price (commercial) excluded
+    assert "needs_protocol" in mem.last_demand_flags
+    assert "needs_price" not in mem.last_demand_flags
 
 
 # ---------------------------------------------------------------------------
-# Multi-group / partial_answer tests
+# Group-outcome → answer_focus shortcuts
 # ---------------------------------------------------------------------------
+
 
 def _make_group_outcome(
     intent: str,
@@ -257,34 +314,8 @@ def _make_group_outcome(
     )
 
 
-def test_partial_answer_when_mixed_outcomes() -> None:
-    """Some groups resolved + some need clarification → partial_answer mode."""
-    resolved = _make_group_outcome("pricing_question", "execute", "resolved")
-    needs_clar = _make_group_outcome(
-        "order_support", "clarify", "needs_clarification",
-        clarification=ClarificationPayload(prompt="Which order?", missing_information=["order_number"]),
-    )
-
-    merged_result = ExecutionResult(
-        executed_calls=list(resolved.execution_result.executed_calls),
-        final_status="ok",
-    )
-
-    bundle = build_response_bundle(ResponseInput(
-        query="check price and order status",
-        locale="en",
-        execution_result=merged_result,
-        action="execute",
-        group_outcomes=[resolved, needs_clar],
-    ))
-
-    assert bundle.response_plan.response_mode == "partial_answer"
-    assert bundle.composed_response.response_type == "partial_answer"
-    assert "Which order?" in bundle.composed_response.message
-
-
-def test_all_clarification_outcomes() -> None:
-    """All groups need clarification → clarification mode."""
+def test_group_outcomes_with_clarification_yield_missing_info_focus() -> None:
+    """Any group needing clarification → answer_focus collapses to missing_information."""
     needs_clar = _make_group_outcome(
         "order_support", "clarify", "needs_clarification",
         clarification=ClarificationPayload(prompt="Which order?"),
@@ -299,11 +330,11 @@ def test_all_clarification_outcomes() -> None:
         group_outcomes=[needs_clar],
     ))
 
-    assert bundle.response_plan.response_mode == "clarification"
+    assert bundle.response_plan.answer_focus == "missing_information"
 
 
-def test_all_resolved_outcomes_no_partial() -> None:
-    """All groups resolved → normal answer mode, not partial_answer."""
+def test_all_resolved_outcomes_yield_informational_focus() -> None:
+    """All groups resolved + tool results → falls through to informational focus inference."""
     resolved1 = _make_group_outcome("pricing_question", "execute", "resolved", "pricing_lookup_tool")
     resolved2 = _make_group_outcome("technical_question", "execute", "resolved", "technical_rag_tool")
 
@@ -321,50 +352,153 @@ def test_all_resolved_outcomes_no_partial() -> None:
         group_outcomes=[resolved1, resolved2],
     ))
 
-    assert bundle.response_plan.response_mode in ("direct_answer", "hybrid_answer")
+    assert bundle.response_plan.answer_focus in {
+        "knowledge_lookup",
+        "commercial_or_operational_lookup",
+        "general_support",
+    }
 
 
 # ---------------------------------------------------------------------------
-# Technical snippets rendering
+# Topic continuity behaviour
 # ---------------------------------------------------------------------------
 
-def test_technical_snippets_cleaned_in_answer() -> None:
-    """RAG snippet metadata prefixes should be stripped from the answer."""
+
+def _make_response_memory_with_topics(topics: list[str]):
+    from src.memory.models import ResponseMemory
+    return ResponseMemory(last_response_topics=topics)
+
+
+def test_topic_continuing_suppresses_object_acknowledgement() -> None:
+    """When last topic matches current focus, should_acknowledge_object is False."""
     executed_call = ExecutedToolCall(
         call_id="1",
-        tool_name="technical_rag_tool",
+        tool_name="catalog_lookup_tool",
         status="ok",
-        request=ToolRequest(tool_name="technical_rag_tool", query="CAR-T workflow"),
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
         result=ToolResult(
-            tool_name="technical_rag_tool",
+            tool_name="catalog_lookup_tool",
             status="ok",
-            unstructured_snippets=[{
-                "content": "company: ProMab | tags: CAR-T, workflow | title: CAR-T workflow overview | body: The CAR-T development process involves antibody selection, construct generation, and cell production.",
-                "title": "CAR-T workflow overview",
-                "section_type": "workflow_overview",
-            }],
+            primary_records=[{"display_name": "CD3 Antibody"}],
+            structured_facts={"species": ["human"]},
         ),
     )
 
-    response, plan = compose_response(
+    # First turn: no prior topics → should_acknowledge_object may be True
+    bundle_first = build_response_bundle(ResponseInput(
+        query="CD3",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+    ))
+
+    # Second turn: prior topic matches → should_acknowledge_object is False
+    bundle_second = build_response_bundle(ResponseInput(
+        query="CD3 applications",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        response_memory=_make_response_memory_with_topics([
+            bundle_first.response_plan.answer_focus,
+        ]),
+    ))
+
+    assert bundle_second.response_plan.should_acknowledge_object is False
+
+
+def test_topic_continuing_demotes_object_summary_block() -> None:
+    """On consecutive same-topic, object_summary should not be in primary blocks."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool",
+            status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+            structured_facts={"species": ["human"]},
+        ),
+    )
+
+    bundle = build_response_bundle(ResponseInput(
+        query="CD3 details",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        response_memory=_make_response_memory_with_topics(["commercial_or_operational_lookup"]),
+    ))
+
+    primary_types = [b.block_type for b in bundle.response_plan.primary_content_blocks]
+    assert "object_summary" not in primary_types
+
+
+def test_no_topic_continuity_for_control_topics() -> None:
+    """Control-topic acknowledgement should not activate continuity rules."""
+    _, plan = compose_response(
         ResponseInput(
-            query="CAR-T workflow",
+            query="ok thanks",
             locale="en",
-            execution_result=_empty_execution_result(executed_calls=[executed_call]),
+            dialogue_act=DialogueActResult(act="closing"),
+            execution_result=_empty_execution_result(),
+            response_memory=_make_response_memory_with_topics(["conversation_control"]),
         )
     )
 
-    assert "company: ProMab" not in response.message
-    assert "tags:" not in response.message
-    assert "CAR-T development process" in response.message or "antibody selection" in response.message
+    assert plan.answer_focus == "conversation_control"
 
 
 # ---------------------------------------------------------------------------
-# Demand-aware planner tests
+# Parser constraints in content blocks
 # ---------------------------------------------------------------------------
 
-def test_planner_selects_hybrid_when_demand_mixed() -> None:
-    """Mixed demand (technical + commercial) → hybrid_answer even with 1 block."""
+
+def test_object_summary_block_includes_customer_constraints() -> None:
+    """When parser_constraints has non-None values, they appear in block data."""
+    executed_call = ExecutedToolCall(
+        call_id="1",
+        tool_name="catalog_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
+        result=ToolResult(
+            tool_name="catalog_lookup_tool",
+            status="ok",
+            primary_records=[{"display_name": "CD3 Antibody"}],
+            structured_facts={"species": ["human"]},
+        ),
+    )
+    primary = ObjectCandidate(
+        object_type="product",
+        canonical_value="CD3",
+        display_name="CD3 Antibody",
+        identifier="A100",
+    )
+    constraints = ParserConstraints(budget="5000 USD", format_or_size="50 kDa")
+
+    bundle = build_response_bundle(ResponseInput(
+        query="CD3",
+        locale="en",
+        execution_result=_empty_execution_result(executed_calls=[executed_call]),
+        resolved_object_state=ResolvedObjectState(primary_object=primary),
+        dialogue_act=DialogueActResult(act="inquiry"),
+        parser_constraints=constraints,
+    ))
+
+    # csr_draft now returns multiple structured blocks, but the planner's
+    # object_summary block still lives on the ResponsePlan instead.
+    plan_blocks = [
+        *bundle.response_plan.primary_content_blocks,
+        *bundle.response_plan.supporting_content_blocks,
+    ]
+    obj_blocks = [b for b in plan_blocks if b.block_type == "object_summary"]
+    assert len(obj_blocks) == 1
+    data = obj_blocks[0].data
+    assert "customer_constraints" in data
+    assert data["customer_constraints"]["budget"] == "5000 USD"
+    assert data["customer_constraints"]["format_or_size"] == "50 kDa"
+    # None fields should not appear
+    assert "timeline_requirement" not in data["customer_constraints"]
+
+
+def test_no_customer_constraints_when_none() -> None:
+    """Without parser_constraints, no customer_constraints key in block data."""
     executed_call = ExecutedToolCall(
         call_id="1",
         tool_name="catalog_lookup_tool",
@@ -376,86 +510,395 @@ def test_planner_selects_hybrid_when_demand_mixed() -> None:
             primary_records=[{"display_name": "CD3 Antibody"}],
         ),
     )
+    primary = ObjectCandidate(
+        object_type="product",
+        canonical_value="CD3",
+        display_name="CD3 Antibody",
+        identifier="A100",
+    )
 
     bundle = build_response_bundle(ResponseInput(
-        query="CD3 price and protocol",
+        query="CD3",
         locale="en",
         execution_result=_empty_execution_result(executed_calls=[executed_call]),
-        demand_profile=DemandProfile(
-            primary_demand="technical",
-            secondary_demands=["commercial"],
-            active_request_flags=["needs_protocol", "needs_price"],
-        ),
+        resolved_object_state=ResolvedObjectState(primary_object=primary),
+        dialogue_act=DialogueActResult(act="inquiry"),
     ))
 
-    assert bundle.response_plan.response_mode == "hybrid_answer"
+    plan_blocks = [
+        *bundle.response_plan.primary_content_blocks,
+        *bundle.response_plan.supporting_content_blocks,
+    ]
+    obj_blocks = [b for b in plan_blocks if b.block_type == "object_summary"]
+    if obj_blocks:
+        assert "customer_constraints" not in obj_blocks[0].data
 
 
-def test_planner_selects_direct_when_demand_single_focus() -> None:
-    """Pure technical demand → direct_answer even with multiple blocks."""
-    calls = [
-        ExecutedToolCall(
-            call_id="1",
-            tool_name="catalog_lookup_tool",
-            status="ok",
-            request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-            result=ToolResult(
-                tool_name="catalog_lookup_tool", status="ok",
-                primary_records=[{"display_name": "CD3 Antibody"}],
-                structured_facts={"species": ["human"]},
+def test_csr_draft_marks_ungrounded_when_no_references_exist() -> None:
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=_FakeStructuredLLM("Please share more project details.")):
+        response = render_csr_draft_response(
+            ResponseInput(
+                query="We need a monoclonal antibody against a membrane protein. What do you need for a quote?",
+                execution_result=_empty_execution_result(),
             ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    assert response.response_type == "csr_draft"
+    assert response.debug_info["grounding_status"] == "ungrounded"
+    trust_block = next(block for block in response.content_blocks if block.block_type == "trust_signal")
+    assert trust_block.data["grounding_status"] == "ungrounded"
+    assert "No live data, strong historical replies, or relevant documents were retrieved" in trust_block.body
+    # Empty reference sections are suppressed — the trust signal already conveys
+    # "nothing retrieved", and per-source placeholders are noise.
+    assert "*📚 Similar past inquiries*" not in response.message
+    assert "*📄 Relevant documents*" not in response.message
+    assert not any(b.block_type == "historical_references" for b in response.content_blocks)
+    assert not any(b.block_type == "relevant_documents" for b in response.content_blocks)
+
+
+def test_csr_draft_surfaces_structured_reference_blocks_when_grounded() -> None:
+    historical_call = ExecutedToolCall(
+        call_id="hist-1",
+        tool_name="historical_thread_tool",
+        status="ok",
+        request=ToolRequest(tool_name="historical_thread_tool", query="stable cell line"),
+        result=ToolResult(
+            tool_name="historical_thread_tool",
+            status="ok",
+            structured_facts={
+                "threads": [
+                    {
+                        "submission_id": "s1",
+                        "best_score": 0.91,
+                        "reply_count": 1,
+                        "units": [
+                            {
+                                "submitted_at": "2026-01-01T00:00:00",
+                                "sender_name": "Sarah",
+                                "institution": "Emory",
+                                "service_of_interest": "Stable Cell Line Development",
+                                "products_of_interest": "",
+                                "page_content": "Customer message: quote for stable line\nSales reply: please share host cell and target details",
+                            }
+                        ],
+                    }
+                ],
+            },
         ),
-        ExecutedToolCall(
-            call_id="2",
+    )
+    rag_call = ExecutedToolCall(
+        call_id="rag-1",
+        tool_name="technical_rag_tool",
+        status="ok",
+        request=ToolRequest(tool_name="technical_rag_tool", query="stable cell line"),
+        result=ToolResult(
             tool_name="technical_rag_tool",
             status="ok",
-            request=ToolRequest(tool_name="technical_rag_tool", query="CD3"),
-            result=ToolResult(
-                tool_name="technical_rag_tool", status="ok",
-                unstructured_snippets=[{"content": "Protocol info"}],
-            ),
-        ),
-    ]
-
-    bundle = build_response_bundle(ResponseInput(
-        query="CD3 protocol details",
-        locale="en",
-        execution_result=_empty_execution_result(executed_calls=calls),
-        demand_profile=DemandProfile(
-            primary_demand="technical",
-            active_request_flags=["needs_protocol"],
-        ),
-    ))
-
-    assert bundle.response_plan.response_mode == "direct_answer"
-
-
-def test_memory_update_stores_primary_demand_only() -> None:
-    """Memory should store primary demand's flags, not all flags from mixed query."""
-    executed_call = ExecutedToolCall(
-        call_id="1",
-        tool_name="catalog_lookup_tool",
-        status="ok",
-        request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
-            tool_name="catalog_lookup_tool", status="ok",
-            primary_records=[{"display_name": "CD3 Antibody"}],
+            structured_facts={
+                "matches": [
+                    {
+                        "section_type": "service_overview",
+                        "chunk_label": "Stable Cell Line Flyer",
+                        "final_score": 1.72,
+                        "content_preview": "Stable cell line development service details.",
+                    }
+                ],
+                "retrieval_confidence": {"level": "high"},
+            },
         ),
     )
 
-    bundle = build_response_bundle(ResponseInput(
-        query="CD3 price and protocol",
-        locale="en",
-        execution_result=_empty_execution_result(executed_calls=[executed_call]),
-        demand_profile=DemandProfile(
-            primary_demand="technical",
-            secondary_demands=["commercial"],
-            active_request_flags=["needs_protocol", "needs_price"],
-        ),
-    ))
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=_FakeStructuredLLM("We can help with stable cell line development. Please share the target and host system.")):
+        response = render_csr_draft_response(
+            ResponseInput(
+                query="We need a stable cell line quote.",
+                execution_result=_empty_execution_result(executed_calls=[historical_call, rag_call]),
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
 
-    mem = bundle.response_plan.memory_update.response_memory
-    assert mem.last_demand_type == "technical"
-    # Only technical flags stored — needs_price (commercial) excluded
-    assert "needs_protocol" in mem.last_demand_flags
-    assert "needs_price" not in mem.last_demand_flags
+    block_types = [block.block_type for block in response.content_blocks]
+    assert response.debug_info["grounding_status"] == "grounded"
+    assert "trust_signal" in block_types
+    assert "historical_references" in block_types
+    assert "relevant_documents" in block_types
+    draft_block = next(block for block in response.content_blocks if block.block_type == "csr_draft")
+    assert draft_block.data["grounding_status"] == "grounded"
+    assert "*🧭 Grounding signal*" in response.message
+    assert "*📚 Similar past inquiries*" in response.message
+    assert "*📄 Relevant documents*" in response.message
+
+
+def test_csr_draft_surfaces_live_pricing_records_from_pricing_lookup_tool() -> None:
+    """Live pricing facts must reach the CSR draft (regression: silent drop)."""
+    pricing_call = ExecutedToolCall(
+        call_id="price-1",
+        tool_name="pricing_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="pricing_lookup_tool", query="CD45 antibody"),
+        result=ToolResult(
+            tool_name="pricing_lookup_tool",
+            status="ok",
+            primary_records=[
+                {
+                    "catalog_no": "20081",
+                    "name": "Anti-CD45 mAb",
+                    "price": 350.0,
+                    "currency": "USD",
+                    "lead_time_text": "in stock",
+                    "business_line": "antibody",
+                }
+            ],
+            structured_facts={
+                "query": "CD45 antibody",
+                "match_status": "ok",
+                "pricing_records": [
+                    {
+                        "catalog_no": "20081",
+                        "name": "Anti-CD45 mAb",
+                        "price": 350.0,
+                        "currency": "USD",
+                        "lead_time_text": "in stock",
+                        "business_line": "antibody",
+                    }
+                ],
+                "match_count": 1,
+            },
+        ),
+    )
+
+    with patch(
+        "src.responser.csr.draft_llm.get_llm",
+        return_value=_FakeStructuredLLM(
+            "CD45 mAb (20081) is $350 USD per 100 ug, currently in stock."
+        ),
+    ):
+        response = render_csr_draft_response(
+            ResponseInput(
+                query="How much is your CD45 antibody?",
+                execution_result=_empty_execution_result(executed_calls=[pricing_call]),
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    block_types = [block.block_type for block in response.content_blocks]
+    assert "structured_facts" in block_types
+
+    draft_block = next(b for b in response.content_blocks if b.block_type == "csr_draft")
+    assert draft_block.data["structured_record_count"] == 1
+
+    structured_block = next(b for b in response.content_blocks if b.block_type == "structured_facts")
+    assert structured_block.data["records"][0]["catalog_no"] == "20081"
+    assert structured_block.data["records"][0]["_source_tool"] == "pricing_lookup_tool"
+
+    # Slack-style section appears in the message body
+    assert "*💰 Live catalog / pricing facts*" in response.message
+    assert "20081" in response.message
+    assert "350" in response.message
+
+    # Live data alone is enough to ground the draft
+    assert response.debug_info["grounding_status"] == "grounded"
+    assert response.debug_info["structured_records_returned"] == 1
+    trust_block = next(b for b in response.content_blocks if b.block_type == "trust_signal")
+    assert trust_block.data["has_live_data"] is True
+
+
+def test_csr_draft_marks_missing_price_explicitly_for_llm() -> None:
+    """When PG returns a catalog row with a NULL price, the extractor must
+    surface "(not on file)" rather than letting render_record_for_llm
+    silently drop the field — otherwise the draft LLM cannot tell the
+    field is missing and substitutes an adjacent one (the bug that
+    produced "available in USD" for catalog 20001)."""
+    pricing_call = ExecutedToolCall(
+        call_id="price-missing",
+        tool_name="pricing_lookup_tool",
+        status="ok",
+        request=ToolRequest(tool_name="pricing_lookup_tool", query="20001"),
+        result=ToolResult(
+            tool_name="pricing_lookup_tool",
+            status="ok",
+            primary_records=[
+                {
+                    "catalog_no": "20001",
+                    "name": "Mouse Monoclonal antibody to Nucleophosmin",
+                    "price": None,
+                    "currency": "USD",
+                    "lead_time_text": None,
+                    "business_line": "Antibody",
+                }
+            ],
+            structured_facts={
+                "query": "20001",
+                "match_status": "ok",
+                "pricing_records": [
+                    {
+                        "catalog_no": "20001",
+                        "name": "Mouse Monoclonal antibody to Nucleophosmin",
+                        "price": None,
+                        "currency": "USD",
+                        "lead_time_text": None,
+                        "business_line": "Antibody",
+                    }
+                ],
+                "match_count": 1,
+            },
+        ),
+    )
+
+    capturing = _PromptCapturingLLM("placeholder draft")
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=capturing):
+        render_csr_draft_response(
+            ResponseInput(
+                query="What's the price of catalog #20001?",
+                execution_result=_empty_execution_result(executed_calls=[pricing_call]),
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    assert "price: (not on file)" in capturing.last_human
+    assert "lead_time_text: (not on file)" in capturing.last_human
+
+
+def test_format_structured_section_renders_full_table_for_csr() -> None:
+    """The catalog/pricing panel must mirror the QB operational pattern:
+    friendly group label, friendly field labels, the "(not on file)"
+    sentinel for missing answerable fields, and a fallback row for any
+    serializer key we haven't curated yet (so new fields aren't silently
+    dropped)."""
+    from src.responser.csr.sections import format_structured_section
+
+    rendered = format_structured_section([
+        {
+            "_source_tool": "catalog_lookup_tool",
+            "id": "abc-123",
+            "catalog_no": "20001",
+            "name": "Mouse Monoclonal antibody to Nucleophosmin",
+            "display_name": "Mouse Monoclonal antibody to Nucleophosmin",
+            "price": "(not on file)",
+            "currency": "USD",
+            "lead_time_text": "(not on file)",
+            "business_line": "Antibody",
+            "target_antigen": "NPM1",
+            "application_text": "ELISA, WB+, IHC+",
+            "score": 0.95,
+            "match_rank": 1,
+            "future_serializer_key": "surfaced",
+        },
+    ])
+
+    assert "_Catalog lookup matches:_" in rendered
+    assert "*[1]* Mouse Monoclonal antibody to Nucleophosmin" in rendered
+    assert "• catalog #: `20001`" in rendered
+    assert "• price: `(not on file)`" in rendered
+    assert "• lead time: `(not on file)`" in rendered
+    assert "• applications: `ELISA, WB+, IHC+`" in rendered
+    # Unknown serializer keys are surfaced rather than silently dropped.
+    assert "• future_serializer_key: `surfaced`" in rendered
+    # Internal/debug fields are hidden.
+    assert "score" not in rendered
+    assert "match_rank" not in rendered
+    assert "abc-123" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# asked_focus consumption — parser-identified focus must reach draft_llm
+# ---------------------------------------------------------------------------
+
+
+class _PromptCapturingLLM:
+    """Captures the (system, human) messages passed to invoke()."""
+
+    def __init__(self, draft: str) -> None:
+        self._draft = draft
+        self.last_system: str = ""
+        self.last_human: str = ""
+
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, messages):
+        for role, content in messages:
+            if role == "system":
+                self.last_system = content
+            elif role == "human":
+                self.last_human = content
+
+        class _Result:
+            draft = ""
+
+        result = _Result()
+        result.draft = self._draft
+        return result
+
+
+def test_csr_draft_prompt_includes_asked_focus_when_set() -> None:
+    """asked_focus from the parser must be surfaced into the draft user prompt."""
+    fake_llm = _PromptCapturingLLM("Draft body.")
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=fake_llm):
+        render_csr_draft_response(
+            ResponseInput(
+                query="Customer is asking when 1002 was sent out — can you confirm?",
+                execution_result=_empty_execution_result(),
+                asked_focus="the date/time invoice 1002 was sent out (delivered) to the customer",
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    assert "ASKED FOCUS" in fake_llm.last_human
+    assert "the date/time invoice 1002 was sent out" in fake_llm.last_human
+    # System prompt must instruct the LLM to honor the focus.
+    assert "ANSWER ONLY THE ASKED FOCUS" in fake_llm.last_system
+
+
+def test_csr_draft_prompt_marks_asked_focus_absent_when_no_focus() -> None:
+    """No asked_focus (greeting / closing) must surface a clear placeholder."""
+    fake_llm = _PromptCapturingLLM("Thanks for reaching out.")
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=fake_llm):
+        render_csr_draft_response(
+            ResponseInput(
+                query="Thanks, that's all for now.",
+                execution_result=_empty_execution_result(),
+                asked_focus=None,
+            ),
+            ResponsePlan(answer_focus="conversation_close"),
+        )
+
+    assert "ASKED FOCUS" in fake_llm.last_human
+    assert "no specific ask identified" in fake_llm.last_human
+
+
+def test_csr_draft_prompt_passes_multi_intent_focus_verbatim() -> None:
+    """Multi-ask focus (semicolon-separated) must reach the prompt verbatim."""
+    fake_llm = _PromptCapturingLLM("Draft body.")
+    multi_focus = (
+        "the price for custom rabbit polyclonal antibody development; "
+        "the lead time for custom rabbit polyclonal antibody development"
+    )
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=fake_llm):
+        render_csr_draft_response(
+            ResponseInput(
+                query="What's the price and lead time for custom rabbit polyclonal antibody development?",
+                execution_result=_empty_execution_result(),
+                asked_focus=multi_focus,
+            ),
+            ResponsePlan(answer_focus="commercial_or_operational_lookup"),
+        )
+
+    assert multi_focus in fake_llm.last_human
+
+
+def test_csr_draft_prompt_treats_blank_asked_focus_as_absent() -> None:
+    """Whitespace-only focus should fall through to the absent-focus branch."""
+    fake_llm = _PromptCapturingLLM("Draft body.")
+    with patch("src.responser.csr.draft_llm.get_llm", return_value=fake_llm):
+        render_csr_draft_response(
+            ResponseInput(
+                query="hi",
+                execution_result=_empty_execution_result(),
+                asked_focus="   ",
+            ),
+            ResponsePlan(answer_focus="conversation_close"),
+        )
+
+    assert "no specific ask identified" in fake_llm.last_human

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +11,32 @@ from src.routing.models import DialogueActResult
 
 class _ToolModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+
+# ---------------------------------------------------------------------------
+# Tool Contract models
+# ---------------------------------------------------------------------------
+
+class MissingParam(_ToolModel):
+    """Description of a single missing parameter.
+
+    DEPRECATED: Kept for backward compatibility with imports.
+    New code should use ToolReadiness.missing_identifiers (list[str]) instead.
+    """
+    name: str
+    description: str = ""
+    group_label: str = ""
+    alternatives: list[str] = Field(default_factory=list)
+
+
+class ToolReadiness(_ToolModel):
+    """Runtime readiness evaluation for a tool given current context."""
+    tool_name: str
+    can_execute: bool
+    quality: Literal["full", "degraded", "insufficient"] = "full"
+    matched_identifier: str = ""
+    missing_identifiers: list[str] = Field(default_factory=list)
+    reason: str = ""
 
 
 class ToolConstraints(_ToolModel):
@@ -46,6 +72,13 @@ class ToolResult(_ToolModel):
     tool_name: str
     status: str = "empty"
     primary_records: list[dict[str, Any]] = Field(default_factory=list)
+    # LLM-ready parallel view of primary_records — same length, same order
+    # (1:1 by index). Tool wrappers SHOULD populate this with a
+    # serialize_for_llm-transformed copy so the drafter doesn't carry
+    # per-tool schema knowledge in its system prompt.
+    # Contract: docs/RESPONDER_DESIGN_V4.md ⭐ section.
+    # Empty list = fallback path; responder uses primary_records directly.
+    llm_records: list[dict[str, Any]] = Field(default_factory=list)
     supporting_records: list[dict[str, Any]] = Field(default_factory=list)
     structured_facts: dict[str, Any] = Field(default_factory=dict)
     unstructured_snippets: list[dict[str, Any]] = Field(default_factory=list)
@@ -62,8 +95,9 @@ class ToolCapability(_ToolModel):
     supported_dialogue_acts: list[str] = Field(default_factory=list)
     supported_modalities: list[str] = Field(default_factory=list)
     supported_request_flags: list[str] = Field(default_factory=list)
-    required_params: list[str] = Field(default_factory=list)
+    full_identifiers: list[str] = Field(default_factory=list)
+    degraded_identifiers: list[str] = Field(default_factory=list)
+    provides_params: list[str] = Field(default_factory=list)
     can_run_in_parallel: bool = False
     returns_structured_facts: bool = False
     returns_unstructured_snippets: bool = False
-    requires_external_system: bool = False

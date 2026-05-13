@@ -1,15 +1,19 @@
+import json
+import os
 from pathlib import Path
+from typing import Iterator
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from langchain_core.runnables import RunnableLambda # 把普通Python函数包装成 LangChain runnable
 from langserve import add_routes # 自动生成 API（不用自己写 /chat）
 
-from src.app.service import run_email_agent
+from src.app.service import run_email_agent, stream_email_agent
 from src.api_models import AgentPrototypeResponse, AgentRequest
+from src.conversations import ConversationStore
 from src.integrations import QuickBooksClient, QuickBooksConfigError
-from src.documents.service import DOCUMENT_ROOT
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -19,6 +23,32 @@ app = FastAPI(
     version="0.1.0",
     description="A LangServe-powered prototype for parsing email requests and preparing agent input.",
 )
+
+
+class RenameConversationPayload(BaseModel):
+    title: str
+
+
+# Module-level singleton — keeps _has_documents_table cache warm across requests.
+# Recreated on process restart, which is fine for a CSR sidecar.
+conversation_store = ConversationStore()
+
+
+def require_csr_auth(authorization: str | None = Header(default=None)) -> None:
+    """Bearer-token gate for /api/conversations/*.
+
+    If CSR_API_TOKEN is unset (dev mode), the gate is open. In any environment
+    that exports the var, requests must carry `Authorization: Bearer <token>`.
+    """
+    expected = os.getenv("CSR_API_TOKEN", "").strip()
+    if not expected:
+        return
+    prefix = "Bearer "
+    if not authorization or not authorization.startswith(prefix):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    if authorization[len(prefix):].strip() != expected:
+        raise HTTPException(status_code=403, detail="Invalid bearer token")
+
 
 email_agent_runnable = RunnableLambda(run_email_agent).with_types(
     input_type=AgentRequest,
@@ -31,10 +61,36 @@ add_routes(
     path="/email-agent",
 )
 
+
+class StreamRequestBody(BaseModel):
+    """Mirror LangServe's ``{input: <payload>}`` envelope so the frontend
+    can use the same payload shape for stream and invoke."""
+    input: AgentRequest
+
+
+@app.post("/email-agent/sse")
+async def email_agent_sse(body: StreamRequestBody) -> StreamingResponse:
+    def event_source() -> Iterator[bytes]:
+        try:
+            for event in stream_email_agent(body.input):
+                name = event.get("event", "message")
+                data = json.dumps(event.get("data", {}), ensure_ascii=False)
+                yield f"event: {name}\ndata: {data}\n\n".encode("utf-8")
+        except Exception as exc:
+            error_payload = json.dumps({"message": str(exc)}, ensure_ascii=False)
+            yield f"event: error\ndata: {error_payload}\n\n".encode("utf-8")
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
-if DOCUMENT_ROOT.exists():
-    app.mount("/documents", StaticFiles(directory=DOCUMENT_ROOT), name="documents")
 
 
 @app.get("/", include_in_schema=False)
@@ -55,6 +111,45 @@ async def serve_frontend() -> HTMLResponse:
 @app.get("/health", tags=["system"])
 async def health_check() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/api/conversations", tags=["conversations"])
+async def list_conversations(
+    limit: int = Query(default=100, ge=1, le=500),
+    _auth: None = Depends(require_csr_auth),
+) -> dict:
+    return {"threads": conversation_store.list_threads(limit=limit)}
+
+
+@app.get("/api/conversations/{thread_key}", tags=["conversations"])
+async def get_conversation(
+    thread_key: str,
+    _auth: None = Depends(require_csr_auth),
+) -> dict:
+    return {"thread_id": thread_key, "messages": conversation_store.get_thread_messages(thread_key)}
+
+
+@app.delete("/api/conversations/{thread_key}", tags=["conversations"])
+async def delete_conversation(
+    thread_key: str,
+    _auth: None = Depends(require_csr_auth),
+) -> dict:
+    deleted = conversation_store.delete_thread(thread_key)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"thread_id": thread_key, "deleted": True}
+
+
+@app.patch("/api/conversations/{thread_key}", tags=["conversations"])
+async def rename_conversation(
+    thread_key: str,
+    payload: RenameConversationPayload,
+    _auth: None = Depends(require_csr_auth),
+) -> dict:
+    renamed = conversation_store.rename_thread(thread_key, payload.title)
+    if not renamed:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"thread_id": thread_key, "renamed": True, "title": payload.title}
 
 
 @app.get("/qb/status", tags=["quickbooks"])

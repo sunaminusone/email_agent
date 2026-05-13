@@ -1,7 +1,5 @@
 from .product_registry import (
-    PRODUCT_DATA_FILES,
     PRODUCT_REGISTRY_BACKEND,
-    ExcelProductRegistrySource,
     PostgresProductRegistrySource,
     ProductAliasRecord,
     ProductRegistryEntry,
@@ -30,9 +28,7 @@ from .service_registry import (
 )
 
 __all__ = [
-    "PRODUCT_DATA_FILES",
     "PRODUCT_REGISTRY_BACKEND",
-    "ExcelProductRegistrySource",
     "PostgresProductRegistrySource",
     "ProductAliasRecord",
     "ProductRegistryEntry",

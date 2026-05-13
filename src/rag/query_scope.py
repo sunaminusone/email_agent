@@ -1,7 +1,21 @@
 from __future__ import annotations
 
 import re
+import warnings
 from typing import Any, Mapping
+
+from src.objects.registries.service_registry import (
+    canonicalize_service_name as _canonicalize_via_registry,
+)
+
+
+def canonicalize_service_name(value: str) -> str:
+    # Route caller-supplied service names through service_registry's alias
+    # table so aliases resolve to the canonical name that chunk metadata
+    # carries — retriever's active_service_boost relies on string equality
+    # with _service_label(metadata). Idempotent on canonical input; passes
+    # through unchanged when no alias matches or the alias is ambiguous.
+    return _canonicalize_via_registry(value)
 
 
 SERVICE_SCOPE_QUERY_PATTERNS = (
@@ -90,6 +104,112 @@ def is_service_scoped_follow_up(query: str, active_service_name: str) -> bool:
     return bool(str(active_service_name or "").strip()) and query_has_service_scope_marker(query)
 
 
+def query_mentions_scope(query: str, scope_name: str) -> bool:
+    normalized_query = normalize_scope_query(query)
+    normalized_scope = normalize_scope_query(scope_name)
+    return bool(normalized_scope and normalized_scope in normalized_query)
+
+
+# Full 1:1 projection from parser semantic_intent to retrieval bucket. Every
+# value in SEMANTIC_INTENT_VALUES must appear here — adding a new canonical
+# intent without updating this table triggers the warning path below.
+#
+# Notes:
+#   - `troubleshooting` → general_technical is pragmatic: KB currently has no
+#     troubleshooting_guide / faq section_type. If KB adds troubleshooting
+#     content, split troubleshooting into its own bucket with section boosts.
+#   - `follow_up` → follow_up is a placeholder bucket. Semantically follow_up
+#     is a dialogue_act concept; the "right" bucket is whatever the prior turn
+#     was asking about. Until routing carries that forward, follow_up stays a
+#     telemetry-only bucket (empty section boost).
+_SEMANTIC_INTENT_BUCKET_MAP: dict[str, str] = {
+    "pricing_question": "pricing",
+    "timeline_question": "timeline",
+    "workflow_question": "workflow",
+    "model_support_question": "model_support",
+    "service_plan_question": "service_plan",
+    "documentation_request": "documentation",
+    "customization_request": "customization",
+    "technical_question": "general_technical",
+    "troubleshooting": "general_technical",
+    "product_inquiry": "general_technical",
+    "shipping_question": "operational",
+    "order_support": "operational",
+    "complaint": "operational",
+    "general_info": "general_info",
+    "follow_up": "follow_up",
+    "unknown": "unknown",
+}
+
+
+def detect_intent_bucket(query: str, semantic_intent: str = "") -> str:
+    # Parser-assigned semantic_intent is authoritative: 1:1 projection to the
+    # retrieval bucket. Keyword fallback only runs when parser did not produce
+    # an intent at all (legacy callers, empty string).
+    cleaned_intent = str(semantic_intent or "").strip()
+
+    if cleaned_intent:
+        mapped = _SEMANTIC_INTENT_BUCKET_MAP.get(cleaned_intent)
+        if mapped:
+            return mapped
+        # Non-empty intent that isn't in the map means parser emitted a value
+        # outside SEMANTIC_INTENT_VALUES — real drift, not a benign case.
+        warnings.warn(
+            f"detect_intent_bucket: unmapped semantic_intent {cleaned_intent!r}; "
+            "falling back to general_technical. Update _SEMANTIC_INTENT_BUCKET_MAP.",
+            stacklevel=2,
+        )
+        return "general_technical"
+
+    normalized_query = normalize_scope_query(query)
+    if not normalized_query:
+        return "general_technical"
+
+    if any(term in normalized_query for term in ("service plan", "plan", "timeline", "phase", "stages")):
+        return "service_plan"
+    if any(term in normalized_query for term in ("workflow", "next step", "happens next", "what happens next", "process", "after")):
+        return "workflow"
+    if any(term in normalized_query for term in ("model", "models", "cell types")):
+        return "model_support"
+
+    return "general_technical"
+
+
+# Bucket modes separate three orthogonal concerns:
+#   - ranked: uses section_type boosts (must have an entry in _SECTION_TYPE_BOOSTS)
+#   - lexical_only: participates in RAG via keyword injection / query rewrite,
+#     no section boosts (either no section_type target in KB, or "no preference"
+#     by design — e.g. general_technical is the catch-all parent bucket)
+#   - non_rag: bucket's intents shouldn't drive technical RAG at all; reaching
+#     RAG with this mode emits a telemetry warning (weak enforcement for now —
+#     strong short-circuit is a separate PR once all callers are audited)
+#   - placeholder: runtime-equivalent to lexical_only, but flags "temporary,
+#     awaiting upgrade" vs. "by design" (e.g. follow_up needs prior-turn intent
+#     carry — see backlog #8; unknown is an admit-you-don't-know terminal)
+#
+# Invariants enforced by tests:
+#   - every bucket in _SEMANTIC_INTENT_BUCKET_MAP.values() must have a mode
+#   - ranked ↔ presence in _SECTION_TYPE_BOOSTS
+_BUCKET_MODES: dict[str, str] = {
+    "pricing": "ranked",
+    "timeline": "ranked",
+    "workflow": "ranked",
+    "model_support": "ranked",
+    "service_plan": "ranked",
+    "general_technical": "lexical_only",
+    "documentation": "lexical_only",
+    "customization": "lexical_only",
+    "operational": "non_rag",
+    "general_info": "lexical_only",
+    "follow_up": "placeholder",
+    "unknown": "placeholder",
+}
+
+
+def get_bucket_mode(bucket: str) -> str:
+    return _BUCKET_MODES.get(str(bucket or "").strip(), "")
+
+
 def _first_value(values: Any) -> str:
     if isinstance(values, list):
         for value in values:
@@ -151,7 +271,6 @@ def _session_payload(agent_input: Mapping[str, Any]) -> Mapping[str, Any]:
             },
             "active_service_name": active_display_name if active_object_type == "service" else "",
             "active_product_name": active_display_name if active_object_type == "product" else "",
-            "active_target": active_display_name if active_object_type == "scientific_target" else "",
             "pending_clarification": {
                 "field": clarification_memory.get("pending_clarification_type", ""),
                 "candidate_options": clarification_memory.get("pending_candidate_options", []),
@@ -162,29 +281,7 @@ def _session_payload(agent_input: Mapping[str, Any]) -> Mapping[str, Any]:
             "last_user_goal": thread_memory.get("last_user_goal", ""),
         }
 
-    route_state = agent_input.get("route_state", {})
-    if not isinstance(route_state, Mapping):
-        return {}
-
-    object_memory = route_state.get("object_memory", {})
-    if not isinstance(object_memory, Mapping):
-        object_memory = {}
-    active_object = object_memory.get("active_object", {})
-    if not isinstance(active_object, Mapping):
-        active_object = {}
-
-    return {
-        "active_entity": {
-            "identifier": active_object.get("identifier", ""),
-            "identifier_type": active_object.get("identifier_type", ""),
-            "entity_kind": active_object.get("object_type", ""),
-            "display_name": active_object.get("display_name", ""),
-            "business_line": active_object.get("business_line", ""),
-        },
-        "active_service_name": "",
-        "active_product_name": active_object.get("display_name", ""),
-        "active_target": "",
-    }
+    return {}
 
 
 def _routing_memory(agent_input: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -224,17 +321,17 @@ def _turn_type(agent_input: Mapping[str, Any]) -> str:
     return str(turn_resolution.get("turn_type") or "").strip()
 
 
-def _primary_intent(agent_input: Mapping[str, Any]) -> str:
+def _semantic_intent(agent_input: Mapping[str, Any]) -> str:
     context = agent_input.get("context", {})
     if not isinstance(context, Mapping):
         return ""
-    return str(context.get("primary_intent") or "").strip()
+    return str(context.get("semantic_intent") or "").strip()
 
 
 def _is_continuation_turn(agent_input: Mapping[str, Any]) -> bool:
     if _turn_type(agent_input) in {"follow_up", "route_continuation"}:
         return True
-    if _primary_intent(agent_input) == "follow_up":
+    if _semantic_intent(agent_input) == "follow_up":
         return True
     return bool(_routing_memory(agent_input).get("should_stick_to_active_route"))
 
@@ -265,10 +362,6 @@ def resolve_current_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
     if product_name or catalog_number:
         return _resolved_scope("product", "current", product_name or catalog_number, "current_product_scope")
 
-    target_name = _first_value(entities.get("targets") or product_lookup_keys.get("targets"))
-    if target_name:
-        return _resolved_scope("scientific_target", "current", target_name, "current_scientific_target_scope")
-
     return _no_scope("no_current_scope")
 
 
@@ -281,18 +374,11 @@ def resolve_active_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
     if current_scope["scope_type"]:
         return _no_scope(f"blocked_by_{current_scope['reason']}")
 
-    if not _is_continuation_turn(agent_input):
-        return _no_scope("blocked_by_non_continuation_turn")
-
     query = _query(agent_input)
     if query_matches_non_technical_fallback_path(query):
         return _no_scope("blocked_by_non_technical_path")
 
     session_payload = _session_payload(agent_input)
-    active_entity = _active_entity(agent_input)
-    prior_active_entity = _prior_active_entity(agent_input)
-    current_active_entity_kind = str(active_entity.get("entity_kind") or "").strip()
-    prior_active_entity_kind = str(prior_active_entity.get("entity_kind") or "").strip()
     active_service_name = str(
         agent_input.get("active_service_name")
         or session_payload.get("active_service_name")
@@ -303,47 +389,65 @@ def resolve_active_scope(agent_input: Mapping[str, Any]) -> dict[str, str]:
         or session_payload.get("active_product_name")
         or ""
     ).strip()
-    active_target = str(
-        agent_input.get("active_target")
-        or session_payload.get("active_target")
-        or ""
-    ).strip()
 
-    if current_active_entity_kind in {"service", "product", "scientific_target"}:
-        active_entity_kind = current_active_entity_kind
-    elif prior_active_entity_kind in {"service", "product", "scientific_target"}:
-        active_entity_kind = prior_active_entity_kind
-    elif active_service_name:
-        active_entity_kind = "service"
-    elif active_product_name:
-        active_entity_kind = "product"
-    elif active_target:
-        active_entity_kind = "scientific_target"
-    else:
-        active_entity_kind = current_active_entity_kind or prior_active_entity_kind
+    if active_service_name and query_mentions_scope(query, active_service_name):
+        return _resolved_scope(
+            "service",
+            "current",
+            active_service_name,
+            "query_mentions_active_service_name",
+        )
+    if active_product_name and query_mentions_scope(query, active_product_name):
+        return _resolved_scope(
+            "product",
+            "current",
+            active_product_name,
+            "query_mentions_active_product_name",
+        )
 
-    if active_entity_kind == "service" and is_service_scoped_follow_up(query, active_service_name):
+    if _is_continuation_turn(agent_input):
+        active_entity = _active_entity(agent_input)
+        prior_active_entity = _prior_active_entity(agent_input)
+        current_active_entity_kind = str(active_entity.get("entity_kind") or "").strip()
+        prior_active_entity_kind = str(prior_active_entity.get("entity_kind") or "").strip()
+
+        if current_active_entity_kind in {"service", "product"}:
+            active_entity_kind = current_active_entity_kind
+        elif prior_active_entity_kind in {"service", "product"}:
+            active_entity_kind = prior_active_entity_kind
+        elif active_service_name:
+            active_entity_kind = "service"
+        elif active_product_name:
+            active_entity_kind = "product"
+        else:
+            active_entity_kind = current_active_entity_kind or prior_active_entity_kind
+
+        if active_entity_kind == "service" and is_service_scoped_follow_up(query, active_service_name):
+            return _resolved_scope(
+                "service",
+                "active",
+                active_service_name,
+                "active_service_follow_up_matched_service_scope_markers",
+            )
+
+        if active_entity_kind == "product" and active_product_name and query_has_product_scope_marker(query):
+            return _resolved_scope(
+                "product",
+                "active",
+                active_product_name,
+                "active_product_follow_up_matched_product_scope_markers",
+            )
+
+    # An active service is a strong anchor: any technical-ish query (already
+    # past the non_technical_fallback gate above) should retrieve within that
+    # service's scope even on cold-start turns without a follow-up marker.
+    if active_service_name:
+        intent_bucket = detect_intent_bucket(query, _semantic_intent(agent_input))
         return _resolved_scope(
             "service",
             "active",
             active_service_name,
-            "active_service_follow_up_matched_service_scope_markers",
-        )
-
-    if active_entity_kind == "product" and active_product_name and query_has_product_scope_marker(query):
-        return _resolved_scope(
-            "product",
-            "active",
-            active_product_name,
-            "active_product_follow_up_matched_product_scope_markers",
-        )
-
-    if active_target and query_has_product_scope_marker(query):
-        return _resolved_scope(
-            "scientific_target",
-            "active",
-            active_target,
-            "active_target_follow_up_matched_product_scope_markers",
+            f"active_service_retrieval_fallback_{intent_bucket}",
         )
 
     return _no_scope("no_active_scope")
@@ -380,20 +484,18 @@ def should_fallback_to_active_service_context(
                 "service_names": [],
                 "product_names": [],
                 "catalog_numbers": [],
-                "targets": [],
             },
             "product_lookup_keys": {
                 "service_names": [],
                 "product_names": [],
                 "catalog_numbers": [],
-                "targets": [],
             },
         }
         if not has_current_scope
         else {
             "query": query,
             "entities": {
-                "targets": ["current_scope_present"],
+                "product_names": ["current_scope_present"],
             },
             "session_payload": {
                 "active_entity": {
@@ -413,12 +515,16 @@ __all__ = [
     "NON_TECHNICAL_FALLBACK_PATTERNS",
     "PRODUCT_SCOPE_QUERY_PATTERNS",
     "SERVICE_SCOPE_QUERY_PATTERNS",
+    "canonicalize_service_name",
+    "detect_intent_bucket",
+    "get_bucket_mode",
     "has_current_scope",
     "is_service_scoped_follow_up",
     "normalize_scope_query",
     "query_has_product_scope_marker",
     "query_matches_non_technical_fallback_path",
     "query_has_service_scope_marker",
+    "query_mentions_scope",
     "resolve_active_scope",
     "resolve_current_scope",
     "resolve_effective_scope",

@@ -11,7 +11,6 @@ from .models import (
     ObjectMemory,
     ResponseMemory,
     ScoredObjectRef,
-    StatefulAnchors,
     ThreadMemory,
     compute_salience,
     salience_to_relevance,
@@ -21,7 +20,7 @@ from .object_memory import apply_object_memory_update, dedupe_object_refs
 from .recall import recall
 from .reflect import reflect
 from .response_memory import apply_response_memory_update, build_response_memory
-from .store import apply_memory_update, load_memory_snapshot, serialize_memory_snapshot, snapshot_to_route_state
+from .store import apply_memory_update, load_memory_snapshot, serialize_memory_snapshot
 from .session_store import SessionStore
 from .thread_memory import apply_thread_memory_update
 __all__ = [
@@ -38,7 +37,6 @@ __all__ = [
     "ObjectMemory",
     "ResponseMemory",
     "ScoredObjectRef",
-    "StatefulAnchors",
     "ThreadMemory",
     "compute_salience",
     "salience_to_relevance",
@@ -52,7 +50,6 @@ __all__ = [
     "dedupe_object_refs",
     "load_memory_snapshot",
     "serialize_memory_snapshot",
-    "snapshot_to_route_state",
     # v3 entry points
     "recall",
     "reflect",

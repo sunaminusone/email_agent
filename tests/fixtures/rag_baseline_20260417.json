@@ -1,0 +1,3926 @@
+{
+  "snapshot_metadata": {
+    "taken_at": "2026-04-17T16:33:25.912395+00:00",
+    "git": {
+      "sha": "90eb3da",
+      "branch": "feat/v3-rag-upgrade",
+      "dirty": true
+    },
+    "top_k": 10,
+    "query_count": 16,
+    "note": "Phase 0 baseline (dense-only, pre-hybrid-search).",
+    "corpus_source": "tests/observe_rag_confidence.py::CORPUS"
+  },
+  "queries": [
+    {
+      "category": "high",
+      "query": "What is the service plan for CAR-T cell therapy?",
+      "context": {
+        "business_line_hint": "car_t"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": 3.47717435836792,
+        "top_base_score": 3.39717435836792,
+        "top_margin": 0.37633249282836934,
+        "matches_count": 10,
+        "top_query_variant": "What is the service plan for CAR-T cell therapy?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "service_plan",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "What is the service plan for CAR-T cell therapy?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "67c242bb8a4e13b5394c7c7abe4357c2",
+          "final_score": 3.4772,
+          "score": 0.68,
+          "raw_score": 0.68,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 3.3972,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan A",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "a1b307c6077069ea5156f84a71fe1d92",
+          "final_score": 3.3976,
+          "score": 0.75,
+          "raw_score": 0.75,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 3.3976,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "plan_comparison",
+          "structural_tag": "section",
+          "chunk_label": "Plan A vs Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "fca296bd3a570b56bcd7a03594a68441",
+          "final_score": 3.0636,
+          "score": 0.7308,
+          "raw_score": 0.7308,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 3.0636,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "pricing_overview",
+          "structural_tag": "section",
+          "chunk_label": "Discovery services plans",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "6caa79a13c6cbf3532edf9d7ebd66311",
+          "final_score": 2.8414,
+          "score": 0.7059,
+          "raw_score": 0.7059,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.7614,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "ecf3abea4ee59d2f84fb9ee22852b1b2",
+          "final_score": 2.6222,
+          "score": 0.7712,
+          "raw_score": 0.7712,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.5822,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan A - Optional Phase I",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "76058a6e190a373e73f0cc2e27dbdf80",
+          "final_score": 2.4012,
+          "score": 0.6955,
+          "raw_score": 0.6955,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.3612,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan B - Phase V",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "18124f32d3d9d0f4d71540666c05c1d5",
+          "final_score": 2.3433,
+          "score": 0.7518,
+          "raw_score": 0.7518,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.3033,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan A - Optional Phase II",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "662d575f4344f991f79147340b83014f",
+          "final_score": 2.3294,
+          "score": 0.7184,
+          "raw_score": 0.7184,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.2894,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project timeline overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "a429f8c13483e9c8ed29356df74b1a61",
+          "final_score": 2.3212,
+          "score": 0.7341,
+          "raw_score": 0.7341,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.2412,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "plan_summary",
+          "structural_tag": "section",
+          "chunk_label": "Plan B summary",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "ff22bc452a9a9f9ce5b870bf8b4ff592",
+          "final_score": 2.2876,
+          "score": 0.6822,
+          "raw_score": 0.6822,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.2476,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the service plan for CAR-T cell therapy?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan A - Phase V",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        }
+      ]
+    },
+    {
+      "category": "high",
+      "query": "What is the workflow for antibody production?",
+      "context": {
+        "business_line_hint": "antibody"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": 0.9770417976379394,
+        "top_base_score": 0.8970417976379395,
+        "top_margin": 0.60795305788517,
+        "matches_count": 10,
+        "top_query_variant": "What is the workflow for antibody production?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "workflow",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "What is the workflow for antibody production?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "12c9ee94d797ff56900f65efbe8e41de",
+          "final_score": 0.977,
+          "score": 0.5931,
+          "raw_score": 0.7131,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.897,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "workflow_overview",
+          "structural_tag": "section",
+          "chunk_label": "Recombinant Antibody Production Workflow",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_recombinant_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "74ed5bb2c43e63b397db6b27a26cc5a2",
+          "final_score": 0.8555,
+          "score": 0.6984,
+          "raw_score": 0.8184,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.7755,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "workflow_overview",
+          "structural_tag": "section",
+          "chunk_label": "Human Fab Library Workflow Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "e79e13a75059fcd0e6127439b7a54641",
+          "final_score": 0.178,
+          "score": 0.818,
+          "raw_score": 0.938,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.178,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "c4756395c919276cf337c31933dfddb7",
+          "final_score": 0.0737,
+          "score": 0.8414,
+          "raw_score": 0.9614,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.0737,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Bispecific Antibody Development Timeline",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_bispecific_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "837642de1ec16f6653d51dca2d163459",
+          "final_score": 0.0492,
+          "score": 0.8549,
+          "raw_score": 0.9749,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.0492,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "phase_overview",
+          "structural_tag": "section",
+          "chunk_label": "Phase II Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "56092fde49febc34b4a9658da9520997",
+          "final_score": -0.352,
+          "score": 0.8152,
+          "raw_score": 0.9352,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.352,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase I",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "5f092500abf0bbd8e647a9970f8c2b13",
+          "final_score": -0.3523,
+          "score": 0.6395,
+          "raw_score": 0.7595,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.4123,
+            "section_type_boost": 0.06,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "workflow_step",
+          "structural_tag": "section",
+          "chunk_label": "Isolate Human B Cells",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "c0d1ceca6d79071ad0a67f02ef907e94",
+          "final_score": -0.4162,
+          "score": 0.8222,
+          "raw_score": 0.9422,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.4162,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project Timeline Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "857f29a12c7c250941a9721467fd971a",
+          "final_score": -0.5466,
+          "score": 0.7778,
+          "raw_score": 0.8978,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.6066,
+            "section_type_boost": 0.06,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "workflow_step",
+          "structural_tag": "section",
+          "chunk_label": "Amplify VH and VL Genes by PCR",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "1aa2cb6a2d846f0d2a4c29ecfc642055",
+          "final_score": -0.6295,
+          "score": 0.8581,
+          "raw_score": 0.9781,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.6295,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What is the workflow for antibody production?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase III",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "high",
+      "query": "What models do you support for mRNA LNP development?",
+      "context": {
+        "business_line_hint": "mrna_lnp"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": 4.21671350479126,
+        "top_base_score": 4.13671350479126,
+        "top_margin": 4.276047127246857,
+        "matches_count": 10,
+        "top_query_variant": "What models do you support for mRNA LNP development?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "model_support",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "What models do you support for mRNA LNP development?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "b528e305d0fd7b8234d9ced2ef05da9b",
+          "final_score": 4.2167,
+          "score": 0.5124,
+          "raw_score": 0.6324,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 4.1367,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "model_support",
+          "structural_tag": "section",
+          "chunk_label": "Model Support",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "95242ab471dd6e5a3ccb71c30ff46dea",
+          "final_score": 0.2504,
+          "score": 0.8344,
+          "raw_score": 0.9544,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.2504,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "df16d77a7e306c6042949c40c9256045",
+          "final_score": -0.1988,
+          "score": 0.9621,
+          "raw_score": 1.0821,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.1988,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "faq",
+          "structural_tag": "section",
+          "chunk_label": "FAQ - How ProMab Is Uniquely Positioned",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "626ffe2f154e31234cc2709336d479b6",
+          "final_score": -0.2296,
+          "score": 0.7706,
+          "raw_score": 0.8906,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.2296,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "application_overview",
+          "structural_tag": "section",
+          "chunk_label": "Application Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "bc8b37cfa6e76152dd5787239b5d2374",
+          "final_score": -0.329,
+          "score": 0.7522,
+          "raw_score": 0.8722,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.369,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "development_capabilities",
+          "structural_tag": "section",
+          "chunk_label": "Service Scope and Supported Cell Types",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "481a192ac3d1cc129549d217c0e2f0fb",
+          "final_score": -0.5217,
+          "score": 0.7484,
+          "raw_score": 0.8684,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.5217,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "why_us",
+          "structural_tag": "section",
+          "chunk_label": "Why Choose ProMab for mRNA-LNP",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "469f230f416c383919c42456bd2efcc7",
+          "final_score": -1.1494,
+          "score": 0.8072,
+          "raw_score": 0.9272,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.1494,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "technical_advantage",
+          "structural_tag": "section",
+          "chunk_label": "Platform Quality Evidence in 293 Cells",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "c49e38890366d036097d260de90380e5",
+          "final_score": -1.6736,
+          "score": 0.7855,
+          "raw_score": 0.9055,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.6736,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "related_services",
+          "structural_tag": "section",
+          "chunk_label": "Related Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "ec96186ab852ac8d25a9cd9db0238e88",
+          "final_score": -1.7958,
+          "score": 0.9338,
+          "raw_score": 1.0538,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.7958,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "technical_advantage",
+          "structural_tag": "section",
+          "chunk_label": "Stability Through Storage and Freeze-Thaw",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "a30b1c8ac91599b993d7844c9c9fc0b8",
+          "final_score": -1.8282,
+          "score": 0.6801,
+          "raw_score": 0.8001,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.8282,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What models do you support for mRNA LNP development?",
+          "section_type": "faq",
+          "structural_tag": "section",
+          "chunk_label": "FAQ - Applications of LNP Delivery",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        }
+      ]
+    },
+    {
+      "category": "high",
+      "query": "How long does CAR-T cell therapy development take?",
+      "context": {
+        "business_line_hint": "car_t"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": 1.5618010759353638,
+        "top_base_score": 1.5618010759353638,
+        "top_margin": 2.0598041117191315,
+        "matches_count": 10,
+        "top_query_variant": "How long does CAR-T cell therapy development take?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "How long does CAR-T cell therapy development take?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "662d575f4344f991f79147340b83014f",
+          "final_score": 1.5618,
+          "score": 0.7858,
+          "raw_score": 0.7858,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.5618,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project timeline overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "67c242bb8a4e13b5394c7c7abe4357c2",
+          "final_score": 0.1944,
+          "score": 0.7262,
+          "raw_score": 0.7262,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.1944,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan A",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "a1b307c6077069ea5156f84a71fe1d92",
+          "final_score": -0.372,
+          "score": 0.8475,
+          "raw_score": 0.8475,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.372,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "plan_comparison",
+          "structural_tag": "section",
+          "chunk_label": "Plan A vs Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "6caa79a13c6cbf3532edf9d7ebd66311",
+          "final_score": -1.3164,
+          "score": 0.8108,
+          "raw_score": 0.8108,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.3164,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "587a410924ff79064b7b538f8449197a",
+          "final_score": -1.5045,
+          "score": 0.9094,
+          "raw_score": 0.9094,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.5045,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_nk_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "50a9d9efda551df97a607a45b54bcd4d",
+          "final_score": -2.0832,
+          "score": 0.7673,
+          "raw_score": 0.7673,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.0832,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "plan_summary",
+          "structural_tag": "section",
+          "chunk_label": "Plan A summary",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "bdbbe39d92d59fb350e66b0209cd771e",
+          "final_score": -2.1131,
+          "score": 0.9182,
+          "raw_score": 0.9182,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.1131,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "CAR-T Cell Design",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "2c5f3ddf510f18e62d1dec17ca9f4caa",
+          "final_score": -2.1485,
+          "score": 0.9532,
+          "raw_score": 0.9532,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.1485,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "plan_summary",
+          "structural_tag": "section",
+          "chunk_label": "Plan A summary",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_macrophage_cell_development_rag_ready_v2.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "fca296bd3a570b56bcd7a03594a68441",
+          "final_score": -2.2926,
+          "score": 0.8844,
+          "raw_score": 0.8844,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.2926,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "pricing_overview",
+          "structural_tag": "section",
+          "chunk_label": "Discovery services plans",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "18124f32d3d9d0f4d71540666c05c1d5",
+          "final_score": -2.3779,
+          "score": 0.9307,
+          "raw_score": 0.9307,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.3779,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How long does CAR-T cell therapy development take?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan A - Optional Phase II",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        }
+      ]
+    },
+    {
+      "category": "high",
+      "query": "What are the phases in antibody discovery?",
+      "context": {
+        "business_line_hint": "antibody"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": 1.1774208116531373,
+        "top_base_score": 1.0974208116531372,
+        "top_margin": 1.7153281752268472,
+        "matches_count": 10,
+        "top_query_variant": "What are the phases in antibody discovery?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "service_plan",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "What are the phases in antibody discovery?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "4bf449d1e65426753ce2d6447ec38ef4",
+          "final_score": 1.1774,
+          "score": 0.888,
+          "raw_score": 1.008,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.0974,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "plan_summary",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package Summary",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "44d02e4028cc557a64206b803840c870",
+          "final_score": -0.5266,
+          "score": 0.7492,
+          "raw_score": 0.8692,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.5666,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase II",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "83a9db45de27483e8a8fe0d2806b4ae0",
+          "final_score": -0.5434,
+          "score": 0.714,
+          "raw_score": 0.834,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.5834,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase II",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "d598568b3f0343905a27c49eb98bd63b",
+          "final_score": -0.5438,
+          "score": 0.7065,
+          "raw_score": 0.8265,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.5838,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Optional Phase II",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "5f429e9fa345bb8f354e08d6198f84a1",
+          "final_score": -0.5907,
+          "score": 0.7363,
+          "raw_score": 0.8563,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.6307,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase I",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_recombinant_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "4f79aa7614eea885c33e957a099fea9e",
+          "final_score": -0.7033,
+          "score": 0.8546,
+          "raw_score": 0.9746,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.7433,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project Timeline Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "890e3c89720f941af64f5726d71befe3",
+          "final_score": -0.7206,
+          "score": 0.7511,
+          "raw_score": 0.8711,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.7206,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "phase_overview",
+          "structural_tag": "section",
+          "chunk_label": "Phase I Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "1aa2cb6a2d846f0d2a4c29ecfc642055",
+          "final_score": -0.7832,
+          "score": 0.7233,
+          "raw_score": 0.8433,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.8232,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase III",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "afd8d23ffa8a8771f596a8fa79d05ac7",
+          "final_score": -0.8197,
+          "score": 0.6842,
+          "raw_score": 0.8042,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.8597,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase I",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "c4756395c919276cf337c31933dfddb7",
+          "final_score": -0.8438,
+          "score": 0.7602,
+          "raw_score": 0.8802,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.8838,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What are the phases in antibody discovery?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Bispecific Antibody Development Timeline",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_bispecific_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "medium",
+      "query": "How does it work?",
+      "context": {
+        "active_service_name": "CAR-T cell therapy",
+        "business_line_hint": "car_t"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": -1.6730105876922607,
+        "top_base_score": -1.6730105876922607,
+        "top_margin": 0.4737781683603921,
+        "matches_count": 10,
+        "top_query_variant": "How does CAR-T cell therapy work?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "service",
+        "effective_scope_name": "CAR-T cell therapy",
+        "effective_scope_source": "active",
+        "effective_scope_reason": "active_service_retrieval_fallback_general_technical",
+        "rewritten_query": "How does CAR-T cell therapy work?",
+        "rewrite_reason": "injected_scope_for_pronoun_workflow_question",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "How does it work?",
+        "How does CAR-T cell therapy work?",
+        "CAR-T cell therapy"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "67c242bb8a4e13b5394c7c7abe4357c2",
+          "final_score": -1.673,
+          "score": 0.9766,
+          "raw_score": 0.9766,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.673,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan A",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "7a2e2b892fcf7a5f9225a49e1dab0d01",
+          "final_score": -2.0919,
+          "score": 0.8417,
+          "raw_score": 0.8417,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.0919,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "workflow_overview",
+          "structural_tag": "section",
+          "chunk_label": "CAR-T workflow overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "a1b307c6077069ea5156f84a71fe1d92",
+          "final_score": -2.1223,
+          "score": 0.9999,
+          "raw_score": 0.9999,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.1223,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "plan_comparison",
+          "structural_tag": "section",
+          "chunk_label": "Plan A vs Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "93218f14ef648fde03803cb4b06c9bbb",
+          "final_score": -2.2261,
+          "score": 0.9188,
+          "raw_score": 0.9188,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.2261,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan A - Phase III",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "5cd012015b144bb3cff5beb3b5b42419",
+          "final_score": -2.2454,
+          "score": 0.9291,
+          "raw_score": 0.9291,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.2454,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan B - Phase III",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "072759ddee82955e17c8b6e4ae5876c8",
+          "final_score": -2.3514,
+          "score": 1.0061,
+          "raw_score": 1.0061,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.3514,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy",
+          "section_type": "development_capabilities",
+          "structural_tag": "section",
+          "chunk_label": "Advancing your preclinical and clinical development",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "754d6c7678f93edd80489bfbb8bfa36a",
+          "final_score": -2.4987,
+          "score": 0.9495,
+          "raw_score": 0.9495,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.4987,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "scientific_rationale",
+          "structural_tag": "section",
+          "chunk_label": "Why CAR-macrophages",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_macrophage_cell_development_rag_ready_v2.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "6caa79a13c6cbf3532edf9d7ebd66311",
+          "final_score": -2.5926,
+          "score": 0.9735,
+          "raw_score": 0.9735,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.5926,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "ddb8e3dccb27f7ef85e92e79a9f879a3",
+          "final_score": -2.7248,
+          "score": 0.8802,
+          "raw_score": 0.8802,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.7248,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan A - Phase IV",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "088a512723afb8e981d9a149179c9922",
+          "final_score": -2.7346,
+          "score": 0.9587,
+          "raw_score": 0.9587,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -2.7346,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "How does CAR-T cell therapy work?",
+          "section_type": "development_capability_overview",
+          "structural_tag": "section",
+          "chunk_label": "CAR-T development capability chain",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        }
+      ]
+    },
+    {
+      "category": "medium",
+      "query": "I need antibody purification for 1 liter",
+      "context": {
+        "active_service_name": "Antibody production",
+        "business_line_hint": "antibody"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": 5.017074775695801,
+        "top_base_score": 4.817074775695801,
+        "top_margin": 1.5268853346506757,
+        "matches_count": 10,
+        "top_query_variant": "I need antibody purification for 1 liter for Antibody production",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "service",
+        "effective_scope_name": "Antibody production",
+        "effective_scope_source": "active",
+        "effective_scope_reason": "active_service_retrieval_fallback_general_technical",
+        "rewritten_query": "I need antibody purification for 1 liter for Antibody production",
+        "rewrite_reason": "injected_scope_by_suffix",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "I need antibody purification for 1 liter",
+        "I need antibody purification for 1 liter for Antibody production",
+        "Antibody production"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "51b47738544f44661ce33d91b9eb7985",
+          "final_score": 5.0171,
+          "score": 0.6074,
+          "raw_score": 0.7274,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 4.8171,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.2
+          },
+          "query_variant": "I need antibody purification for 1 liter for Antibody production",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Purification Pricing - 1 Liter Purification from Supernatant",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "8e9124db024d4eb90f0fa0357e035462",
+          "final_score": 4.6829,
+          "score": 0.6731,
+          "raw_score": 0.7931,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 4.4829,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.2
+          },
+          "query_variant": "I need antibody purification for 1 liter for Antibody production",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Purification Pricing - 1 Liter Purification from Supernatant",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "e3cbd3630b608d6435062fec49f1c9e1",
+          "final_score": 3.4398,
+          "score": 0.9372,
+          "raw_score": 1.0572,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 3.2398,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.2
+          },
+          "query_variant": "I need antibody purification for 1 liter for Antibody production",
+          "section_type": "phase_overview",
+          "structural_tag": "section",
+          "chunk_label": "Phase III Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_recombinant_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "e82698dc123565c7e88584c1785306c0",
+          "final_score": 2.3479,
+          "score": 0.805,
+          "raw_score": 0.925,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.3479,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "I need antibody purification for 1 liter for Antibody production",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production Yield in Bioreactors - 1 Liter of Supernatant",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "2a42fbebf78aabd9e4261b501cda8ff2",
+          "final_score": 1.5301,
+          "score": 0.927,
+          "raw_score": 1.047,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.5301,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Antibody production",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Production Timeline Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "10d79d13161411e281f63be1bd566eae",
+          "final_score": 1.2092,
+          "score": 0.7471,
+          "raw_score": 0.8671,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.2092,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "I need antibody purification for 1 liter for Antibody production",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production Yield in Bioreactors - 1 Liter of Supernatant",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "802551c6d81439b553754050aff99811",
+          "final_score": 0.8476,
+          "score": 0.7729,
+          "raw_score": 0.8929,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.8476,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Antibody production",
+          "section_type": "service_component",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production In Vitro",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "2e1f3e9eb653c1c121b9f4cd122686ee",
+          "final_score": -0.1904,
+          "score": 0.8364,
+          "raw_score": 0.9564,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.1904,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Antibody production",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production in Bioreactors",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "04adfcf75ae11285de4006869ddac49b",
+          "final_score": -1.6589,
+          "score": 0.6552,
+          "raw_score": 0.7752,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.7589,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "I need antibody purification for 1 liter for Antibody production",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Purification Pricing - 500 Milliliters",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "03051309ed4832d2ee68b190b2c888f2",
+          "final_score": -1.6615,
+          "score": 0.6641,
+          "raw_score": 0.7841,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.7615,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "I need antibody purification for 1 liter for Antibody production",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Purification Pricing - 100 Milliliters",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "medium",
+      "query": "Quote for antibody production service",
+      "context": {
+        "business_line_hint": "antibody"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": 3.0695303440093995,
+        "top_base_score": 2.9695303440093994,
+        "top_margin": 0.6914892196655273,
+        "matches_count": 10,
+        "top_query_variant": "Quote for antibody production service",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "Quote for antibody production service"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "23dd8ae38746912780419800f390afd4",
+          "final_score": 3.0695,
+          "score": 0.6695,
+          "raw_score": 0.7895,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.9695,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "service_component",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production In Vivo",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "0a8614cfcf34aa70989c5a45eb6cb3bd",
+          "final_score": 2.6994,
+          "score": 0.7061,
+          "raw_score": 0.8261,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.5994,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "why_us",
+          "structural_tag": "section",
+          "chunk_label": "Why Choose ProMab for Antibody Production",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "a13285e3ea933a8575a93741f1617bc3",
+          "final_score": 2.2776,
+          "score": 0.5916,
+          "raw_score": 0.7116,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.1776,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production Yield in Bioreactors - 500 Milliliters of Supernatant",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "893cc95b62cf57b49a04a3fd3ab7bc12",
+          "final_score": 2.1571,
+          "score": 0.6891,
+          "raw_score": 0.8091,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.0571,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Ascites Production Pricing - 51 to 99 Mice",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "d7cf593c22497dbb967afc6ad1dea96d",
+          "final_score": 2.1416,
+          "score": 0.6835,
+          "raw_score": 0.8035,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 2.0416,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Ascites Production Pricing - 11 to 50 Mice",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "0de32394ee151621f591f5678c620e6e",
+          "final_score": 2.067,
+          "score": 0.7677,
+          "raw_score": 0.8877,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.967,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "service_component",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Stable Cell Line Development",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "2c7d1fe67226f66ee3d4fb0efafe767e",
+          "final_score": 2.037,
+          "score": 0.6881,
+          "raw_score": 0.8081,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.937,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "d1c6fbc74a328ce138f952db66ea4a19",
+          "final_score": 1.967,
+          "score": 0.698,
+          "raw_score": 0.818,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.867,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Ascites Production Pricing - More Than 100 Mice",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "2e1f3e9eb653c1c121b9f4cd122686ee",
+          "final_score": 1.7679,
+          "score": 0.6394,
+          "raw_score": 0.7594,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.6679,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production in Bioreactors",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "0368c6d3a4bf5bb418e9f41a0b7cb332",
+          "final_score": 1.754,
+          "score": 0.731,
+          "raw_score": 0.851,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 1.654,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.1
+          },
+          "query_variant": "Quote for antibody production service",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "medium",
+      "query": "What's the timeline for this service?",
+      "context": {
+        "active_service_name": "CAR-T cell therapy",
+        "business_line_hint": "car_t"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": 0.49196104884147646,
+        "top_base_score": 0.41196104884147644,
+        "top_margin": 0.5919076331456502,
+        "matches_count": 10,
+        "top_query_variant": "CAR-T cell therapy discovery services plan",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "service",
+        "effective_scope_name": "CAR-T cell therapy",
+        "effective_scope_source": "active",
+        "effective_scope_reason": "active_service_follow_up_matched_service_scope_markers",
+        "rewritten_query": "What's the timeline for CAR-T cell therapy?",
+        "rewrite_reason": "injected_scope_for_referential_entity",
+        "intent_bucket": "service_plan",
+        "expanded_queries": [
+          "CAR-T cell therapy discovery services plan",
+          "CAR-T cell therapy phases",
+          "CAR-T cell therapy project timeline",
+          "CAR-T cell therapy workflow summary"
+        ],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "What's the timeline for this service?",
+        "What's the timeline for CAR-T cell therapy?",
+        "CAR-T cell therapy",
+        "CAR-T cell therapy discovery services plan",
+        "CAR-T cell therapy phases",
+        "CAR-T cell therapy project timeline",
+        "CAR-T cell therapy workflow summary"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "67c242bb8a4e13b5394c7c7abe4357c2",
+          "final_score": 0.492,
+          "score": 0.7454,
+          "raw_score": 0.7454,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": 0.412,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan A",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "6caa79a13c6cbf3532edf9d7ebd66311",
+          "final_score": -0.0133,
+          "score": 0.7295,
+          "raw_score": 0.7295,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.0933,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "a429f8c13483e9c8ed29356df74b1a61",
+          "final_score": -0.1258,
+          "score": 0.7086,
+          "raw_score": 0.7086,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.2058,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "plan_summary",
+          "structural_tag": "section",
+          "chunk_label": "Plan B summary",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "662d575f4344f991f79147340b83014f",
+          "final_score": -0.1607,
+          "score": 0.7297,
+          "raw_score": 0.7297,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.2007,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the timeline for CAR-T cell therapy?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project timeline overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "a1b307c6077069ea5156f84a71fe1d92",
+          "final_score": -0.3699,
+          "score": 0.7816,
+          "raw_score": 0.7816,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -0.3699,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "plan_comparison",
+          "structural_tag": "section",
+          "chunk_label": "Plan A vs Plan B",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "fca296bd3a570b56bcd7a03594a68441",
+          "final_score": -1.1319,
+          "score": 0.7117,
+          "raw_score": 0.7117,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.1319,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "pricing_overview",
+          "structural_tag": "section",
+          "chunk_label": "Discovery services plans",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "50a9d9efda551df97a607a45b54bcd4d",
+          "final_score": -1.1802,
+          "score": 0.6879,
+          "raw_score": 0.6879,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.2602,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "plan_summary",
+          "structural_tag": "section",
+          "chunk_label": "Plan A summary",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "1cc2da66309015746087692664dc85a7",
+          "final_score": -1.5396,
+          "score": 0.7212,
+          "raw_score": 0.7212,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.5396,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "workflow_step",
+          "structural_tag": "section",
+          "chunk_label": "Animal Studies",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "18124f32d3d9d0f4d71540666c05c1d5",
+          "final_score": -1.6194,
+          "score": 0.7805,
+          "raw_score": 0.7805,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.6594,
+            "section_type_boost": 0.04,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan A - Optional Phase II",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_car_t_cell_development_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "379e20e1e7dc383b2354a1823026be96",
+          "final_score": -1.772,
+          "score": 0.8206,
+          "raw_score": 0.8206,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -1.852,
+            "section_type_boost": 0.08,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "CAR-T cell therapy discovery services plan",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Plan A",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_gamma_delta_t_cell_development_rag_ready_v4.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        }
+      ]
+    },
+    {
+      "category": "low",
+      "query": "What's your contact phone number?",
+      "context": {},
+      "confidence": {
+        "level": "observed",
+        "top_final_score": -7.565062046051025,
+        "top_base_score": -7.565062046051025,
+        "top_margin": 0.49542856216430664,
+        "matches_count": 10,
+        "top_query_variant": "What's your contact phone number?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "What's your contact phone number?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "d519b26ce9df15efbec21a68558a84c2",
+          "final_score": -7.5651,
+          "score": 1.6448,
+          "raw_score": 1.6448,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -7.5651,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "pricing_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Plans and Prices",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_bispecific_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "714982c691bc329f0faed01e0e69088c",
+          "final_score": -7.9123,
+          "score": 1.6255,
+          "raw_score": 1.6255,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -7.9123,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "technical_advantage",
+          "structural_tag": "section",
+          "chunk_label": "CAR-T Expansion Platform Support",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_t_cell_activation_proliferation_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "b0c1cbc53730509f0fc1823136fe7d01",
+          "final_score": -8.0731,
+          "score": 1.5547,
+          "raw_score": 1.5547,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.0731,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Master and Working Cell Banking Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "0f6f36a67c688d63fbf5d8c942ff38f8",
+          "final_score": -8.196,
+          "score": 1.6418,
+          "raw_score": 1.6418,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.196,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "FACS Analysis",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_bispecific_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "84876ecec89fad009bbd92eb1c5607dd",
+          "final_score": -8.2656,
+          "score": 1.5928,
+          "raw_score": 1.5928,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.2656,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "related_services",
+          "structural_tag": "section",
+          "chunk_label": "Related Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_dc_migration_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "2b90c532ce8a00e0d79a8f468872684d",
+          "final_score": -8.2913,
+          "score": 1.6121,
+          "raw_score": 1.6121,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.2913,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "related_services",
+          "structural_tag": "section",
+          "chunk_label": "Related Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_flow_cytometry_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "11e0455d86064f7305d520d810826f57",
+          "final_score": -8.298,
+          "score": 1.5904,
+          "raw_score": 1.5904,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.298,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "add_on_services",
+          "structural_tag": "section",
+          "chunk_label": "Additional Add-On Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_bispecific_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "afe97b852476209cfe5c33f08306bff8",
+          "final_score": -8.3434,
+          "score": 1.6395,
+          "raw_score": 1.6395,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.3434,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Octet BLI Binding Assay",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_bispecific_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "d406aca6ba80cd168c01d4bc6e110793",
+          "final_score": -8.3471,
+          "score": 1.6288,
+          "raw_score": 1.6288,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.3471,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Affinity Tune-Up and Humanization Service Timeline",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_affinity_tune_humanization_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "fddb840f1191a1d72a0bc21a7b1622d4",
+          "final_score": -8.3646,
+          "score": 1.645,
+          "raw_score": 1.645,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.3646,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's your contact phone number?",
+          "section_type": "development_capabilities",
+          "structural_tag": "section",
+          "chunk_label": "Validation Assets for Bispecific Antibodies",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_bispecific_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "low",
+      "query": "Do you ship to Europe?",
+      "context": {},
+      "confidence": {
+        "level": "observed",
+        "top_final_score": -8.564539909362793,
+        "top_base_score": -8.564539909362793,
+        "top_margin": 0.9021463394165039,
+        "matches_count": 10,
+        "top_query_variant": "Do you ship to Europe?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "Do you ship to Europe?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "2be9e38b3022adf77cab5cd3a8ae2610",
+          "final_score": -8.5645,
+          "score": 1.6207,
+          "raw_score": 1.6207,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.5645,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "workflow_step",
+          "structural_tag": "section",
+          "chunk_label": "Subcloning Expansion and Cryopreservation",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "6130452290132f80315bf9bd3586aa3d",
+          "final_score": -9.3538,
+          "score": 1.6114,
+          "raw_score": 1.6114,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.3538,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "6956de1ad5eea67a12653af8316e22ee",
+          "final_score": -9.3909,
+          "score": 1.6434,
+          "raw_score": 1.6434,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.3909,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase III",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "2969b67e59dd79217c7fa1e31f6897bb",
+          "final_score": -9.6554,
+          "score": 1.6328,
+          "raw_score": 1.6328,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.6554,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "validation_models",
+          "structural_tag": "section",
+          "chunk_label": "Analytical Data and Deliverables",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/protein-expression/promab_peptide_synthesis_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "protein_expression"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "1aa2cb6a2d846f0d2a4c29ecfc642055",
+          "final_score": -9.8909,
+          "score": 1.6312,
+          "raw_score": 1.6312,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.8909,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase III",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "21f41bace104cfd26124825fbb73f945",
+          "final_score": -9.98,
+          "score": 1.5671,
+          "raw_score": 1.5671,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.98,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "workflow_step",
+          "structural_tag": "section",
+          "chunk_label": "Optional LNP Delivery Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "44d02e4028cc557a64206b803840c870",
+          "final_score": -10.0512,
+          "score": 1.6261,
+          "raw_score": 1.6261,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.0512,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package - Phase II",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "bea992cc864198ed2ce1681cc13ca71f",
+          "final_score": -10.1475,
+          "score": 1.6393,
+          "raw_score": 1.6393,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1475,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "add_on_services",
+          "structural_tag": "section",
+          "chunk_label": "Additional Add-On Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "f165342c1fd325629ccf43f94153dc73",
+          "final_score": -10.1876,
+          "score": 1.6289,
+          "raw_score": 1.6289,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1876,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Standard Package",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/protein-expression/promab_e_coli_expression_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "protein_expression"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "db657229f7f73fca13c9e82a908b83f5",
+          "final_score": -10.1883,
+          "score": 1.6412,
+          "raw_score": 1.6412,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1883,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Do you ship to Europe?",
+          "section_type": "package_inclusions",
+          "structural_tag": "section",
+          "chunk_label": "Included in Custom Package",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_bispecific_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "low",
+      "query": "When will I receive the invoice?",
+      "context": {},
+      "confidence": {
+        "level": "observed",
+        "top_final_score": -9.937776565551758,
+        "top_base_score": -9.937776565551758,
+        "top_margin": 0.10324923197428326,
+        "matches_count": 10,
+        "top_query_variant": "When will I receive the invoice?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "When will I receive the invoice?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "f0239fe02aa821b728c59b0a99bfe0cf",
+          "final_score": -9.9378,
+          "score": 1.6061,
+          "raw_score": 1.6061,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.9378,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 10 Fifth Injection of Antigen",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "b2a57efeb0600f025413a1c347c2bc1f",
+          "final_score": -9.9732,
+          "score": 1.6583,
+          "raw_score": 1.6583,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.9732,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase III - Week 14 Two Vials of Hybridoma Cells Cryopreserved",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "80d627007327c24e68c997cc1bf42a1d",
+          "final_score": -10.0233,
+          "score": 1.6332,
+          "raw_score": 1.6332,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.0233,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project Timeline Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "df9020350bf03979471c5782f0edca7b",
+          "final_score": -10.1266,
+          "score": 1.5982,
+          "raw_score": 1.5982,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1266,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 8 Fourth Injection of Antigen",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "04c3ed98c89f5086e7e281cc773267b1",
+          "final_score": -10.1546,
+          "score": 1.619,
+          "raw_score": 1.619,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1546,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 6 Third Injection of Antigen",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "d46a4143b14871cd61c500fd48027543",
+          "final_score": -10.1609,
+          "score": 1.6319,
+          "raw_score": 1.6319,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1609,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Mammalian Expression Timeline Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/protein-expression/promab_mammalian_expression_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "protein_expression"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "b992388f081a034a04da7b8d47d81f6d",
+          "final_score": -10.1683,
+          "score": 1.6477,
+          "raw_score": 1.6477,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1683,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 2 Initial Immunization of 5 Mice",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "92033a80f35737b56f13efa192727e91",
+          "final_score": -10.1766,
+          "score": 1.629,
+          "raw_score": 1.629,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1766,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 4, 7.5, and 11 Evaluation of Titer by ELISA",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "cb81b5ecd440326fe21c19eb1e078aab",
+          "final_score": -10.1791,
+          "score": 1.6456,
+          "raw_score": 1.6456,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1791,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Weeks 2-11 Immunization of 5 Balb/c Mice",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "47dc29335bd0b85df5d030b98dde658c",
+          "final_score": -10.1887,
+          "score": 1.6135,
+          "raw_score": 1.6135,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1887,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "When will I receive the invoice?",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 4 Second Injection of Antigen",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "low",
+      "query": "Who is your sales rep for antibody products?",
+      "context": {
+        "business_line_hint": "antibody"
+      },
+      "confidence": {
+        "level": "observed",
+        "top_final_score": -4.205044269561768,
+        "top_base_score": -4.205044269561768,
+        "top_margin": 0.35820802052815726,
+        "matches_count": 10,
+        "top_query_variant": "Who is your sales rep for antibody products?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "Who is your sales rep for antibody products?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "0a8614cfcf34aa70989c5a45eb6cb3bd",
+          "final_score": -4.205,
+          "score": 0.943,
+          "raw_score": 1.063,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -4.205,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "why_us",
+          "structural_tag": "section",
+          "chunk_label": "Why Choose ProMab for Antibody Production",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "a13285e3ea933a8575a93741f1617bc3",
+          "final_score": -4.2957,
+          "score": 0.9577,
+          "raw_score": 1.0777,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -4.2957,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production Yield in Bioreactors - 500 Milliliters of Supernatant",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "12c9ee94d797ff56900f65efbe8e41de",
+          "final_score": -4.5779,
+          "score": 0.8626,
+          "raw_score": 0.9826,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -4.5779,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "workflow_overview",
+          "structural_tag": "section",
+          "chunk_label": "Recombinant Antibody Production Workflow",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_recombinant_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "23dd8ae38746912780419800f390afd4",
+          "final_score": -4.8162,
+          "score": 0.9475,
+          "raw_score": 1.0675,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -4.8162,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "service_component",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Production In Vivo",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "537b19a76415799c653926ca0b25ff9e",
+          "final_score": -4.8248,
+          "score": 0.9211,
+          "raw_score": 1.0411,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -4.8248,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "related_services",
+          "structural_tag": "section",
+          "chunk_label": "Related Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_recombinant_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "74ed5bb2c43e63b397db6b27a26cc5a2",
+          "final_score": -4.8865,
+          "score": 0.9371,
+          "raw_score": 1.0571,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -4.8865,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "workflow_overview",
+          "structural_tag": "section",
+          "chunk_label": "Human Fab Library Workflow Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_human_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "88801d53b97917f466978b8aa28bd308",
+          "final_score": -5.041,
+          "score": 0.9119,
+          "raw_score": 1.0319,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -5.041,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "why_us",
+          "structural_tag": "section",
+          "chunk_label": "Why Choose ProMab for Rabbit Polyclonal Antibodies",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "fce5e8624ad093983ef5c70898dc25fc",
+          "final_score": -5.1073,
+          "score": 0.934,
+          "raw_score": 1.054,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -5.1073,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "application_use_case",
+          "structural_tag": "section",
+          "chunk_label": "Full-Length Antibodies",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_recombinant_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "25663ef45cfb39b2608828f7eb4f73de",
+          "final_score": -5.1703,
+          "score": 0.9504,
+          "raw_score": 1.0704,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -5.1703,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "validation_models",
+          "structural_tag": "section",
+          "chunk_label": "Validation Models and Assays",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "51b47738544f44661ce33d91b9eb7985",
+          "final_score": -5.1905,
+          "score": 0.9573,
+          "raw_score": 1.0773,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -5.1905,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Who is your sales rep for antibody products?",
+          "section_type": "add_on_service_pricing",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Purification Pricing - 1 Liter Purification from Supernatant",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "irrelevant",
+      "query": "What's the weather today in Boston?",
+      "context": {},
+      "confidence": {
+        "level": "observed",
+        "top_final_score": -10.140390396118164,
+        "top_base_score": -10.140390396118164,
+        "top_margin": 0.053246498107910156,
+        "matches_count": 10,
+        "top_query_variant": "What's the weather today in Boston?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "What's the weather today in Boston?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "ec96186ab852ac8d25a9cd9db0238e88",
+          "final_score": -10.1404,
+          "score": 1.8453,
+          "raw_score": 1.8453,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1404,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "technical_advantage",
+          "structural_tag": "section",
+          "chunk_label": "Stability Through Storage and Freeze-Thaw",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "94e0f5085bd3d1ebaa52f60c81b73fa0",
+          "final_score": -10.1934,
+          "score": 1.8537,
+          "raw_score": 1.8537,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1934,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "development_capabilities",
+          "structural_tag": "section",
+          "chunk_label": "T Cell Specificity Profiling Capabilities",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_t_cell_specificity_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "fe2e764dae48d61c579e5a57d90df0e7",
+          "final_score": -10.1936,
+          "score": 1.8669,
+          "raw_score": 1.8669,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1936,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_cytokine_response_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "477e25e8d48428d9de9e40b61917c0d2",
+          "final_score": -10.1939,
+          "score": 1.8699,
+          "raw_score": 1.8699,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1939,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/protein-expression/promab_baculovirus_expression_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "protein_expression"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "9212e8e5d57f655df13b224a93878f27",
+          "final_score": -10.1939,
+          "score": 1.8393,
+          "raw_score": 1.8393,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1939,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "scientific_rationale",
+          "structural_tag": "section",
+          "chunk_label": "Why T Cell Specificity Matters",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_t_cell_specificity_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "85d6ca759bb7bfb199249138baf6b133",
+          "final_score": -10.1941,
+          "score": 1.8587,
+          "raw_score": 1.8587,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1941,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan B - Phase V",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_gamma_delta_t_cell_development_rag_ready_v4.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "f48fa9f2b3dfa2af7144f929c6ed0ca2",
+          "final_score": -10.1941,
+          "score": 1.8697,
+          "raw_score": 1.8697,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1941,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan B - Optional Phase VI",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_gamma_delta_t_cell_development_rag_ready_v4.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "0368c6d3a4bf5bb418e9f41a0b7cb332",
+          "final_score": -10.1941,
+          "score": 1.8678,
+          "raw_score": 1.8678,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1941,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "e67473b2c85616fa33dcd9d3cb465151",
+          "final_score": -10.1943,
+          "score": 1.8614,
+          "raw_score": 1.8614,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1943,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "why_us",
+          "structural_tag": "section",
+          "chunk_label": "Why Choose ProMab for T Cell Specificity Assays",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_t_cell_specificity_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "aa7f4a704696ec0c67a728ce11ac0f70",
+          "final_score": -10.1944,
+          "score": 1.8677,
+          "raw_score": 1.8677,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1944,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "What's the weather today in Boston?",
+          "section_type": "related_reference",
+          "structural_tag": "section",
+          "chunk_label": "Reference",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_cytokine_response_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        }
+      ]
+    },
+    {
+      "category": "irrelevant",
+      "query": "Can you recommend a good restaurant?",
+      "context": {},
+      "confidence": {
+        "level": "observed",
+        "top_final_score": -10.192612648010254,
+        "top_base_score": -10.192612648010254,
+        "top_margin": 0.0001624425252284567,
+        "matches_count": 10,
+        "top_query_variant": "Can you recommend a good restaurant?",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "Can you recommend a good restaurant?"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "95242ab471dd6e5a3ccb71c30ff46dea",
+          "final_score": -10.1926,
+          "score": 1.8083,
+          "raw_score": 1.8083,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1926,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "21f41bace104cfd26124825fbb73f945",
+          "final_score": -10.1927,
+          "score": 1.8077,
+          "raw_score": 1.8077,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1927,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "workflow_step",
+          "structural_tag": "section",
+          "chunk_label": "Optional LNP Delivery Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "bc8b37cfa6e76152dd5787239b5d2374",
+          "final_score": -10.1928,
+          "score": 1.8144,
+          "raw_score": 1.8144,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1928,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "development_capabilities",
+          "structural_tag": "section",
+          "chunk_label": "Service Scope and Supported Cell Types",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "30f939f9ca1d252eea8222aabc32925c",
+          "final_score": -10.1928,
+          "score": 1.8146,
+          "raw_score": 1.8146,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1928,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "validation_models",
+          "structural_tag": "section",
+          "chunk_label": "Specificity-Probing Technologies",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_t_cell_specificity_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "e05759732568ee9eadcac92faa57d9dd",
+          "final_score": -10.1928,
+          "score": 1.817,
+          "raw_score": 1.817,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1928,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "service_overview",
+          "structural_tag": "section",
+          "chunk_label": "Service Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_recombinant_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "30e461370bdf434e7c46db8ef78af023",
+          "final_score": -10.1928,
+          "score": 1.8173,
+          "raw_score": 1.8173,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1928,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "service_phase",
+          "structural_tag": "section",
+          "chunk_label": "Plan A - Optional Phase II",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/car-t:car-nk/promab_custom_gamma_delta_t_cell_development_rag_ready_v4.txt",
+          "file_name": "",
+          "business_line": "car_t_car_nk"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "0de32394ee151621f591f5678c620e6e",
+          "final_score": -10.1929,
+          "score": 1.8178,
+          "raw_score": 1.8178,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1929,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "service_component",
+          "structural_tag": "section",
+          "chunk_label": "Antibody Stable Cell Line Development",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_antibody_production_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "469f230f416c383919c42456bd2efcc7",
+          "final_score": -10.1929,
+          "score": 1.8095,
+          "raw_score": 1.8095,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1929,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "technical_advantage",
+          "structural_tag": "section",
+          "chunk_label": "Platform Quality Evidence in 293 Cells",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "ea7243dbe84b999eca561df50f674542",
+          "final_score": -10.1929,
+          "score": 1.8103,
+          "raw_score": 1.8103,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1929,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "related_services",
+          "structural_tag": "section",
+          "chunk_label": "Related Services",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/cell-based-assays/promab_t_cell_specificity_assay_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "cell_based_assays"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "c54eee83bacaeb14805f1b3a0daca12b",
+          "final_score": -10.1929,
+          "score": 1.8161,
+          "raw_score": 1.8161,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -10.1929,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Can you recommend a good restaurant?",
+          "section_type": "plan_summary",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package Summary",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_recombinant_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    },
+    {
+      "category": "irrelevant",
+      "query": "Tell me about COVID vaccines",
+      "context": {},
+      "confidence": {
+        "level": "observed",
+        "top_final_score": -7.374762058258057,
+        "top_base_score": -7.374762058258057,
+        "top_margin": 1.380229791005453,
+        "matches_count": 10,
+        "top_query_variant": "Tell me about COVID vaccines",
+        "top_is_synthesized": false
+      },
+      "retrieval_debug": {
+        "effective_scope_type": "",
+        "effective_scope_name": "",
+        "effective_scope_source": "",
+        "effective_scope_reason": "blocked_by_non_continuation_turn",
+        "rewritten_query": "",
+        "rewrite_reason": "no_rewrite_blocked_by_non_continuation_turn",
+        "intent_bucket": "general_technical",
+        "expanded_queries": [],
+        "used_llm_contextualizer": false
+      },
+      "retrieval_mode": "chroma_similarity_bge_rerank",
+      "query_variants": [
+        "Tell me about COVID vaccines"
+      ],
+      "documents_found": 10,
+      "top_matches": [
+        {
+          "rank": 1,
+          "chunk_key": "a30b1c8ac91599b993d7844c9c9fc0b8",
+          "final_score": -7.3748,
+          "score": 1.4755,
+          "raw_score": 1.4755,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -7.3748,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "faq",
+          "structural_tag": "section",
+          "chunk_label": "FAQ - Applications of LNP Delivery",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/mrna-lnp/promab_mrna_lnp_gene_delivery_rag_ready.txt",
+          "file_name": "",
+          "business_line": "mrna_lnp"
+        },
+        {
+          "rank": 2,
+          "chunk_key": "a9e097a131dcc5f58295f02cdcabd633",
+          "final_score": -8.7163,
+          "score": 1.4647,
+          "raw_score": 1.4647,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.7163,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project Timeline Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 3,
+          "chunk_key": "80d627007327c24e68c997cc1bf42a1d",
+          "final_score": -8.7671,
+          "score": 1.4886,
+          "raw_score": 1.4886,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.7671,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project Timeline Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 4,
+          "chunk_key": "172dedfd3e73ab3609bc06eaad5c25a1",
+          "final_score": -8.7815,
+          "score": 1.4817,
+          "raw_score": 1.4817,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -8.7815,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "phase_overview",
+          "structural_tag": "section",
+          "chunk_label": "Phase I Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 5,
+          "chunk_key": "47dc29335bd0b85df5d030b98dde658c",
+          "final_score": -9.0804,
+          "score": 1.4945,
+          "raw_score": 1.4945,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.0804,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 4 Second Injection of Antigen",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 6,
+          "chunk_key": "cb81b5ecd440326fe21c19eb1e078aab",
+          "final_score": -9.0866,
+          "score": 1.443,
+          "raw_score": 1.443,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.0866,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Weeks 2-11 Immunization of 5 Balb/c Mice",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 7,
+          "chunk_key": "f0239fe02aa821b728c59b0a99bfe0cf",
+          "final_score": -9.106,
+          "score": 1.4898,
+          "raw_score": 1.4898,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.106,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 10 Fifth Injection of Antigen",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 8,
+          "chunk_key": "9a30d943240f2e830da1542a45bd94d5",
+          "final_score": -9.1067,
+          "score": 1.4702,
+          "raw_score": 1.4702,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.1067,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "service_plan",
+          "structural_tag": "section",
+          "chunk_label": "Discovery Package",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 9,
+          "chunk_key": "b992388f081a034a04da7b8d47d81f6d",
+          "final_score": -9.1145,
+          "score": 1.4806,
+          "raw_score": 1.4806,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.1145,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "timeline_milestone",
+          "structural_tag": "section",
+          "chunk_label": "Phase I - Week 2 Initial Immunization of 5 Mice",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_mouse_monoclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        },
+        {
+          "rank": 10,
+          "chunk_key": "c0d1ceca6d79071ad0a67f02ef907e94",
+          "final_score": -9.1986,
+          "score": 1.458,
+          "raw_score": 1.458,
+          "priority_tier": 5,
+          "score_breakdown": {
+            "base": -9.1986,
+            "section_type_boost": 0.0,
+            "active_service_boost": 0.0,
+            "explicit_term_boost": 0.0
+          },
+          "query_variant": "Tell me about COVID vaccines",
+          "section_type": "timeline_overview",
+          "structural_tag": "section",
+          "chunk_label": "Project Timeline Overview",
+          "source_path": "/Users/promab/anaconda_projects/email_agent/data/processed/rag_ready_files/antibody/promab_rabbit_polyclonal_antibodies_rag_ready_v1.txt",
+          "file_name": "",
+          "business_line": "antibody"
+        }
+      ]
+    }
+  ]
+}

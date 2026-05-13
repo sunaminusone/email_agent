@@ -43,6 +43,7 @@ def _base_constraints(
         primary_object=primary_object,
         secondary_objects=secondary_objects,
         dialogue_act=context.dialogue_act,
+        semantic_intent=context.semantic_intent,
     )
     retrieval_hints = _build_retrieval_hints(context)
     debug_context = {
@@ -61,10 +62,28 @@ def _base_constraints(
             "business_line": retrieval_hints.get("business_line", ""),
             "demand": _build_retrieval_demand(context),
         },
-        "tool": {},
+        "tool": _build_parser_tool_constraints(context),
         "debug": debug_context,
     }
 
+
+
+def _build_parser_tool_constraints(context: ExecutionContext) -> dict[str, Any]:
+    """Extract non-None parser constraints and open slots into a flat dict.
+
+    Tools consume these via ``request.constraints.tool.get("field_name")``.
+    Only non-empty values are included to avoid noise.
+    """
+    result: dict[str, Any] = {}
+    if context.parser_constraints is not None:
+        for key, value in context.parser_constraints.model_dump().items():
+            if value is not None:
+                result[key] = value
+    if context.parser_open_slots is not None:
+        for key, value in context.parser_open_slots.model_dump().items():
+            if value is not None and value != []:
+                result[key] = value
+    return result
 
 
 def _build_scope_context(
@@ -73,6 +92,7 @@ def _build_scope_context(
     primary_object: ObjectCandidate | None,
     secondary_objects: list[ObjectCandidate],
     dialogue_act: DialogueActResult,
+    semantic_intent: str,
 ) -> dict[str, Any]:
     primary_label = ""
     if primary_object is not None:
@@ -83,7 +103,10 @@ def _build_scope_context(
         "original_query": query,
         "effective_query": query,
         "context": {
-            "primary_intent": _dialogue_act_label(dialogue_act),
+            "semantic_intent": semantic_intent,
+        },
+        "dialogue_act": {
+            "act": dialogue_act.act,
         },
         "primary_object": _serialize_object(primary_object),
         "secondary_objects": [_serialize_object(item) for item in secondary_objects],
@@ -181,12 +204,5 @@ def _scope_entities(primary_object: ObjectCandidate | None, secondary_objects: l
     return {key: dedupe_strings(values) for key, values in entities.items()}
 
 
-def _dialogue_act_label(dialogue_act: DialogueActResult) -> str:
-    mapping = {
-        "inquiry": "technical_question",
-        "selection": "selection",
-        "closing": "acknowledge",
-    }
-    return mapping.get(dialogue_act.act, "unknown")
 
 

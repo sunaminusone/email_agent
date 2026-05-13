@@ -18,7 +18,6 @@ import re
 from typing import Any
 
 from src.common.models import IntentGroup, ObjectRef
-from src.ingestion.stateful_anchors import extract_stateful_anchors
 from src.memory.models import (
     BASE_WEIGHT_MAP,
     ConversationTrajectory,
@@ -42,6 +41,13 @@ _FOLLOW_UP_PHRASES = [
     "about that", "regarding that", "the same",
     "再说说", "继续", "还有", "关于这个", "接着说", "多说一点",
 ]
+
+_INFORMATIONAL_TOPICS = {
+    "knowledge_lookup",
+    "document_lookup",
+    "commercial_or_operational_lookup",
+    "general_support",
+}
 
 _INTENT_KEYWORDS: dict[str, list[str]] = {
     "technical_question": ["mechanism", "protocol", "how does", "explain", "原理", "方案"],
@@ -69,16 +75,13 @@ def recall(
     # 1. Load snapshot
     snapshot = load_memory_snapshot(prior_state, thread_id=thread_id)
 
-    # 2. Extract stateful anchors (reuse existing logic)
-    anchors = extract_stateful_anchors(snapshot)
-
-    # 3. Compute trajectory
+    # 2. Compute trajectory
     trajectory = _compute_trajectory(snapshot)
 
-    # 4. Score object salience
+    # 3. Score object salience
     scored_objects = _score_recent_objects(snapshot)
 
-    # 5. Detect intent drift
+    # 4. Detect intent drift
     prior_groups = list(snapshot.intent_memory.prior_intent_groups)
     drift = _detect_intent_drift(
         user_query=user_query,
@@ -86,10 +89,9 @@ def recall(
         trajectory=trajectory,
     )
 
-    # 6. Assemble MemoryContext
+    # 5. Assemble MemoryContext
     return MemoryContext(
         snapshot=snapshot,
-        stateful_anchors=anchors,
         prior_intent_groups=drift.resolved_groups,
         intent_continuity_confidence=drift.continuity_confidence,
         trajectory=trajectory,
@@ -110,6 +112,7 @@ def _compute_trajectory(snapshot: MemorySnapshot) -> ConversationTrajectory:
     thread = snapshot.thread_memory
     clarification = snapshot.clarification_memory
     objects = snapshot.object_memory
+    response = snapshot.response_memory
 
     # Fresh start: no prior route or turn history
     if not thread.active_route and not thread.last_turn_type:
@@ -124,8 +127,12 @@ def _compute_trajectory(snapshot: MemorySnapshot) -> ConversationTrajectory:
             prior_turn_type=thread.last_turn_type,
         )
 
-    # Follow-up: last turn was a substantive response, user continues
-    if thread.last_turn_type in {"answer", "clarification_answer"}:
+    # Follow-up: last turn produced an informational response topic. Keep a
+    # legacy fallback for older snapshots that still carry pre-v4 turn types.
+    if (
+        response.last_response_topics
+        and response.last_response_topics[-1] in _INFORMATIONAL_TOPICS
+    ) or thread.last_turn_type in {"answer", "clarification_answer"}:
         return ConversationTrajectory(
             phase="follow_up",
             prior_route=thread.active_route,
@@ -181,7 +188,6 @@ def _score_recent_objects(snapshot: MemorySnapshot) -> list[ScoredObjectRef]:
 
 def _object_ref_key(ref: ObjectRef) -> tuple[str, str, str]:
     return (ref.object_type, ref.identifier, ref.display_name)
-
 
 # ---------------------------------------------------------------------------
 # Intent drift detection

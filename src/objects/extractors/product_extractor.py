@@ -9,6 +9,72 @@ from src.objects.registries.product_registry import (
 )
 
 
+def _product_name(match: dict[str, object], fallback: str) -> str:
+    return str(match.get("name") or match.get("canonical_name") or fallback)
+
+
+# Keys to surface from a product registry match dict into ObjectCandidate.metadata.
+# Three call sites (alias-single / alias-ambiguous / catalog_no) all need the same
+# shape; centralising avoids each one drifting independently when new fields land.
+# Antibody facet (host / dilutions / immunogen / etc.) is sourced from the
+# antibody_product_catalog child via the registry's LEFT JOIN; CAR-T / mRNA
+# rows have empty strings on those keys.
+_METADATA_TEXT_KEYS = (
+    "record_type",
+    "target_antigen",
+    "application_text",
+    "species_reactivity_text",
+    "format_or_size",
+    # Antibody facet (sourced from antibody_product_catalog child).
+    "host",
+    "clone",
+    "clonality",
+    "isotype",
+    "ig_class",
+    "gene_id",
+    "molecular_weight",
+    "sequence",
+    "elisa_dilution",
+    "wb_dilution",
+    "fcm_dilution",
+    "ihc_dilution",
+    "icc_dilution",
+    "immunogen",
+    "references_text",
+    # CAR-T facet (sourced from cart_product_catalog child).
+    "costimulatory_domain",
+    "construct",
+    "group_name",
+    "group_type",
+    "group_subtype",
+    "group_summary",
+    "cell_number",
+    "marker",
+    "unit",
+    # mRNA-LNP facet (sourced from lnp_product_catalog child).
+    "lnp_type",
+    "lnp_application",
+    "application_handling",
+    "cell_type_tested",
+    "data_sheet_url",
+    # Common provenance — COALESCEd across the three children in retrieval.
+    "formulation",
+    "storage",
+    "shipping",
+    "description",
+    "product_type",
+)
+_METADATA_LIST_KEYS = ("aliases", "applications")
+
+
+def _match_to_metadata(match: dict[str, object], **extras: object) -> dict[str, object]:
+    metadata: dict[str, object] = {key: match.get(key, []) for key in _METADATA_LIST_KEYS}
+    for key in _METADATA_TEXT_KEYS:
+        metadata[key] = match.get(key, "")
+    metadata.update(extras)
+    return metadata
+
+
 def extract_product_candidates(ingestion_bundle: IngestionBundle) -> ExtractorOutput:
     parser_entities = ingestion_bundle.turn_signals.parser_signals.entities
     deterministic = ingestion_bundle.turn_signals.deterministic_signals
@@ -42,12 +108,13 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
 
     if len(matches) == 1:
         match = matches[0]
+        product_name = _product_name(match, span.text)
         return [
             ObjectCandidate(
                 object_type="product",
                 raw_value=span.text,
-                canonical_value=match.get("canonical_name", "") or span.text,
-                display_name=match.get("canonical_name", "") or span.text,
+                canonical_value=product_name,
+                display_name=product_name,
                 identifier=match.get("catalog_no", ""),
                 identifier_type="catalog_no" if match.get("catalog_no") else "",
                 business_line=match.get("business_line", ""),
@@ -55,36 +122,7 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
                 recency="CURRENT_TURN",
                 source_type="parser",
                 evidence_spans=[span],
-                metadata={
-                    "aliases": match.get("aliases", []),
-                    "target_antigen": match.get("target_antigen", ""),
-                    "application_text": match.get("application_text", ""),
-                    "species_reactivity_text": match.get("species_reactivity_text", ""),
-                    "format_or_size": match.get("format_or_size", ""),
-                    "clone": match.get("clone", ""),
-                    "clonality": match.get("clonality", ""),
-                    "isotype": match.get("isotype", ""),
-                    "ig_class": match.get("ig_class", ""),
-                    "gene_id": match.get("gene_id", ""),
-                    "gene_accession": match.get("gene_accession", ""),
-                    "swissprot": match.get("swissprot", ""),
-                    "costimulatory_domain": match.get("costimulatory_domain", ""),
-                    "construct": match.get("construct", ""),
-                    "product_type": match.get("product_type", ""),
-                    "group_name": match.get("group_name", ""),
-                    "group_type": match.get("group_type", ""),
-                    "group_subtype": match.get("group_subtype", ""),
-                    "group_summary": match.get("group_summary", ""),
-                    "price_usd": match.get("price_usd", ""),
-                    "unit": match.get("unit", ""),
-                    "cell_number": match.get("cell_number", ""),
-                    "marker": match.get("marker", ""),
-                    "source_file": match.get("source_file", ""),
-                    "source_sheet": match.get("source_sheet", ""),
-                    "matched_alias": span.text,
-                    "matched_alias_kinds": alias_kinds,
-                    "alias_match_count": len(alias_matches),
-                },
+                metadata=_match_to_metadata(match, matched_alias_kinds=alias_kinds),
             )
         ], []
 
@@ -93,8 +131,8 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
             ObjectCandidate(
                 object_type="product",
                 raw_value=span.text,
-                canonical_value=match.get("canonical_name", "") or span.text,
-                display_name=match.get("canonical_name", "") or span.text,
+                canonical_value=_product_name(match, span.text),
+                display_name=_product_name(match, span.text),
                 identifier=match.get("catalog_no", ""),
                 identifier_type="catalog_no" if match.get("catalog_no") else "",
                 business_line=match.get("business_line", ""),
@@ -102,18 +140,7 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
                 recency="CURRENT_TURN",
                 source_type="parser",
                 evidence_spans=[span],
-                metadata={
-                    "aliases": match.get("aliases", []),
-                    "target_antigen": match.get("target_antigen", ""),
-                    "application_text": match.get("application_text", ""),
-                    "species_reactivity_text": match.get("species_reactivity_text", ""),
-                    "format_or_size": match.get("format_or_size", ""),
-                    "clonality": match.get("clonality", ""),
-                    "match_strategy": "ambiguous_registry_alias",
-                    "matched_alias": span.text,
-                    "matched_alias_kinds": alias_kinds,
-                    "alias_match_count": len(alias_matches),
-                },
+                metadata=_match_to_metadata(match, matched_alias_kinds=alias_kinds),
                 is_ambiguous=True,
             )
             for match in matches
@@ -139,7 +166,6 @@ def _extract_product_name_span(span: EntitySpan) -> tuple[list[ObjectCandidate],
             recency="CURRENT_TURN",
             source_type="parser",
             evidence_spans=[span],
-            metadata={"match_strategy": "unresolved_product_name"},
         )
     ], []
 
@@ -169,8 +195,8 @@ def _extract_catalog_number_candidate(
     return ObjectCandidate(
         object_type="product",
         raw_value=catalog_no,
-        canonical_value=match.get("canonical_name", "") or catalog_no,
-        display_name=match.get("canonical_name", "") or catalog_no,
+        canonical_value=_product_name(match, catalog_no),
+        display_name=_product_name(match, catalog_no),
         identifier=match.get("catalog_no", "") or catalog_no,
         identifier_type="catalog_no",
         business_line=match.get("business_line", ""),
@@ -178,31 +204,5 @@ def _extract_catalog_number_candidate(
         recency="CURRENT_TURN",
         source_type=source_type,
         evidence_spans=evidence_spans,
-        metadata={
-            "aliases": match.get("aliases", []),
-            "target_antigen": match.get("target_antigen", ""),
-            "application_text": match.get("application_text", ""),
-            "species_reactivity_text": match.get("species_reactivity_text", ""),
-            "format_or_size": match.get("format_or_size", ""),
-            "clone": match.get("clone", ""),
-            "clonality": match.get("clonality", ""),
-            "isotype": match.get("isotype", ""),
-            "ig_class": match.get("ig_class", ""),
-            "gene_id": match.get("gene_id", ""),
-            "gene_accession": match.get("gene_accession", ""),
-            "swissprot": match.get("swissprot", ""),
-            "costimulatory_domain": match.get("costimulatory_domain", ""),
-            "construct": match.get("construct", ""),
-            "product_type": match.get("product_type", ""),
-            "group_name": match.get("group_name", ""),
-            "group_type": match.get("group_type", ""),
-            "group_subtype": match.get("group_subtype", ""),
-            "group_summary": match.get("group_summary", ""),
-            "price_usd": match.get("price_usd", ""),
-            "unit": match.get("unit", ""),
-            "cell_number": match.get("cell_number", ""),
-            "marker": match.get("marker", ""),
-            "source_file": match.get("source_file", ""),
-            "source_sheet": match.get("source_sheet", ""),
-        },
+        metadata=_match_to_metadata(match),
     )

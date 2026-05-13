@@ -11,13 +11,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.common.execution_models import ExecutedToolCall, ExecutionResult, MergedResults
 from src.common.models import DemandProfile, GroupDemand, IntentGroup
+from src.ingestion.demand_profile import narrow_demand_profile
 from src.executor.completeness import evaluate_completeness, CompletenessResult
 from src.executor.merger import final_status_for_calls, merge_execution_results
 from src.executor.models import ExecutionContext, ToolSelection
 from src.executor.request_builder import build_tool_request
 from src.executor.tool_selector import select_tools, _score_tool, _classify_demand, _get_active_flags
-from src.executor.engine import build_execution_context, run_executor
-from src.ingestion.models import ParserRequestFlags, ParserRetrievalHints
+from src.executor.engine import _resolve_follow_up_intent, build_execution_context, run_executor
+from src.ingestion.models import ParserConstraints, ParserOpenSlots, ParserRequestFlags, ParserRetrievalHints
 from src.objects.models import ObjectCandidate
 from src.routing.models import DialogueActResult, RouteDecision
 from src.tools.models import ToolCapability, ToolRequest, ToolResult
@@ -53,7 +54,9 @@ def _make_context(
     object_type: str = "product",
     dialogue_act: str = "inquiry",
     request_flags: ParserRequestFlags | None = None,
-    primary_intent: str = "product_inquiry",
+    semantic_intent: str = "product_inquiry",
+    parser_constraints: ParserConstraints | None = None,
+    parser_open_slots: ParserOpenSlots | None = None,
 ) -> ExecutionContext:
     primary = ObjectCandidate(
         object_type=object_type,
@@ -65,10 +68,12 @@ def _make_context(
     ) if object_type else None
     return ExecutionContext(
         query=query,
-        primary_intent=primary_intent,
+        semantic_intent=semantic_intent,
         primary_object=primary,
         dialogue_act=DialogueActResult(act=dialogue_act),
         request_flags=request_flags,
+        parser_constraints=parser_constraints,
+        parser_open_slots=parser_open_slots,
     )
 
 
@@ -182,7 +187,7 @@ class TestScoreTool:
         )
         flags = ParserRequestFlags(needs_protocol=True)
         active = {"needs_protocol"}
-        ctx = _make_context(object_type="product", request_flags=flags, primary_intent="technical_question")
+        ctx = _make_context(object_type="product", request_flags=flags, semantic_intent="technical_question")
 
         rag_score, _ = _score_tool(rag_cap, ctx, "technical", active)
         catalog_score, _ = _score_tool(catalog_cap, ctx, "technical", active)
@@ -209,11 +214,11 @@ class TestScoreTool:
             supported_modalities=["unstructured_retrieval"],
         )
         # Technical demand → RAG aligns
-        ctx_tech = _make_context(primary_intent="technical_question")
+        ctx_tech = _make_context(semantic_intent="technical_question")
         score_tech, _ = _score_tool(rag_cap, ctx_tech, "technical", set())
 
         # Commercial demand → RAG doesn't align
-        ctx_comm = _make_context(primary_intent="product_inquiry")
+        ctx_comm = _make_context(semantic_intent="product_inquiry")
         score_comm, _ = _score_tool(rag_cap, ctx_comm, "commercial", set())
 
         assert score_tech > score_comm
@@ -269,7 +274,7 @@ class TestClassifyDemand:
 
     def test_general_when_no_active_demand(self) -> None:
         """No active_demand → conservative general, no re-classification."""
-        ctx = _make_context(primary_intent="technical_question")
+        ctx = _make_context(semantic_intent="technical_question")
         assert _classify_demand(ctx) == "general"
 
     def test_operational_from_active_demand(self) -> None:
@@ -339,7 +344,12 @@ class TestSelectTools:
         flags = ParserRequestFlags(needs_protocol=True)
         ctx = _make_context(
             object_type="product", dialogue_act="inquiry",
-            request_flags=flags, primary_intent="technical_question",
+            request_flags=flags, semantic_intent="technical_question",
+        )
+        # Pure-technical scenario: no catalog identifier in the customer's
+        # message, so the known-catalog invariant should not fire.
+        ctx.primary_object = ctx.primary_object.model_copy(
+            update={"identifier": "", "identifier_type": ""},
         )
         ctx.active_demand = GroupDemand(
             primary_demand="technical", request_flags=["needs_protocol"],
@@ -376,7 +386,7 @@ class TestSelectTools:
         flags = ParserRequestFlags(needs_protocol=True, needs_price=True)
         ctx = _make_context(
             object_type="product", dialogue_act="inquiry",
-            request_flags=flags, primary_intent="technical_question",
+            request_flags=flags, semantic_intent="technical_question",
         )
         ctx.active_demand = GroupDemand(
             primary_demand="technical",
@@ -388,6 +398,127 @@ class TestSelectTools:
         tool_names = {s.tool_name for s in sels}
         assert "pricing_lookup_tool" in tool_names
         assert "technical_rag_tool" in tool_names
+
+    def test_known_catalog_product_includes_catalog_lookup_even_for_doc_request(self) -> None:
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_availability"],
+            ),
+        )
+        register_tool(
+            tool_name="document_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="document_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["technical"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_documentation"],
+            ),
+        )
+        flags = ParserRequestFlags(needs_documentation=True)
+        ctx = _make_context(
+            object_type="product", dialogue_act="inquiry",
+            request_flags=flags, semantic_intent="documentation_request",
+        )
+        ctx.active_demand = GroupDemand(
+            primary_demand="technical", request_flags=["needs_documentation"],
+        )
+
+        sels = select_tools(ctx)
+        tool_names = {s.tool_name for s in sels}
+        assert "document_lookup_tool" in tool_names
+        assert "catalog_lookup_tool" in tool_names
+        catalog_sel = next(s for s in sels if s.tool_name == "catalog_lookup_tool")
+        assert catalog_sel.role == "supporting"
+        assert "known_catalog_product_invariant" in catalog_sel.match_reasons
+
+    def test_unknown_catalog_no_does_not_force_catalog_lookup(self) -> None:
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_availability"],
+            ),
+        )
+        register_tool(
+            tool_name="document_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="document_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["technical"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_documentation"],
+            ),
+        )
+        flags = ParserRequestFlags(needs_documentation=True)
+        ctx = _make_context(
+            object_type="product", dialogue_act="inquiry",
+            request_flags=flags, semantic_intent="documentation_request",
+        )
+        ctx.primary_object = ctx.primary_object.model_copy(
+            update={"metadata": {"match_strategy": "unknown_catalog_no"}},
+        )
+        ctx.active_demand = GroupDemand(
+            primary_demand="technical", request_flags=["needs_documentation"],
+        )
+
+        sels = select_tools(ctx)
+        tool_names = {s.tool_name for s in sels}
+        assert "catalog_lookup_tool" not in tool_names
+
+    def test_service_object_does_not_trigger_catalog_invariant(self) -> None:
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product", "service"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_availability"],
+            ),
+        )
+        register_tool(
+            tool_name="document_lookup_tool",
+            executor=lambda req: _make_tool_result(req.tool_name),
+            capability=ToolCapability(
+                tool_name="document_lookup_tool",
+                supported_object_types=["product", "service"],
+                supported_demands=["technical"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+                supported_request_flags=["needs_documentation"],
+            ),
+        )
+        flags = ParserRequestFlags(needs_documentation=True)
+        ctx = _make_context(
+            object_type="service", dialogue_act="inquiry",
+            request_flags=flags, semantic_intent="documentation_request",
+        )
+        ctx.active_demand = GroupDemand(
+            primary_demand="technical", request_flags=["needs_documentation"],
+        )
+
+        sels = select_tools(ctx)
+        tool_names = {s.tool_name for s in sels}
+        assert "catalog_lookup_tool" not in tool_names
 
 
 # ===================================================================
@@ -434,6 +565,39 @@ class TestBuildToolRequest:
         assert request.primary_object is None
         scope = request.constraints.scope
         assert scope["primary_object"] == {}
+
+    def test_parser_constraints_populate_tool_dict(self) -> None:
+        constraints = ParserConstraints(
+            budget="5000 USD",
+            format_or_size="50 kDa",
+            destination="South Korea",
+        )
+        context = _make_context(parser_constraints=constraints)
+        request = build_tool_request(context, "catalog_lookup_tool")
+        tool = request.constraints.tool
+        assert tool["budget"] == "5000 USD"
+        assert tool["format_or_size"] == "50 kDa"
+        assert tool["destination"] == "South Korea"
+        # None fields should not appear
+        assert "timeline_requirement" not in tool
+
+    def test_parser_open_slots_populate_tool_dict(self) -> None:
+        open_slots = ParserOpenSlots(
+            experiment_type="Western Blot",
+            pain_point="low yield",
+        )
+        context = _make_context(parser_open_slots=open_slots)
+        request = build_tool_request(context, "rag_tool")
+        tool = request.constraints.tool
+        assert tool["experiment_type"] == "Western Blot"
+        assert tool["pain_point"] == "low yield"
+        # None fields should not appear
+        assert "customer_goal" not in tool
+
+    def test_tool_dict_empty_when_no_constraints(self) -> None:
+        context = _make_context()
+        request = build_tool_request(context, "some_tool")
+        assert request.constraints.tool == {}
 
 
 # ===================================================================
@@ -486,12 +650,15 @@ class TestBuildExecutionContext:
             [focus_group],
         )
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         ctx = build_execution_context(
             ingestion_bundle=bundle,
             resolved_object_state=resolved,
             route_decision=route,
             demand_profile=demand_profile,
             focus_group=focus_group,
+            active_demand=scoped_demand,
         )
 
         assert ctx.query == "CD3 antibody"
@@ -503,6 +670,187 @@ class TestBuildExecutionContext:
         assert ctx.demand_profile is not None
         assert ctx.active_demand is not None
         assert ctx.active_demand.primary_demand == "commercial"
+
+    def test_passes_parser_constraints_to_context(self) -> None:
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        constraints = ParserConstraints(format_or_size="50 kDa", budget="3000 USD")
+        open_slots = ParserOpenSlots(experiment_type="ELISA")
+
+        bundle = IngestionBundle(
+            turn_core=TurnCore(raw_query="test", normalized_query="test"),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(
+                    context=ParserContext(),
+                    constraints=constraints,
+                    open_slots=open_slots,
+                ),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        resolved = ResolvedObjectState()
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        ctx = build_execution_context(
+            ingestion_bundle=bundle,
+            resolved_object_state=resolved,
+            route_decision=route,
+        )
+
+        assert ctx.parser_constraints is not None
+        assert ctx.parser_constraints.format_or_size == "50 kDa"
+        assert ctx.parser_constraints.budget == "3000 USD"
+        assert ctx.parser_open_slots is not None
+        assert ctx.parser_open_slots.experiment_type == "ELISA"
+
+
+class TestResolveFollowUpIntent:
+    """Backlog #8: follow_up turn substitutes prior_semantic_intent so RAG
+    sees the meaningful retrieval bucket instead of the placeholder."""
+
+    def _snapshot_with_prior(self, prior: str):
+        from src.memory.models import IntentMemory, MemorySnapshot
+        return MemorySnapshot(intent_memory=IntentMemory(prior_semantic_intent=prior))
+
+    def test_substitutes_when_follow_up_with_meaningful_prior(self) -> None:
+        snap = self._snapshot_with_prior("pricing_question")
+        assert _resolve_follow_up_intent("follow_up", snap) == "pricing_question"
+
+    def test_passes_through_non_follow_up(self) -> None:
+        snap = self._snapshot_with_prior("pricing_question")
+        assert _resolve_follow_up_intent("technical_question", snap) == "technical_question"
+
+    def test_keeps_follow_up_when_prior_is_unknown(self) -> None:
+        snap = self._snapshot_with_prior("unknown")
+        assert _resolve_follow_up_intent("follow_up", snap) == "follow_up"
+
+    def test_keeps_follow_up_when_prior_is_also_follow_up(self) -> None:
+        # Belt-and-suspenders: writer-side fix should prevent this state, but
+        # the resolver shouldn't loop to itself even if it ever sees one.
+        snap = self._snapshot_with_prior("follow_up")
+        assert _resolve_follow_up_intent("follow_up", snap) == "follow_up"
+
+    def test_passes_through_when_no_memory(self) -> None:
+        assert _resolve_follow_up_intent("follow_up", None) == "follow_up"
+
+
+class TestAmbiguousBusinessLineAggregation:
+    """杠杆三: when primary is unresolved, aggregate business_line from ambiguous_sets."""
+
+    def _build_context_with_ambiguous(
+        self,
+        ambiguous_sets: list,
+        primary: ObjectCandidate | None = None,
+    ):
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        bundle = IngestionBundle(
+            turn_core=TurnCore(raw_query="antibody discovery"),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(context=ParserContext()),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        resolved = ResolvedObjectState(
+            primary_object=primary,
+            ambiguous_sets=ambiguous_sets,
+        )
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        return build_execution_context(
+            ingestion_bundle=bundle,
+            resolved_object_state=resolved,
+            route_decision=route,
+        )
+
+    def test_aggregates_single_business_line_from_ambiguous_candidates(self) -> None:
+        from src.objects.models import AmbiguousObjectSet
+
+        candidates = [
+            ObjectCandidate(
+                object_type="service",
+                canonical_value="Mouse Monoclonal Antibody",
+                display_name="Mouse Monoclonal Antibody",
+                business_line="antibody",
+                is_ambiguous=True,
+            ),
+            ObjectCandidate(
+                object_type="service",
+                canonical_value="Rabbit Polyclonal Antibody Production",
+                display_name="Rabbit Polyclonal Antibody Production",
+                business_line="antibody",
+                is_ambiguous=True,
+            ),
+        ]
+        ambiguous_set = AmbiguousObjectSet(
+            object_type="service",
+            query_value="antibody discovery",
+            candidates=candidates,
+            resolution_strategy="clarify",
+        )
+        ctx = self._build_context_with_ambiguous([ambiguous_set])
+        assert ctx.resolved_object_constraints.get("business_line") == "antibody"
+
+    def test_does_not_aggregate_when_candidates_span_multiple_lines(self) -> None:
+        from src.objects.models import AmbiguousObjectSet
+
+        candidates = [
+            ObjectCandidate(
+                object_type="service",
+                canonical_value="CAR-T Cell Design and Development",
+                business_line="car_t_car_nk",
+                is_ambiguous=True,
+            ),
+            ObjectCandidate(
+                object_type="service",
+                canonical_value="Mouse Monoclonal Antibody",
+                business_line="antibody",
+                is_ambiguous=True,
+            ),
+        ]
+        ambiguous_set = AmbiguousObjectSet(
+            object_type="service",
+            candidates=candidates,
+            resolution_strategy="clarify",
+        )
+        ctx = self._build_context_with_ambiguous([ambiguous_set])
+        assert "business_line" not in ctx.resolved_object_constraints
+
+    def test_does_not_override_existing_primary_business_line(self) -> None:
+        from src.objects.models import AmbiguousObjectSet
+
+        primary = ObjectCandidate(
+            object_type="service",
+            canonical_value="CAR-T Cell Design and Development",
+            display_name="CAR-T Development",
+            business_line="car_t_car_nk",
+        )
+        ambiguous_set = AmbiguousObjectSet(
+            object_type="service",
+            candidates=[
+                ObjectCandidate(
+                    object_type="service",
+                    canonical_value="Mouse Monoclonal Antibody",
+                    business_line="antibody",
+                    is_ambiguous=True,
+                ),
+            ],
+            resolution_strategy="clarify",
+        )
+        ctx = self._build_context_with_ambiguous([ambiguous_set], primary=primary)
+        assert ctx.resolved_object_constraints.get("business_line") == "car_t_car_nk"
 
 
 class TestRunExecutor:
@@ -538,6 +886,7 @@ class TestRunExecutor:
         result = run_executor(bundle, resolved, route)
         assert result.final_status == "empty"
         assert result.executed_calls == []
+        assert result.iteration_count == 1
 
     def test_dispatches_and_merges_tool_results(self) -> None:
         from src.ingestion.models import (
@@ -595,6 +944,7 @@ class TestRunExecutor:
         assert result.executed_calls[0].tool_name == "catalog_lookup_tool"
         assert result.executed_calls[0].status == "ok"
         assert "catalog_lookup_tool" in result.merged_results.primary_facts
+        assert result.iteration_count == 1
 
     def test_retries_with_fallback_when_primary_returns_empty(self) -> None:
         """When primary (commercial) returns empty, demand-aware fallback retries with RAG."""
@@ -649,7 +999,7 @@ class TestRunExecutor:
             turn_core=TurnCore(raw_query="CAR-T availability and protocol", normalized_query="CAR-T availability and protocol"),
             turn_signals=TurnSignals(
                 parser_signals=ParserSignals(
-                    context=ParserContext(primary_intent="product_inquiry"),
+                    context=ParserContext(semantic_intent="product_inquiry"),
                     request_flags=ParserRequestFlags(needs_availability=True, needs_protocol=True),
                 ),
                 deterministic_signals=DeterministicSignals(),
@@ -678,16 +1028,282 @@ class TestRunExecutor:
             )],
         )
 
+        scoped_demand = narrow_demand_profile(demand_profile, focus_group)
+
         result = run_executor(
             bundle, resolved, route,
             focus_group=focus_group,
             demand_profile=demand_profile,
+            active_demand=scoped_demand,
         )
 
         tool_names = [call.tool_name for call in result.executed_calls]
         assert "catalog_lookup_tool" in tool_names
         assert "technical_rag_tool" in tool_names
         assert result.final_status == "ok"
+        assert result.iteration_count == 1
+
+    def test_retries_into_second_iteration_when_unsatisfied_demand_adds_tool(self) -> None:
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        def empty_order_lookup(request: ToolRequest) -> ToolResult:
+            return ToolResult(tool_name=request.tool_name, status="empty")
+
+        def ok_shipping_lookup(request: ToolRequest) -> ToolResult:
+            return ToolResult(
+                tool_name=request.tool_name,
+                status="ok",
+                primary_records=[{"tracking_number": "1Z999"}],
+            )
+
+        register_tool(
+            tool_name="order_lookup_tool",
+            executor=empty_order_lookup,
+            capability=ToolCapability(
+                tool_name="order_lookup_tool",
+                supported_object_types=["order"],
+                supported_demands=["operational"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["external_api"],
+            ),
+        )
+        register_tool(
+            tool_name="shipping_lookup_tool",
+            executor=ok_shipping_lookup,
+            capability=ToolCapability(
+                tool_name="shipping_lookup_tool",
+                supported_object_types=["shipment"],
+                supported_demands=[],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["external_api"],
+                supported_request_flags=["needs_shipping_info"],
+            ),
+        )
+
+        primary = ObjectCandidate(
+            object_type="order",
+            canonical_value="SO-123",
+            display_name="SO-123",
+            identifier="SO-123",
+            identifier_type="order_no",
+        )
+        bundle = IngestionBundle(
+            turn_core=TurnCore(
+                raw_query="Where is order SO-123?",
+                normalized_query="Where is order SO-123?",
+            ),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(
+                    context=ParserContext(semantic_intent="shipping_question"),
+                    request_flags=ParserRequestFlags(needs_shipping_info=True),
+                ),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        resolved = ResolvedObjectState(primary_object=primary)
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        result = run_executor(
+            bundle,
+            resolved,
+            route,
+            active_demand=GroupDemand(
+                primary_demand="operational",
+                request_flags=["needs_shipping_info"],
+            ),
+        )
+
+        assert result.iteration_count == 2
+        assert [call.tool_name for call in result.executed_calls] == [
+            "order_lookup_tool",
+            "shipping_lookup_tool",
+        ]
+
+    def test_cross_group_cache_dedup_skips_already_called_tools(self) -> None:
+        """Group B's executor should skip tools that group A already cached for the same object.
+
+        Without this, every group re-selects known-catalog / flag-overlap tools,
+        the dispatcher hits the cache, and each group accrues a 0ms duplicate
+        ExecutedToolCall — which surfaces as N x duplicate planned_actions.
+        """
+        from src.agent.tool_call_cache import ToolCallCache
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        dispatch_count = {"catalog": 0, "rag": 0}
+
+        def catalog_executor(request: ToolRequest) -> ToolResult:
+            dispatch_count["catalog"] += 1
+            return ToolResult(
+                tool_name=request.tool_name,
+                status="ok",
+                primary_records=[{"display_name": "CD3 Antibody", "catalog_no": "A100"}],
+            )
+
+        def rag_executor(request: ToolRequest) -> ToolResult:
+            dispatch_count["rag"] += 1
+            return ToolResult(
+                tool_name=request.tool_name,
+                status="ok",
+                unstructured_snippets=[{"content": "CD3 background"}],
+            )
+
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=catalog_executor,
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+            ),
+        )
+        register_tool(
+            tool_name="technical_rag_tool",
+            executor=rag_executor,
+            capability=ToolCapability(
+                tool_name="technical_rag_tool",
+                supported_object_types=["product"],
+                supported_demands=["technical"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["unstructured_retrieval"],
+            ),
+        )
+
+        primary = ObjectCandidate(
+            object_type="product",
+            canonical_value="CD3",
+            display_name="CD3 Antibody",
+            identifier="A100",
+            identifier_type="catalog_no",
+        )
+        bundle = IngestionBundle(
+            turn_core=TurnCore(raw_query="CD3 antibody protocol", normalized_query="CD3 antibody protocol"),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(
+                    context=ParserContext(),
+                    request_flags=ParserRequestFlags(needs_protocol=True),
+                ),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        resolved = ResolvedObjectState(primary_object=primary)
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+        active_demand = GroupDemand(
+            primary_demand="technical",
+            request_flags=["needs_protocol"],
+        )
+
+        cache = ToolCallCache()
+
+        # Group A: technical_rag fires via needs_protocol flag overlap;
+        # catalog_lookup fires via known-catalog invariant.
+        result_a = run_executor(
+            bundle, resolved, route,
+            tool_call_cache=cache, active_demand=active_demand,
+        )
+        assert result_a.final_status == "ok"
+        a_tools = [call.tool_name for call in result_a.executed_calls]
+        assert "catalog_lookup_tool" in a_tools
+        assert "technical_rag_tool" in a_tools
+
+        # Group B: same object, same selections — but cache should suppress
+        # both selections, returning ok with no new calls.
+        result_b = run_executor(
+            bundle, resolved, route,
+            tool_call_cache=cache, active_demand=active_demand,
+        )
+        assert result_b.final_status == "ok"
+        assert result_b.executed_calls == []
+        assert "already executed by a prior" in result_b.reason
+
+        # Real dispatch counts: each tool ran exactly once (group A), not twice.
+        assert dispatch_count == {"catalog": 1, "rag": 1}
+
+    def test_cross_group_cache_does_not_dedup_for_different_object(self) -> None:
+        """Cache dedup is per-object: group B with a different identifier still dispatches."""
+        from src.agent.tool_call_cache import ToolCallCache
+        from src.ingestion.models import (
+            IngestionBundle, TurnCore, TurnSignals,
+            ParserSignals, ParserContext, DeterministicSignals,
+            ReferenceSignals,
+        )
+        from src.objects.models import ResolvedObjectState
+
+        dispatch_count = {"count": 0}
+
+        def catalog_executor(request: ToolRequest) -> ToolResult:
+            dispatch_count["count"] += 1
+            return ToolResult(
+                tool_name=request.tool_name,
+                status="ok",
+                primary_records=[{"display_name": request.scope.get("display_name", ""), "catalog_no": request.scope.get("identifier", "")}],
+            )
+
+        register_tool(
+            tool_name="catalog_lookup_tool",
+            executor=catalog_executor,
+            capability=ToolCapability(
+                tool_name="catalog_lookup_tool",
+                supported_object_types=["product"],
+                supported_demands=["commercial"],
+                supported_dialogue_acts=["inquiry"],
+                supported_modalities=["structured_lookup"],
+            ),
+        )
+
+        bundle = IngestionBundle(
+            turn_core=TurnCore(raw_query="product question", normalized_query="product question"),
+            turn_signals=TurnSignals(
+                parser_signals=ParserSignals(context=ParserContext()),
+                deterministic_signals=DeterministicSignals(),
+                reference_signals=ReferenceSignals(),
+            ),
+        )
+        route = RouteDecision(action="execute", dialogue_act=DialogueActResult(act="inquiry"))
+
+        cache = ToolCallCache()
+
+        # Group A: object CD3
+        primary_a = ObjectCandidate(
+            object_type="product",
+            canonical_value="CD3",
+            display_name="CD3 Antibody",
+            identifier="A100",
+            identifier_type="catalog_no",
+        )
+        result_a = run_executor(
+            bundle, ResolvedObjectState(primary_object=primary_a), route,
+            tool_call_cache=cache,
+        )
+        assert len(result_a.executed_calls) == 1
+
+        # Group B: different object CD19
+        primary_b = ObjectCandidate(
+            object_type="product",
+            canonical_value="CD19",
+            display_name="CD19 Antibody",
+            identifier="A200",
+            identifier_type="catalog_no",
+        )
+        result_b = run_executor(
+            bundle, ResolvedObjectState(primary_object=primary_b), route,
+            tool_call_cache=cache,
+        )
+        assert len(result_b.executed_calls) == 1
+        assert dispatch_count["count"] == 2  # both groups dispatched real calls
 
 
 # ===================================================================
@@ -774,7 +1390,7 @@ class TestEvaluateCompleteness:
 
     def test_retry_when_flag_demand_unsatisfied(self) -> None:
         """needs_protocol active but only catalog called → demand unsatisfied → retry with RAG."""
-        context = _make_context(primary_intent="technical_question")
+        context = _make_context(semantic_intent="technical_question")
         context.active_demand = GroupDemand(
             primary_demand="technical", request_flags=["needs_protocol"],
         )
@@ -788,7 +1404,7 @@ class TestEvaluateCompleteness:
 
     def test_sufficient_when_demand_tool_already_called(self) -> None:
         """needs_protocol active + RAG already called → demand satisfied."""
-        context = _make_context(primary_intent="technical_question")
+        context = _make_context(semantic_intent="technical_question")
         context.active_demand = GroupDemand(
             primary_demand="technical", request_flags=["needs_protocol"],
         )
@@ -801,7 +1417,7 @@ class TestEvaluateCompleteness:
 
     def test_retry_add_shipping_when_demanded(self) -> None:
         """needs_shipping_info active but shipping tool not called → retry."""
-        context = _make_context(primary_intent="shipping_question")
+        context = _make_context(semantic_intent="shipping_question")
         context.active_demand = GroupDemand(
             primary_demand="operational", request_flags=["needs_shipping_info"],
         )
@@ -815,7 +1431,7 @@ class TestEvaluateCompleteness:
 
     def test_no_retry_when_no_active_demand_and_primary_ok(self) -> None:
         """No active_demand + primary ok → sufficient (no phantom demand)."""
-        context = _make_context(primary_intent="product_inquiry")
+        context = _make_context(semantic_intent="product_inquiry")
         calls = [_make_executed_call(
             "catalog_lookup_tool", "ok",
             result=_make_tool_result("catalog_lookup_tool", "ok", primary_records=[{"name": "CD3"}]),

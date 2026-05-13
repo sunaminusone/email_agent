@@ -20,10 +20,22 @@ SERVICE_PAGE_SOURCE_DIRS = [
     BASE_DIR / "data" / "processed" / "rag_ready_files" / "cell-based-assays",
     BASE_DIR / "data" / "processed" / "rag_ready_files" / "protein-expression",
 ]
-SERVICE_REGISTRY_BACKEND = (os.getenv("OBJECTS_SERVICE_REGISTRY_BACKEND") or "files").strip().lower()
-SERVICE_REGISTRY_TABLE = os.getenv("OBJECTS_SERVICE_REGISTRY_TABLE", "service_registry")
+SERVICE_REGISTRY_BACKEND = (os.getenv("OBJECTS_SERVICE_REGISTRY_BACKEND") or "auto").strip().lower()
+SERVICE_REGISTRY_TABLE = os.getenv("OBJECTS_SERVICE_REGISTRY_TABLE", "service_catalog")
 SERVICE_PAGE_FILE_PATTERN = re.compile(r"promab_.*_rag_ready(?:_.*)?\.txt$", re.I)
 _KEY_VALUE_PATTERN = re.compile(r"^([A-Za-z0-9_ /()+&.-]+):\s*(.*)$")
+
+# Canonical Layer-1 taxonomy. Single source of truth for every consumer that
+# needs to validate a business_line string (corpus hints, LLM-produced facts,
+# RAG soft-boost guards). Must stay aligned with the business_line values
+# emitted by service_page_ingestion into each service's metadata.
+KNOWN_BUSINESS_LINES: frozenset[str] = frozenset({
+    "antibody",
+    "car_t_car_nk",
+    "cell_based_assays",
+    "mrna_lnp",
+    "protein_expression",
+})
 
 MANUAL_SERVICE_ALIASES: dict[str, tuple[str, ...]] = {
     "mRNA-LNP Gene Delivery": (
@@ -31,23 +43,102 @@ MANUAL_SERVICE_ALIASES: dict[str, tuple[str, ...]] = {
         "mRNA-LNP delivery",
         "mRNA LNP delivery",
         "LNP gene delivery",
+        "LNP delivery",
         "mRNA Lipid Nanoparticle Gene Delivery",
+        "mRNA-LNP",
+        "mRNA LNP",
+        "mRNA LNP development",
     ),
+    # The three species-specific monoclonal services share the bare
+    # "monoclonal antibody" / "monoclonal antibodies" / "mAb" aliases on
+    # purpose: when a customer says it without species, the alias index
+    # surfaces all three canonicals so service_extractor's multi-match
+    # branch fires AmbiguousObjectSet → routing emits
+    # object_disambiguation clarify rather than picking one arbitrarily.
     "Mouse Monoclonal Antibodies": (
         "Mouse Monoclonal Antibody Service",
         "Mouse Monoclonal Antibody Development",
+        "mouse monoclonal",
+        "mouse mAb",
+        "monoclonal antibody",
+        "monoclonal antibodies",
+        "mAb",
     ),
     "Rabbit Monoclonal Antibodies": (
         "Rabbit Monoclonal Antibody Service",
         "Rabbit Monoclonal Antibody Development",
+        "rabbit monoclonal",
+        "rabbit mAb",
+        "monoclonal antibody",
+        "monoclonal antibodies",
+        "mAb",
+    ),
+    "Human Monoclonal Antibodies": (
+        "human monoclonal",
+        "human mAb",
+        "monoclonal antibody",
+        "monoclonal antibodies",
+        "mAb",
     ),
     "Rabbit Polyclonal Antibody Production": (
         "Rabbit Polyclonal Antibodies",
         "Rabbit Polyclonal Antibody Service",
+        "rabbit polyclonal",
+    ),
+    "Bispecific Antibody Development": (
+        "bispecific",
+        "bispecific mAb",
+    ),
+    "Affinity Tune-Up & Humanization": (
+        "humanization",
+        "affinity tune-up",
+        "affinity maturation",
     ),
     "CAR-T Cell Design and Development": (
         "Custom CAR-T Cell Development",
         "CAR-T Development",
+        "CAR-T cell therapy",
+        "CAR-T therapy",
+        "CAR-T cell therapy development",
+    ),
+    "Custom CAR-NK Manufacturing": (
+        "CAR-NK",
+        "CAR-NK development",
+        "CAR-NK service",
+    ),
+    "Custom CAR-Macrophage Cell Development": (
+        "CAR-macrophage",
+        "CAR-M",
+        "CAR macrophage development",
+    ),
+    "Stable Cell Line Development": (
+        "stable cell line service",
+        # CHO is shared with Mammalian Protein Expression on purpose so a
+        # bare "CHO" / "CHO work" surfaces multi-match → ambiguous_set.
+        "CHO",
+        "CHO cell line",
+    ),
+    "T Cell Activation and Proliferation Assay": (
+        "T cell activation",
+        "T cell proliferation",
+    ),
+    "Lentivirus Production": (
+        "lentivirus",
+    ),
+    "E. coli Protein Expression": (
+        "E. coli expression",
+        "E coli expression",
+    ),
+    "Mammalian Protein Expression": (
+        "mammalian expression",
+        # See note on Stable Cell Line Development — CHO intentionally
+        # ambiguous between the two services.
+        "CHO",
+        "CHO cell line",
+    ),
+    "Baculovirus Protein Expression": (
+        "baculovirus expression",
+        "insect cell expression",
     ),
 }
 
@@ -141,8 +232,10 @@ class PostgresServiceRegistrySource:
 
 
 def get_service_registry_source() -> ServiceRegistrySource:
+    dsn = _postgres_dsn()
+    if SERVICE_REGISTRY_BACKEND == "auto":
+        return PostgresServiceRegistrySource(dsn=dsn) if dsn else FilesServiceRegistrySource()
     if SERVICE_REGISTRY_BACKEND == "postgres":
-        dsn = _postgres_dsn()
         if not dsn:
             raise ValueError("OBJECTS_SERVICE_REGISTRY_BACKEND is postgres but no PostgreSQL DSN is configured.")
         return PostgresServiceRegistrySource(dsn=dsn)
@@ -189,12 +282,96 @@ def get_service_registry_payload() -> dict[str, Any]:
     }
 
 
+# Trailing service-suffix patterns shared by registration and lookup.
+# Registration uses these inside `_generate_service_phrase_variants` to
+# pre-index phrase variants of every canonical name (e.g. canonical
+# "Rabbit Polyclonal Antibody Production" registers variant "Rabbit
+# Polyclonal Antibody" by stripping "Production"). Lookup applies the
+# SAME patterns to the parser's raw entity span so the stripped form
+# reaches the indexed variant.  Editing this tuple updates both sides
+# atomically — adding a suffix here without registering the variant
+# would silently produce keys that don't resolve.
+_SHARED_TRAIL_SUFFIXES: tuple[tuple[str, str], ...] = (
+    (r"\bdesign and development\b$", ""),
+    (r"\bservices\b$", ""),
+    (r"\bservice\b$", ""),
+    (r"\bdevelopment\b$", ""),
+    (r"\bmanufacturing\b$", ""),
+    (r"\bproduction\b$", ""),
+    (r"\bassay\b$", ""),
+)
+# Lookup-only extras: parser emits natural-language phrasings
+# ("X project" / "X work") that don't appear in canonical service
+# names, so registration never pre-generates "X" via these strips.
+# Lookup still strips them so "X project" reaches a registered "X"
+# phrase variant produced by one of the shared suffixes above.
+_LOOKUP_ONLY_TRAIL_SUFFIXES: tuple[tuple[str, str], ...] = (
+    (r"\bproject\b$", ""),
+    (r"\bprojects\b$", ""),
+    (r"\bwork\b$", ""),
+)
+_LOOKUP_TRAIL_STRIP_PATTERNS: tuple[tuple[str, str], ...] = (
+    _SHARED_TRAIL_SUFFIXES + _LOOKUP_ONLY_TRAIL_SUFFIXES
+)
+
+
+def _resolve_alias_lookup_key(alias: str) -> str:
+    """Return an alias-index key that hits the registry, applying iterative
+    trailing-suffix stripping when the raw input misses.
+
+    Returns "" when no transformation produces a hit.
+
+    Symmetry with registration: `_generate_service_phrase_variants`
+    pre-generates phrase variants by stripping the same trailing
+    suffixes from canonical names.  Without this lookup-side
+    counterpart, parser-emitted phrases like "X service" / "X
+    development" / "X project" would miss even though registration
+    already indexed "X" as a phrase variant.
+    """
+    primary = normalize_object_alias(alias)
+    if not primary:
+        return ""
+    payload = get_service_registry_payload()
+    alias_index = payload["alias_to_services"]
+    if primary in alias_index:
+        return primary
+
+    candidate = primary
+    # Iteratively strip — multi-suffix shapes ("X development project")
+    # need more than one pass.  Bounded by len(patterns) so it terminates.
+    for _ in range(len(_LOOKUP_TRAIL_STRIP_PATTERNS)):
+        progressed = False
+        for pattern, replacement in _LOOKUP_TRAIL_STRIP_PATTERNS:
+            stripped = re.sub(pattern, replacement, candidate, flags=re.IGNORECASE).strip()
+            if not stripped or stripped == candidate:
+                continue
+            normalized = normalize_object_alias(stripped)
+            if not normalized:
+                continue
+            # Single-token strips would otherwise produce overly generic
+            # keys ("rabbit", "antibody") that could collide across
+            # services.  Allow them ONLY when the stripped form is itself
+            # a registered alias — acronyms ("CHO") and catalog-style
+            # tokens that the alias map intentionally indexes as
+            # multi-target ambiguity triggers.
+            if len(normalized.split()) < 2 and normalized not in alias_index:
+                continue
+            candidate = normalized
+            progressed = True
+            if candidate in alias_index:
+                return candidate
+            break
+        if not progressed:
+            break
+    return ""
+
+
 def lookup_services_by_alias(alias: str) -> list[dict[str, Any]]:
-    normalized = normalize_object_alias(alias)
-    if not normalized:
+    key = _resolve_alias_lookup_key(alias)
+    if not key:
         return []
     payload = get_service_registry_payload()
-    names = payload["alias_to_services"].get(normalized, [])
+    names = payload["alias_to_services"].get(key, [])
     return [
         payload["by_canonical_name"][name]
         for name in names
@@ -203,11 +380,11 @@ def lookup_services_by_alias(alias: str) -> list[dict[str, Any]]:
 
 
 def lookup_service_alias_matches(alias: str) -> list[dict[str, str]]:
-    normalized = normalize_object_alias(alias)
-    if not normalized:
+    key = _resolve_alias_lookup_key(alias)
+    if not key:
         return []
     payload = get_service_registry_payload()
-    return payload["alias_to_match_records"].get(normalized, [])
+    return payload["alias_to_match_records"].get(key, [])
 
 
 def canonicalize_service_name(value: str) -> str:
@@ -335,15 +512,13 @@ def _generate_service_phrase_variants(text: str, alias_kind: str = "phrase_fragm
     variants: list[str] = []
     queue: list[str] = [cleaned]
     seen: set[str] = {normalize_object_alias(cleaned)}
+    # Leading "custom" strip is registration-only (canonical names
+    # carry the "Custom" prefix; parsers normally don't emit it).
+    # The trailing suffixes come from the shared tuple above so
+    # adding a new suffix updates both registration and lookup.
     replacements = (
         (r"^custom\s+", ""),
-        (r"\bdesign and development\b$", ""),
-        (r"\bservices\b$", ""),
-        (r"\bservice\b$", ""),
-        (r"\bdevelopment\b$", ""),
-        (r"\bmanufacturing\b$", ""),
-        (r"\bproduction\b$", ""),
-        (r"\bassay\b$", ""),
+        *_SHARED_TRAIL_SUFFIXES,
     )
 
     while queue:
@@ -411,9 +586,11 @@ def _dedupe_service_alias_records(records: list[ServiceAliasRecord]) -> list[Ser
 
 
 def _postgres_dsn() -> str:
+    from src.common.pg_runtime import with_runtime_timeouts
+
     database_url = os.getenv("DATABASE_URL", "").strip()
     if database_url:
-        return database_url
+        return with_runtime_timeouts(database_url)
     host = os.getenv("PGHOST", "localhost").strip()
     port = os.getenv("PGPORT", "5432").strip()
     user = os.getenv("PGUSER", "postgres").strip()
@@ -422,5 +599,5 @@ def _postgres_dsn() -> str:
     if not database:
         return ""
     if password:
-        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
-    return f"postgresql://{user}@{host}:{port}/{database}"
+        return with_runtime_timeouts(f"postgresql://{user}:{password}@{host}:{port}/{database}")
+    return with_runtime_timeouts(f"postgresql://{user}@{host}:{port}/{database}")
