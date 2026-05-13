@@ -13,6 +13,7 @@ from src.ingestion.models import ParserConstraints
 from src.objects.models import ObjectCandidate, ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
+from src.tools.result_builders import build_tool_result
 from src.app.service import _serialize_execution_plan
 from src.responser import ResponseInput, build_response_bundle, compose_response
 from src.responser.csr.composer import render_csr_draft_response
@@ -37,7 +38,7 @@ def test_execution_plan_serialization_uses_true_iteration_count() -> None:
                     tool_name="catalog_lookup_tool",
                     status="ok",
                     request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-                    result=ToolResult(tool_name="catalog_lookup_tool", status="ok"),
+                    result=build_tool_result(tool_name="catalog_lookup_tool", status="ok"),
                 )
             ],
             iteration_count=2,
@@ -75,7 +76,7 @@ def test_grounded_lookup_yields_commercial_focus_in_csr_draft() -> None:
         tool_name="catalog_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="catalog_lookup_tool",
             status="ok",
             primary_records=[{"display_name": "CD3 Antibody", "catalog_no": "A100"}],
@@ -186,7 +187,7 @@ def test_build_response_bundle_derives_topic_and_path() -> None:
         tool_name="technical_rag_tool",
         status="ok",
         request=ToolRequest(tool_name="technical_rag_tool", query="validation"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="technical_rag_tool",
             status="ok",
             unstructured_snippets=[{"content_preview": "Validated in flow cytometry."}],
@@ -216,7 +217,7 @@ def test_response_plan_updates_last_tool_results_memory() -> None:
         tool_name="catalog_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="catalog_lookup_tool",
             status="ok",
             primary_records=[{"display_name": "CD3 Antibody"}],
@@ -248,7 +249,7 @@ def test_memory_update_stores_primary_demand_only() -> None:
         tool_name="catalog_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="catalog_lookup_tool", status="ok",
             primary_records=[{"display_name": "CD3 Antibody"}],
         ),
@@ -292,7 +293,7 @@ def _make_group_outcome(
                     tool_name=tool_name,
                     status="ok",
                     request=ToolRequest(tool_name=tool_name, query="test"),
-                    result=ToolResult(
+                    result=build_tool_result(
                         tool_name=tool_name,
                         status="ok",
                         primary_records=[{"display_name": f"{intent} result"}],
@@ -376,7 +377,7 @@ def test_topic_continuing_suppresses_object_acknowledgement() -> None:
         tool_name="catalog_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="catalog_lookup_tool",
             status="ok",
             primary_records=[{"display_name": "CD3 Antibody"}],
@@ -411,7 +412,7 @@ def test_topic_continuing_demotes_object_summary_block() -> None:
         tool_name="catalog_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="catalog_lookup_tool",
             status="ok",
             primary_records=[{"display_name": "CD3 Antibody"}],
@@ -457,7 +458,7 @@ def test_object_summary_block_includes_customer_constraints() -> None:
         tool_name="catalog_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="catalog_lookup_tool",
             status="ok",
             primary_records=[{"display_name": "CD3 Antibody"}],
@@ -504,7 +505,7 @@ def test_no_customer_constraints_when_none() -> None:
         tool_name="catalog_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="catalog_lookup_tool", query="CD3"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="catalog_lookup_tool",
             status="ok",
             primary_records=[{"display_name": "CD3 Antibody"}],
@@ -563,7 +564,7 @@ def test_csr_draft_surfaces_structured_reference_blocks_when_grounded() -> None:
         tool_name="historical_thread_tool",
         status="ok",
         request=ToolRequest(tool_name="historical_thread_tool", query="stable cell line"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="historical_thread_tool",
             status="ok",
             structured_facts={
@@ -592,7 +593,7 @@ def test_csr_draft_surfaces_structured_reference_blocks_when_grounded() -> None:
         tool_name="technical_rag_tool",
         status="ok",
         request=ToolRequest(tool_name="technical_rag_tool", query="stable cell line"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="technical_rag_tool",
             status="ok",
             structured_facts={
@@ -637,7 +638,7 @@ def test_csr_draft_surfaces_live_pricing_records_from_pricing_lookup_tool() -> N
         tool_name="pricing_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="pricing_lookup_tool", query="CD45 antibody"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="pricing_lookup_tool",
             status="ok",
             primary_records=[
@@ -715,7 +716,7 @@ def test_csr_draft_marks_missing_price_explicitly_for_llm() -> None:
         tool_name="pricing_lookup_tool",
         status="ok",
         request=ToolRequest(tool_name="pricing_lookup_tool", query="20001"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name="pricing_lookup_tool",
             status="ok",
             primary_records=[

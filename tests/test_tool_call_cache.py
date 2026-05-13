@@ -9,6 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.agent.tool_call_cache import ToolCallCache
 from src.common.execution_models import ExecutedToolCall
 from src.tools.models import ToolRequest, ToolResult
+from src.tools.result_builders import build_tool_result
 
 
 def _make_call(
@@ -22,7 +23,7 @@ def _make_call(
         tool_name=tool_name,
         status=status,
         request=ToolRequest(tool_name=tool_name, query="test"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name=tool_name,
             status=status,
             primary_records=primary_records or [],

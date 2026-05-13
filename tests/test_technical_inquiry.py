@@ -34,6 +34,7 @@ from src.routing.models import DialogueActResult, RouteDecision
 from src.routing.orchestrator import route
 from src.tools.models import ToolCapability, ToolRequest, ToolResult
 from src.tools.registry import register_tool, clear_registry
+from src.tools.result_builders import ok_result
 
 
 # ---------------------------------------------------------------------------
@@ -41,9 +42,8 @@ from src.tools.registry import register_tool, clear_registry
 # ---------------------------------------------------------------------------
 
 def _fake_rag_executor(request: ToolRequest) -> ToolResult:
-    return ToolResult(
+    return ok_result(
         tool_name=request.tool_name,
-        status="ok",
         unstructured_snippets=[{
             "content": "The CAR-T cell therapy development workflow involves: "
                        "1) Target selection, 2) Antibody screening, "
@@ -56,9 +56,8 @@ def _fake_rag_executor(request: ToolRequest) -> ToolResult:
 
 
 def _fake_catalog_executor(request: ToolRequest) -> ToolResult:
-    return ToolResult(
+    return ok_result(
         tool_name=request.tool_name,
-        status="ok",
         primary_records=[{
             "display_name": "Anti-CD3 Antibody",
             "catalog_no": "AB-100",

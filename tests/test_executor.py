@@ -23,6 +23,7 @@ from src.objects.models import ObjectCandidate
 from src.routing.models import DialogueActResult, RouteDecision
 from src.tools.models import ToolCapability, ToolRequest, ToolResult
 from src.tools.registry import register_tool, clear_registry
+from src.tools.result_builders import build_tool_result, empty_result, ok_result
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +31,11 @@ from src.tools.registry import register_tool, clear_registry
 # ---------------------------------------------------------------------------
 
 def _make_tool_result(tool_name: str, status: str = "ok", **kwargs) -> ToolResult:
-    return ToolResult(tool_name=tool_name, status=status, **kwargs)
+    # Thin wrapper over the prod public builder so tests don't drift from
+    # the result-construction code path used in src/tools/. Keeps the
+    # positional-tool_name ergonomics tests rely on (e.g. lambda req:
+    # _make_tool_result(req.tool_name)).
+    return build_tool_result(tool_name=tool_name, status=status, **kwargs)
 
 
 def _make_executed_call(
@@ -897,9 +902,8 @@ class TestRunExecutor:
         from src.objects.models import ResolvedObjectState
 
         def fake_executor(request: ToolRequest) -> ToolResult:
-            return ToolResult(
+            return ok_result(
                 tool_name=request.tool_name,
-                status="ok",
                 primary_records=[{"display_name": "CD3 Antibody", "catalog_no": "A100"}],
                 structured_facts={"species": ["human"]},
             )
@@ -956,12 +960,11 @@ class TestRunExecutor:
         from src.objects.models import ResolvedObjectState
 
         def empty_catalog(request: ToolRequest) -> ToolResult:
-            return ToolResult(tool_name=request.tool_name, status="empty")
+            return empty_result(tool_name=request.tool_name)
 
         def ok_rag(request: ToolRequest) -> ToolResult:
-            return ToolResult(
+            return ok_result(
                 tool_name=request.tool_name,
-                status="ok",
                 unstructured_snippets=[{"content": "CAR-T workflow info"}],
             )
 
@@ -1052,12 +1055,11 @@ class TestRunExecutor:
         from src.objects.models import ResolvedObjectState
 
         def empty_order_lookup(request: ToolRequest) -> ToolResult:
-            return ToolResult(tool_name=request.tool_name, status="empty")
+            return empty_result(tool_name=request.tool_name)
 
         def ok_shipping_lookup(request: ToolRequest) -> ToolResult:
-            return ToolResult(
+            return ok_result(
                 tool_name=request.tool_name,
-                status="ok",
                 primary_records=[{"tracking_number": "1Z999"}],
             )
 
@@ -1144,17 +1146,15 @@ class TestRunExecutor:
 
         def catalog_executor(request: ToolRequest) -> ToolResult:
             dispatch_count["catalog"] += 1
-            return ToolResult(
+            return ok_result(
                 tool_name=request.tool_name,
-                status="ok",
                 primary_records=[{"display_name": "CD3 Antibody", "catalog_no": "A100"}],
             )
 
         def rag_executor(request: ToolRequest) -> ToolResult:
             dispatch_count["rag"] += 1
-            return ToolResult(
+            return ok_result(
                 tool_name=request.tool_name,
-                status="ok",
                 unstructured_snippets=[{"content": "CD3 background"}],
             )
 
@@ -1246,9 +1246,8 @@ class TestRunExecutor:
 
         def catalog_executor(request: ToolRequest) -> ToolResult:
             dispatch_count["count"] += 1
-            return ToolResult(
+            return ok_result(
                 tool_name=request.tool_name,
-                status="ok",
                 primary_records=[{"display_name": request.scope.get("display_name", ""), "catalog_no": request.scope.get("identifier", "")}],
             )
 

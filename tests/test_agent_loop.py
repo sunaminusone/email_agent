@@ -17,6 +17,7 @@ from src.memory.models import MemoryContext, MemorySnapshot
 from src.objects.models import ObjectCandidate, ResolvedObjectState
 from src.routing.models import ClarificationPayload, DialogueActResult, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
+from src.tools.result_builders import build_tool_result
 
 
 def _dummy_call(
@@ -30,7 +31,7 @@ def _dummy_call(
         tool_name=tool_name,
         status=status,
         request=ToolRequest(tool_name=tool_name, query="q"),
-        result=ToolResult(
+        result=build_tool_result(
             tool_name=tool_name,
             status=status,
             structured_facts={"retrieval_confidence": confidence or {}},

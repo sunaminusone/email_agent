@@ -27,6 +27,7 @@ from src.responser.csr.extractors import (
     extract_structured_records,
 )
 from src.tools.models import ToolRequest, ToolResult
+from src.tools.result_builders import build_tool_result
 
 
 _LLM_RECORDS_FIELD_PRESENT = "llm_records" in ToolResult.model_fields
@@ -57,7 +58,7 @@ def _make_call(
         role=role,
         status=status,
         request=ToolRequest(tool_name=tool_name),
-        result=ToolResult(**result_kwargs),
+        result=build_tool_result(**result_kwargs),
     )
 
 

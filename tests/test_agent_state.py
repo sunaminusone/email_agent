@@ -11,6 +11,7 @@ from src.common.execution_models import ExecutedToolCall, ExecutionResult
 from src.common.models import IntentGroup
 from src.routing.models import ClarificationPayload, RouteDecision
 from src.tools.models import ToolRequest, ToolResult
+from src.tools.result_builders import build_tool_result
 
 
 def _group(intent: str = "pricing_question", object_type: str = "product") -> IntentGroup:
@@ -29,7 +30,7 @@ def _execution(status: str = "ok", tool_name: str = "catalog_lookup_tool") -> Ex
                 tool_name=tool_name,
                 status=status,
                 request=ToolRequest(tool_name=tool_name, query="test"),
-                result=ToolResult(tool_name=tool_name, status=status),
+                result=build_tool_result(tool_name=tool_name, status=status),
             )
         ],
         final_status=status,
