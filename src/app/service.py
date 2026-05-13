@@ -330,23 +330,58 @@ def _persist_session_state(
 
 
 def _extract_persisted_documents(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect clickable chip metadata for both kinds of click-through links
+    in the responder's panel content_blocks:
+
+      * ``service_primary_document`` — one chip from the active service's
+        primary brochure (presigned URL minted by responser's
+        ``get_primary_service_document_link``).
+      * ``document_files`` — one chip per matched product flyer / service
+        brochure surfaced by ``document_lookup_tool`` (presigned URL
+        minted by ``run_document_selection``).
+
+    Persisting both means stored conversations re-render chips correctly
+    on reload — the frontend's executed_actions path is only available on
+    the live response."""
     documents: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+
+    def _append(label: str, file_name: str, document_url: str,
+                storage_url: str, document_type: str) -> None:
+        if not document_url or document_url in seen_urls:
+            return
+        seen_urls.add(document_url)
+        documents.append({
+            "label": label or file_name or "Download files",
+            "file_name": file_name,
+            "document_url": document_url,
+            "storage_url": storage_url,
+            "document_type": document_type,
+        })
+
     for block in list(metadata.get("content_blocks") or []):
-        if str(block.get("kind", "")) != "service_primary_document":
-            continue
+        kind = str(block.get("kind", ""))
         data = dict(block.get("data") or {})
-        presigned_url = str(data.get("presigned_url", "") or "").strip()
-        if not presigned_url:
-            continue
-        documents.append(
-            {
-                "label": str(data.get("title") or data.get("file_name") or "Download files"),
-                "file_name": str(data.get("file_name", "") or ""),
-                "document_url": presigned_url,
-                "storage_url": str(data.get("storage_url", "") or ""),
-                "document_type": str(data.get("document_type", "") or ""),
-            }
-        )
+
+        if kind == "service_primary_document":
+            _append(
+                label=str(data.get("title") or ""),
+                file_name=str(data.get("file_name", "") or ""),
+                document_url=str(data.get("presigned_url", "") or "").strip(),
+                storage_url=str(data.get("storage_url", "") or ""),
+                document_type=str(data.get("document_type", "") or ""),
+            )
+        elif kind == "document_files":
+            for entry in list(data.get("files") or []):
+                if not isinstance(entry, dict):
+                    continue
+                _append(
+                    label=str(entry.get("title") or ""),
+                    file_name=str(entry.get("file_name", "") or ""),
+                    document_url=str(entry.get("document_url", "") or "").strip(),
+                    storage_url=str(entry.get("storage_url", "") or ""),
+                    document_type=str(entry.get("document_type", "") or ""),
+                )
     return documents
 
 

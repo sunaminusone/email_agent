@@ -34,6 +34,15 @@ def _gather_inputs(response_input: ResponseInput) -> dict[str, Any]:
     composer needs, and compute the trust signal. Shared by the streaming
     and non-streaming entry points so both see identical data."""
     buckets = collect_calls_by_bucket(response_input)
+    # Tools that actually fired this turn (after dedup), used by
+    # draft_llm._build_system_prompt to conditionally load per-tool
+    # drafting fragments. See docs/RESPONDER_DESIGN_V4.md.
+    tools_fired = {
+        call.tool_name
+        for calls in buckets.values()
+        for call in calls
+        if call.tool_name
+    }
     raw_historical_threads = extract_historical_threads(buckets["historical"])
     historical_threads = filter_historical_threads(raw_historical_threads)
     document_matches = extract_technical_doc_matches(buckets["technical_docs"])
@@ -65,6 +74,7 @@ def _gather_inputs(response_input: ResponseInput) -> dict[str, Any]:
         "primary_service_document": primary_service_document,
         "primary_service_document_error": primary_service_document_error,
         "trust_signal": trust_signal,
+        "tools_fired": tools_fired,
     }
 
 
@@ -231,6 +241,7 @@ def render_csr_draft_response(
         operational_records=inputs["operational_records"],
         trust_signal=inputs["trust_signal"],
         primary_service_document=inputs["primary_service_document"],
+        tools_fired=inputs["tools_fired"],
     )
     panel_pairs = _build_panel_section_pairs(inputs)
     return _assemble_composed_response(
@@ -272,6 +283,7 @@ def stream_csr_response(
         operational_records=inputs["operational_records"],
         trust_signal=inputs["trust_signal"],
         primary_service_document=inputs["primary_service_document"],
+        tools_fired=inputs["tools_fired"],
     ):
         chunks.append(chunk)
         yield "draft_chunk", {"text": chunk}

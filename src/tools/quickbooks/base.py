@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from src.integrations.quickbooks import QuickBooksClient, QuickBooksConfigError
+from src.integrations.quickbooks.llm_serializer import serialize_qb_record
 from src.tools.models import ToolRequest, ToolResult
 from src.tools.result_builders import empty_result, error_result, ok_result, partial_result
 
@@ -83,10 +84,16 @@ def execute_quickbooks_tool(
             debug_info={"quickbooks_request": request_payload},
         )
     if matches:
+        # Parallel LLM-ready view — resolves QB sentinels (email_status:
+        # NotSet etc.), renames ambiguous fields (txn_date, balance), and
+        # derives payment_status inline. See
+        # docs/RESPONDER_DESIGN_V4.md ⭐ section.
+        llm_matches = [serialize_qb_record(m) for m in matches]
         if api_errors:
             return partial_result(
                 tool_name=request.tool_name,
                 primary_records=matches,
+                llm_records=llm_matches,
                 errors=api_errors,
                 structured_facts=facts,
                 debug_info={"quickbooks_request": request_payload},
@@ -94,6 +101,7 @@ def execute_quickbooks_tool(
         return ok_result(
             tool_name=request.tool_name,
             primary_records=matches,
+            llm_records=llm_matches,
             structured_facts=facts,
             debug_info={"quickbooks_request": request_payload},
         )

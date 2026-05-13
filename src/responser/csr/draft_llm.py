@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from textwrap import indent
 from typing import Any, Iterator
 
 from pydantic import BaseModel, ConfigDict
 
 from src.config import get_llm
-from src.responser.csr.extractors import PAYMENT_STATUS_VOCABULARY
+from src.responser.csr.prompts import fragments_for_tools
 
 _DRAFT_SYSTEM_PROMPT = """\
 You are drafting a customer-service reply for a customer-service representative
@@ -39,94 +38,11 @@ Rules:
   emailed to you" / "I don't see a delivery timestamp on file") instead
   of substituting a related field. Never present a different field as if
   it answered the question.
-- SPECIAL CASE — record found but asked field missing: when STRUCTURED
-  LIVE FACTS DID return the product / service the customer asked about
-  but the specific field they asked for is the "(not on file)" sentinel,
-  the draft must (a) confirm we found the record by citing catalog_no
-  and name, (b) state the asked field is not on file, and (c) propose a
-  concrete next step. Confirming the match is NOT volunteering adjacent
-  fields; it frames the gap honestly so the customer knows we have the
-  product / service and can act.
-  Use the next-step phrasing that matches the record kind:
-  * Catalog products (records with a `catalog_no` — e.g. an antibody SKU
-    whose price simply isn't loaded into our DB): the price exists, we
-    just need to look it up. Phrase the follow-up as confirming the
-    listed catalog price, NOT a custom quote. Example: "I can confirm
-    the catalog price for you — could you let me know the host species /
-    clone / format you need so I pull the right SKU?" Do NOT default to
-    "custom quote" / "sales team will follow up with a quote" wording
-    for catalog SKUs; that framing implies a bespoke project where one
-    isn't needed and may push the customer onto a slower path.
-  * Service-flyer records (records with `plan_name` / `phase_name` /
-    `pricing_tier` — e.g. a CAR-T or stable-cell-line development
-    package): pricing is project-shaped. Phrase the follow-up as a
-    custom quote. Example: "I can have our sales team send a custom
-    quote — could you share the quantity / project scope?"
-  * Operational records (orders / invoices / shipping with a missing
-    field): phrase the follow-up as looping in the right internal team.
-    Example: "let me loop in the product / shipping team to confirm
-    lead time / tracking."
 - STRUCTURED LIVE FACTS are AUTHORITATIVE. When live catalog / pricing
   records are present, cite catalog_no, price, currency, and lead_time
   EXACTLY as given — do NOT round, paraphrase, or pull these numbers from
   past sales emails (which may be outdated). If past sales emails contradict
   the live data, trust the live data and ignore the email's number.
-- Service-flyer pricing semantics (records sourced from service flyers):
-  * If a record has `plan_total_price` set, that IS the bundled plan
-    total — cite it directly when the customer asks about plan cost.
-  * Otherwise, a flyer pricing record represents a SINGLE PHASE of a
-    multi-phase plan (look for `plan_name` and `phase_name`). Its
-    `price` is the phase price, not the plan total.
-  * `optional: yes` means that phase is not always included — its
-    price only applies if the customer chooses to include it.
-  * Do NOT sum phase prices into an implied "plan total" yourself.
-    Either cite `plan_total_price` directly, or — if no record has it
-    — say plan-level total isn't in the data and list phase prices
-    with their plan/phase context (e.g. "Plan A · Phase III: $7,350 —
-    vector construction"), noting that the full quote depends on
-    selected phases.
-- Catalog record fields are pre-serialized for you — field names (e.g.
-  `wb_dilution`, `construct`, `lnp_type`, `formulation`, `storage`,
-  `shipping`, `data_sheet_url`) are self-describing; match them to the
-  customer's ask. Empty / missing fields are already omitted from the
-  record — if the field the customer asked about isn't there, say so per
-  the general ASKED FOCUS rule. When a field carries free-form citation
-  text (e.g. `references_text`, `immunogen`), quote it verbatim; if HTML
-  markup is present, extract the citation/description text and drop raw
-  `<br />` etc.
-- OPERATIONAL RECORDS (orders / invoices / shipping) are also authoritative —
-  cite order numbers, statuses, and tracking IDs exactly as given.
-- QuickBooks field semantics (don't mistranslate these):
-  * `email_status: NotSet` / `print_status: NotSet` mean the document was
-    NEVER sent via QuickBooks email / print — not "we have no record".
-    `EmailSent` means it was sent but QB does not store the timestamp.
-    `NeedToSend` means it's queued / marked to be sent but has not actually
-    been emailed yet (this drives the `(not sent)` suffix on payment_status).
-    None of these statuses carry a send DATE.
-  * `txn_date` is when the document was CREATED in QuickBooks (issue date),
-    NOT when it was sent / delivered to the customer.
-  * `due_date` is the payment due date, not a send or delivery date.
-  * `ship_date` is the goods-shipped date, not the document-sent date.
-  * `last_updated_at` is the most recent edit timestamp on the QB record —
-    NOT a send / delivery / payment date.
-  * `balance` is the still-unpaid amount; `total_amt` is the invoice's full
-    value. `balance == 0` confirms full payment.
-  * On Customer records, `balance` / `open_balance` are the customer's TOTAL
-    outstanding amount across all their invoices, not a per-invoice figure.
-  * `payment_status` is derived from balance / due_date / email_status
-    (Invoice records only — SalesReceipts skip this). Possible values:
-__PAYMENT_STATUS_VOCABULARY__
-    Do NOT volunteer payment status unless the customer asked about it.
-- MATCHED DOCUMENT FILES → render as a markdown link in the draft prose
-  whenever the customer asked for product info, documentation, or basic
-  introduction to a product. Format: `[Title](document_url)` (e.g.
-  `[PM-CAR1000 Product Flyer](https://...)`). The frontend renders this as
-  a clickable blue link the customer can preview directly. The link is
-  signed and expires in ~1 hour, so do not paraphrase or omit the URL.
-  Surface ONE link per document file; do not list multiple files in a row
-  unless the customer asked for several products. Skip entirely when the
-  asked_focus is a narrow factual lookup (e.g. "what's the cell number")
-  that the structured catalog already answers.
 - Lean on past sales replies for TONE and STRUCTURE — how our team talks to
   customers — but not for specific numbers when live data exists.
 - Use documentation chunks to cite technical specs and process details only
@@ -138,10 +54,7 @@ __PAYMENT_STATUS_VOCABULARY__
 - Reply in the same language as the customer inquiry (English by default).
 - Do NOT add headers like "Draft:" — the wrapper takes care of that.
 - Keep it concise; the CSR will expand if needed.
-""".replace(
-    "__PAYMENT_STATUS_VOCABULARY__",
-    indent(PAYMENT_STATUS_VOCABULARY, "    "),
-)
+"""
 
 
 _UNGROUNDED_RULE = """
@@ -176,8 +89,14 @@ def _build_system_prompt(
     *,
     grounding_status: str,
     primary_service_document: dict[str, Any] | None,
+    tools_fired: set[str] | None = None,
 ) -> str:
-    prompt = _DRAFT_SYSTEM_PROMPT
+    parts: list[str] = [_DRAFT_SYSTEM_PROMPT]
+    # Conditionally load per-tool drafting fragments (e.g. service-flyer
+    # pricing nuance). See docs/RESPONDER_DESIGN_V4.md "Drafting fragments".
+    if tools_fired:
+        parts.extend(fragments_for_tools(tools_fired))
+    prompt = "\n\n".join(parts)
     if grounding_status == "ungrounded":
         prompt += _UNGROUNDED_RULE
     elif grounding_status == "weakly_grounded":
@@ -203,6 +122,7 @@ def _build_draft_prompts(
     operational_records: list[dict[str, Any]],
     trust_signal: dict[str, Any],
     primary_service_document: dict[str, Any] | None,
+    tools_fired: set[str] | None = None,
 ) -> tuple[str, str]:
     parts: list[str] = []
     parts.append(f"NEW CUSTOMER INQUIRY:\n{query}\n")
@@ -315,6 +235,7 @@ def _build_draft_prompts(
     system_prompt = _build_system_prompt(
         grounding_status=str(trust_signal.get("grounding_status") or ""),
         primary_service_document=primary_service_document,
+        tools_fired=tools_fired,
     )
     return system_prompt, user_prompt
 
@@ -330,6 +251,7 @@ def generate_draft(
     operational_records: list[dict[str, Any]],
     trust_signal: dict[str, Any],
     primary_service_document: dict[str, Any] | None,
+    tools_fired: set[str] | None = None,
 ) -> str:
     if not query.strip():
         return ""
@@ -344,6 +266,7 @@ def generate_draft(
         operational_records=operational_records,
         trust_signal=trust_signal,
         primary_service_document=primary_service_document,
+        tools_fired=tools_fired,
     )
 
     try:
@@ -368,6 +291,7 @@ def stream_draft(
     operational_records: list[dict[str, Any]],
     trust_signal: dict[str, Any],
     primary_service_document: dict[str, Any] | None,
+    tools_fired: set[str] | None = None,
 ) -> Iterator[str]:
     """Yield draft text token-by-token. Drops with_structured_output since we
     just want a raw text stream (the structured wrapper would produce partial
@@ -385,6 +309,7 @@ def stream_draft(
         operational_records=operational_records,
         trust_signal=trust_signal,
         primary_service_document=primary_service_document,
+        tools_fired=tools_fired,
     )
 
     try:

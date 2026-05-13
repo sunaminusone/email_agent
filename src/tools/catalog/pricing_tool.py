@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.catalog.service import lookup_catalog_products
 from src.rag.flyer_pricing import lookup_flyer_pricing
+from src.tools.catalog.pricing_serializer import serialize_pricing_record
 from src.tools.models import ToolRequest, ToolResult
 from src.tools.result_builders import empty_result, error_result, ok_result, partial_result
 
@@ -70,9 +71,15 @@ def execute_pricing_lookup_tool(request: ToolRequest) -> ToolResult:
     }
 
     if pricing_records:
+        # Parallel LLM-ready view: PG records pass through; flyer records
+        # get `optional` sentinel → is_optional bool, and bare `price` →
+        # `phase_price` when phase_name is set. See
+        # docs/RESPONDER_DESIGN_V4.md ⭐ section.
+        llm_pricing_records = [serialize_pricing_record(r) for r in pricing_records]
         return ok_result(
             tool_name=request.tool_name,
             primary_records=pricing_records,
+            llm_records=llm_pricing_records,
             supporting_records=matches,
             structured_facts=facts,
             debug_info={"catalog_params": params},

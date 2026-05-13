@@ -125,13 +125,16 @@ def _materialize_missing_answerable_fields(record: dict[str, Any]) -> None:
 def extract_structured_records(calls: list[ExecutedToolCall]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for call in calls:
-        facts = call.result.structured_facts or {}
-        records = facts.get("pricing_records")
-        if not records:
-            # Prefer llm_records (tool-side serialized view); fall back to
-            # primary_records when the tool hasn't been migrated yet.
-            # Contract: docs/RESPONDER_DESIGN_V4.md ⭐ section.
-            records = call.result.llm_records or call.result.primary_records or []
+        # Prefer llm_records (tool-side serialized view); fall back to
+        # primary_records when the tool hasn't been migrated yet, then to
+        # the legacy facts.pricing_records pre-Phase-3 path.
+        # Contract: docs/RESPONDER_DESIGN_V4.md ⭐ section.
+        records = (
+            call.result.llm_records
+            or call.result.primary_records
+            or (call.result.structured_facts or {}).get("pricing_records")
+            or []
+        )
         for record in records:
             if not isinstance(record, dict):
                 continue
