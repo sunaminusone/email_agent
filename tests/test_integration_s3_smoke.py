@@ -37,7 +37,7 @@ def test_service_document_presigned_url_round_trip() -> None:
         cur = conn.execute(
             "SELECT storage_url FROM service_documents "
             "WHERE storage_url LIKE 's3://%' "
-            "ORDER BY service_document_id LIMIT 1"
+            "ORDER BY id LIMIT 1"
         )
         row = cur.fetchone()
     if row is None:
@@ -47,8 +47,15 @@ def test_service_document_presigned_url_round_trip() -> None:
     presigned = generate_presigned_document_url(storage_url, expires_in=60)
     assert presigned.startswith("https://"), presigned
 
-    response = requests.head(presigned, timeout=10, allow_redirects=True)
-    assert response.status_code == 200, (
-        f"HEAD {storage_url} -> {response.status_code}; "
-        "check bucket policy / object existence / region"
-    )
+    # The URL is signed for GET (generate_presigned_document_url uses
+    # ClientMethod="get_object"); V2 SigV4 is method-bound, so HEAD with
+    # the same URL returns 403. Stream a GET and close immediately —
+    # avoids downloading the full PDF just for the round-trip check.
+    response = requests.get(presigned, timeout=10, allow_redirects=True, stream=True)
+    try:
+        assert response.status_code == 200, (
+            f"GET {storage_url} -> {response.status_code}; "
+            "check bucket policy / object existence / region"
+        )
+    finally:
+        response.close()
