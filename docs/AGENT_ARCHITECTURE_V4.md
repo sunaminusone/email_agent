@@ -167,17 +167,21 @@ src/
 ├── responser/                   # Response synthesis layer
 │   ├── service.py               #   main orchestrator (always renders csr_draft)
 │   ├── blocks.py                #   content block extraction
-│   ├── composer.py              #   pass-through finalizer for CSR structured output
-│   ├── renderers/               #   v4: only csr_draft is dispatched
-│   │   ├── csr_draft.py         #   ★ the only renderer used in v4
-│   │   ├── answer.py            #   dormant (kept for import safety)
-│   │   ├── clarification.py     #   dormant
-│   │   ├── handoff.py           #   dormant
-│   │   ├── knowledge.py         #   dormant
-│   │   ├── partial_answer.py    #   dormant
-│   │   ├── acknowledgement.py   #   dormant
-│   │   └── termination.py       #   dormant
-│   └── models.py                #   AgentResponse, ContentBlock
+│   ├── planner.py               #   minimal ResponsePlan synthesis
+│   ├── models.py                #   ResponseBundle, ContentBlock
+│   └── csr/                     #   ★ active CSR draft pipeline
+│       ├── composer.py          #   render_csr_draft_response + stream_csr_response
+│       ├── draft_llm.py         #   LLM draft generation + system prompt assembly
+│       ├── extractors.py        #   ExecutedToolCall → bucketed records + tools_fired
+│       ├── dedup_keys.py        #   per-tool identity → dedupe across cross-group reuse
+│       ├── sections.py          #   Slack-style panel formatters
+│       ├── grounding.py         #   trust signal / retrieval quality computation
+│       └── prompts/             #   ★ conditionally-loaded drafting fragments
+│           ├── catalog_record.md
+│           ├── operational_record.md
+│           ├── pricing_semantics.md
+│           ├── document_link_rendering.md
+│           └── record_gap_followup.md
 │
 ├── memory/                      # Session state persistence
 │   ├── session_store.py         #   Redis-backed session management
@@ -429,12 +433,14 @@ tool-registry-first, not LangChain-first.
 
 ### 6. Responser
 
-**Purpose**: synthesize the CSR-facing draft bundle.
+**Purpose**: synthesize the CSR-facing draft bundle. Full design in
+[RESPONDER_DESIGN_V4.md](RESPONDER_DESIGN_V4.md) — this section is the
+overview; that doc owns the contract, pipeline, and migration history.
 
 **v4 invariant — always csr_draft**: `_render_response`
 (`src/responser/service.py`) always calls
-`render_csr_draft_response` (`src/responser/renderers/csr_draft.py`),
-which produces the structured output:
+`render_csr_draft_response` (`src/responser/csr/composer.py`),
+producing the structured output:
 
 ```
 📝 Draft reply              — LLM-synthesized, marked clearly as draft
@@ -442,24 +448,22 @@ which produces the structured output:
 💰 Live catalog facts       — structured records when available
 📚 Similar past inquiries   — Top historical threads (full conversation)
 📄 Relevant documents       — Top KB chunks
+📁 Matched document files   — Clickable product flyer / brochure chips
 📦 Operational records      — QuickBooks records when available
 ⚠️ AI routing notes         — Only when routing flagged ambiguity / handoff
 ```
 
-`compose_final_response` (`src/responser/composer.py`) is now effectively a
-pass-through finalizer — the renderer already returns the final structured
-message, and no post-render rewrite runs.
+Per-tool drafting nuance lives in `src/responser/csr/prompts/<topic>.md`
+fragments and loads conditionally based on which tools fired this turn
+(see RESPONDER_DESIGN_V4 "Drafting fragments").
 
-The seven legacy renderers (`acknowledgement`, `answer`, `clarification`,
-`handoff`, `knowledge`, `partial_answer`, `termination`) **are kept** but
-never dispatched. They assume customer-facing output, which v4 invalidates.
-Cleanup is deferred until we are confident nothing imports them.
-
-**LangChain usage**: LLM call inside `csr_draft.py` to produce the actual
-draft from retrieved context.
+**LangChain usage**: LLM call inside `draft_llm.py` to produce the draft
+text from retrieved context.
 
 **Does not**: select tools, execute retrieval, invent facts beyond what
-the retrieved threads / docs say.
+retrieved threads / docs say, OR carry per-tool schema knowledge in the
+draft prompt — that lives in tool-side `serialize_for_llm` per the
+`ToolResult.llm_records` contract (RESPONDER_DESIGN_V4 ⭐ section).
 
 ### 7. Memory
 
@@ -493,8 +497,6 @@ described across the design set are still not fully landed in code:
   control signals now need explicit end-to-end ownership so future fields
   are not silently dropped between `ResponsePlan.memory_update`,
   `MemoryContribution`, and `reflect()`.
-- **Dormant renderer cleanup**: legacy customer-facing renderers remain on
-  disk for compatibility even though `csr_draft` is the only dispatched path.
 - **Potential future LangGraph migration**: executor is currently a Python
   loop; any LangGraph wording in older docs should be read as roadmap, not
   current runtime behavior.

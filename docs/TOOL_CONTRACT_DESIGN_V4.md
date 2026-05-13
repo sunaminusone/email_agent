@@ -359,6 +359,31 @@ def find_resolution_provider(path_eval, available_params) -> str | None:
 
 ---
 
+## Tool 输出契约 — `serialize_for_llm` (SHOULD)
+
+`ToolResult` 加了一个并行 `llm_records: list[dict]` 字段(2026-05 落地),让每个 tool wrapper 把 `primary_records` 项投影成 LLM-ready 形态,这样 responder 的 drafting prompt 不必再背 per-tool schema 知识。完整契约 + 命名规范在 [RESPONDER_DESIGN_V4.md](RESPONDER_DESIGN_V4.md) ⭐ 章节。
+
+**SHOULD,不是 MUST**:旧 tool 不实现也能工作 — extractor 会 fallback 到 `primary_records`(详见 `src/responser/csr/extractors.py:extract_structured_records / extract_operational_records`)。
+
+### 几条工程约束
+
+- **1:1 对位**:`llm_records[i]` 是同一条底层 record 的 LLM 视角;`dedupe_calls` 的 identity 永远在 `primary_records` 上算,`llm_records` 按 index 携带,不单独计算
+- **命名"中等清晰"**:`wb_dilution` / `lnp_type` 这种行业惯用缩写保留;`txn_date` → `transaction_date`、`email_status: NotSet` → `email_sent: false` 这种圈外人看不懂的展开
+- **Sentinel 处理在 serializer**:不要把"`sequence: full` 意思是缺失"放进 prompt,直接在 serializer 里 drop / 改写
+- **Tool 不实现镜像的字段**:只 `primary_records` 走镜像;`supporting_records` 和 `unstructured_snippets` 继续要求 tool 直接产出近 LLM-ready 形态,不再额外开 mirror
+
+### 已迁移的 tool 实现位置
+
+| Tool | Serializer | 行为 |
+|---|---|---|
+| `catalog_lookup_tool` | `src/catalog/retrieval/llm_serializer.py` | 三业务线 dispatch + cross-facet None 收敛 + sequence sentinel resolve |
+| `pricing_lookup_tool` | `src/tools/catalog/pricing_serializer.py` | PG 直通 / service-flyer `optional` → `is_optional` + `price` → `phase_price` |
+| 4 QB tools | `src/integrations/quickbooks/llm_serializer.py` | email_status sentinel → email_sent bool + balance scope-explicit 重命名 + payment_status 内联 derivation |
+
+`document_lookup_tool` / `historical_thread_tool` / `technical_rag_tool` 暂未实现 — 现有 record shape 已经基本 LLM-ready,迁移收益小。
+
+---
+
 ## 删除的代码
 
 | 文件 | 删除内容 | 原因 |
